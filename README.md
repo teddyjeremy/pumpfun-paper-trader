@@ -67,3 +67,14 @@ The initial service intentionally starts in safe degraded mode until live provid
 ## Disclaimer
 
 This is a research and simulation tool, not investment advice. Paper fills are estimates, not evidence of real-world profitability. A three-hour run is an integration smoke test, not a strategy validation.
+
+
+## Vercel dashboard deployment
+
+The operator dashboard is deployed as a stateless Vercel Node.js function. The deployment is for viewing diagnostics and the current process snapshot; it is **not** the always-on Pump.fun listener or paper execution worker. In-memory counters reset between serverless instances and must not be treated as durable trading history.
+
+Production dashboard: https://pumpfun-paper-trader.vercel.app
+
+The Vercel project uses Node.js 22.x and Singapore function region. Deployment Protection is enabled for the default Vercel domains. Keep it protected unless you intentionally configure an authenticated public dashboard.
+
+The persistent market worker, provider stream, and PostgreSQL ledger belong on Google Cloud (or another persistent runtime). Connect that worker to durable storage and expose a narrowly scoped authenticated dashboard API before presenting live results.
