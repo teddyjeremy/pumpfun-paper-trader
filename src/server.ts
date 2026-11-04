@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { config } from "./config.js";
 import { diagnose, increment, snapshot } from "./diagnostics/registry.js";
 import { trackingSnapshot } from "./diagnostics/tracker.js";
+import { getPersistenceStatus } from "./persistence/postgres.js";
 
 export const app = Fastify({
   logger: { level: config.LOG_LEVEL, redact: ["*.HELIUS_API_KEY", "*.apiKey", "*.secret", "*.authorization"] }
@@ -31,6 +32,7 @@ app.get("/api/diagnostics", async () => ({
 }));
 
 app.get("/api/tracking", async () => trackingSnapshot());
+app.get("/api/persistence", async () => getPersistenceStatus());
 
 app.get("/api/results/summary", async () => {
   const state = snapshot();
@@ -107,6 +109,7 @@ main{max-width:1440px;margin:auto;padding:26px clamp(16px,4vw,54px) 60px}.intro{
 <section class="panel"><div class="section-head"><h3>Graduation watch</h3></div><div class="metric" id="graduationCount">0</div><div class="metric-note" id="graduationDetail">Approaching / graduated / unavailable</div></section>
 <section class="panel"><div class="section-head"><h3>Execution latency</h3></div><div class="list" id="latency"><div class="empty">No samples yet</div></div></section>
 </div>
+<div class="section panel"><div class="section-head"><h3>Database persistence</h3><span class="tag warn" id="dbTag">CHECKING</span></div><div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div><div class="metric-label">PostgreSQL</div><div class="metric" id="dbConnected">—</div></div><div><div class="metric-label">Schema</div><div class="metric" id="dbSchema">—</div></div><div><div class="metric-label">Migration</div><div class="metric" id="dbMigration">—</div></div></div><div class="metric-note" id="dbNote">Connection status is checked without exposing credentials.</div></div>
 <div class="section panel"><div class="section-head"><h3>Recent candidates</h3><span class="muted small">Latest 100 tracked records</span></div><div class="table-wrap"><table><thead><tr><th>Mint</th><th>Stage</th><th>Decision</th><th>Risk</th><th>Momentum</th><th>Round-trip cost</th><th>Updated</th></tr></thead><tbody id="candidates"><tr><td colspan="7" class="empty">No candidate records yet</td></tr></tbody></table></div></div>
 <div class="section panel"><div class="section-head"><h3>Positions</h3><span class="muted small">Paper positions only</span></div><div class="table-wrap"><table><thead><tr><th>Mint</th><th>State</th><th>Entry cost</th><th>Exit value</th><th>Fees</th><th>Net PnL</th><th>Zero balance</th></tr></thead><tbody id="positions"><tr><td colspan="7" class="empty">No paper positions recorded</td></tr></tbody></table></div></div>
 <div class="foot"><span>Auto-refresh every 5 seconds · All values are telemetry, not trading advice.</span><span id="updatedAt">Last updated —</span></div>
@@ -123,7 +126,7 @@ function bars(obj){const entries=Object.entries(obj||{});const max=Math.max(1,..
 function list(items,empty){return items.length?items.map(x=>'<div class="list-item"><span>'+esc(x[0])+'</span><b>'+esc(x[1])+'</b></div>').join(''):'<div class="empty">'+empty+'</div>'}
 function latency(x){return x&&x.samples?num(x.p50Ms)+' / '+num(x.p95Ms)+' ms':'—'}
 async function refresh(){try{
- const [d,r,t]=await Promise.all([fetch('/api/diagnostics',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Diagnostics '+x.status);return x.json()}),fetch('/api/results/summary',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Summary '+x.status);return x.json()}),fetch('/api/tracking',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Tracking '+x.status);return x.json()})]);
+ const [d,r,t,db]=await Promise.all([fetch('/api/diagnostics',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Diagnostics '+x.status);return x.json()}),fetch('/api/results/summary',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Summary '+x.status);return x.json()}),fetch('/api/tracking',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Tracking '+x.status);return x.json()}),fetch('/api/persistence',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Persistence '+x.status);return x.json()})]);
  const ready=!!d.readiness?.ready;$('#healthDot').className='dot '+(ready?'good':'bad');$('#healthText').textContent=ready?'READY':'DEGRADED';$('#readyTag').className='tag '+(ready?'good':'warn');$('#readyTag').textContent=ready?'READY':'NOT READY';
  $('#diagnosis').textContent=d.diagnosis?.status||'Unknown';$('#diagnosisDetail').textContent=(d.diagnosis?.notes||[]).join(' ')||'No diagnosis details';
  const blockers=d.readiness?.blockers||[];$('#blockers').innerHTML=blockers.length?blockers.map(x=>'<div class="list-item"><span>'+esc(x)+'</span>'+tag('blocked')+'</div>').join(''):'<div class="empty">No readiness blockers reported</div>';
@@ -136,6 +139,7 @@ async function refresh(){try{
  const candidates=t.candidates||[];$('#candidates').innerHTML=candidates.length?candidates.slice(0,30).map(c=>'<tr><td title="'+esc(c.mint)+'">'+esc(short(c.mint))+'</td><td>'+tag(c.stage)+'</td><td>'+tag(c.decision)+'</td><td>'+num(c.riskScore)+'</td><td>'+num(c.momentumScore)+'</td><td>'+pct(c.roundTripCostPct)+'</td><td>'+esc(new Date(c.lastUpdatedAt).toLocaleTimeString())+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">No candidate records yet — market adapters are not connected.</td></tr>';
  const positions=t.positions?.records||[];$('#positions').innerHTML=positions.length?positions.slice().reverse().map(p=>'<tr><td>'+esc(short(p.mint))+'</td><td>'+tag(p.state)+'</td><td>'+money(p.entryCostUsd)+'</td><td>'+money(p.exitValueUsd)+'</td><td>'+money(p.feesUsd)+'</td><td>'+money(p.realizedNetPnlUsd)+'</td><td>'+tag(p.tokenBalanceZeroConfirmed?'confirmed':'pending')+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">No paper positions recorded</td></tr>';
  $('#openPositions').textContent=num(t.positions?.open??0);
+ $('#dbConnected').textContent=db.connected?'Connected':db.configured?'Offline':'Not configured';$('#dbSchema').textContent=db.schemaReady?'Ready':'Pending';$('#dbMigration').textContent=db.migrationVersion||'—';$('#dbTag').className='tag '+(db.schemaReady?'good':db.connected?'warn':'bad');$('#dbTag').textContent=db.schemaReady?'PERSISTENT':db.connected?'SCHEMA PENDING':'OFFLINE';$('#dbNote').textContent=db.error||'Database connection and migration status verified.';
  const pnl=t.positions?.realizedNetPnlUsd??r.portfolio?.realizedNetPnlUsd;$('#pnl').textContent=money(pnl);$('#pnlNote').textContent=pnl===null?'No realized PnL until persisted trades exist':'Net of recorded fees and execution costs';
  $('#updatedAt').textContent='Last updated '+new Date().toLocaleTimeString();
  }catch(e){$('#healthDot').className='dot bad';$('#healthText').textContent='API ERROR';$('#diagnosis').textContent='Dashboard API unavailable';$('#diagnosisDetail').textContent=String(e)}}
