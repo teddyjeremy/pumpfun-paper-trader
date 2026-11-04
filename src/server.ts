@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import { config } from "./config.js";
 import { diagnose, increment, snapshot } from "./diagnostics/registry.js";
+import { trackingSnapshot } from "./diagnostics/tracker.js";
 
 const app = Fastify({
   logger: { level: config.LOG_LEVEL, redact: ["*.HELIUS_API_KEY", "*.apiKey", "*.secret", "*.authorization"] }
@@ -28,6 +29,8 @@ app.get("/api/diagnostics", async () => ({
     nodeVersion: process.version
   }
 }));
+
+app.get("/api/tracking", async () => trackingSnapshot());
 
 app.get("/api/results/summary", async () => {
   const state = snapshot();
@@ -68,15 +71,17 @@ a{color:#8cbcff}button{background:#263a5d;color:white;border:0;padding:9px 13px;
 <section><h2>System diagnosis</h2><p id="diagnosis" class="muted">Loading diagnostics…</p><pre id="blockers"></pre></section>
 <section><h2>Activity & results</h2><pre id="results">Loading…</pre></section>
 <section><h2>Recent failures</h2><pre id="failures">Loading…</pre></section>
+<section><h2>Tracked funnel, rejections, latency, positions and graduation</h2><pre id="tracking">Loading…</pre></section>
 <p class="muted">Refreshes every 5 seconds. A missing metric is shown as unavailable, never as zero profit.</p>
 <script>
 async function refresh(){try{
- const [d,r]=await Promise.all([fetch('/api/diagnostics').then(x=>x.json()),fetch('/api/results/summary').then(x=>x.json())]);
+ const [d,r,t]=await Promise.all([fetch('/api/diagnostics').then(x=>x.json()),fetch('/api/results/summary').then(x=>x.json()),fetch('/api/tracking').then(x=>x.json())]);
  document.querySelector('#ready').textContent=d.readiness.ready?'READY':'NOT READY';
  document.querySelector('#diagnosis').textContent=d.diagnosis.status+' — '+d.diagnosis.notes.join(' ');
  document.querySelector('#blockers').textContent='Blockers: '+d.readiness.blockers.join(' | ')+'\n\nTop failure categories:\n'+JSON.stringify(d.diagnosis.topFailures,null,2);
- document.querySelector('#results').textContent=JSON.stringify(r,null,2);
+ document.querySelector('#results').textContent=JSON.stringify({summary:r, tracking:t},null,2);
  document.querySelector('#failures').textContent=JSON.stringify(d.failures.slice(0,20),null,2);
+ document.querySelector('#tracking').textContent=JSON.stringify(t,null,2);
  }catch(e){document.querySelector('#diagnosis').textContent='Dashboard API unavailable: '+e}}
 refresh();setInterval(refresh,5000);
 </script></body></html>`));
