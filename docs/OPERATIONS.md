@@ -48,3 +48,25 @@ Every simulated fill should store raw SOL/token amounts, decimals, quote timesta
 6. Review failure categories and rejected candidates before changing thresholds.
 
 A three-hour test validates integration and operational behavior, not profitability.
+
+
+## Live tracking API (current foundation)
+
+- `GET /api/tracking`: candidate funnel, rejection reasons, quote outcomes and cost samples, p50/p95 latency by subsystem, provider reconnects/slot lag, graduation states, position telemetry, invariant violations and recent events.
+- The dashboard polls this endpoint every five seconds and includes the tracking output.
+- `src/diagnostics/tracker.ts` exports typed functions for discovery stages, decisions, risk, momentum, quote outcomes, latency, provider state, graduation and position state.
+
+### Instrumentation contract for future adapters
+
+Call the matching tracker function at the point the event happens:
+- discovery/enrichment/risk/quote/watchlist: `trackStage`
+- final accept/reject: `trackDecision`
+- risk assessment: `trackRisk`
+- momentum score: `trackMomentum`
+- quote result: `trackQuote`
+- measured subsystem duration: `trackLatency`
+- provider connect/disconnect/reconnect and slot lag: `trackProvider`
+- graduation state: `trackGraduation`
+- position lifecycle: `trackPosition`
+
+The current tracker is process-memory only and resets on restart. It is a telemetry foundation, not yet a durable historical analytics system. PostgreSQL event persistence and real adapter instrumentation are required before these values represent live market activity. Never interpret an empty chart/counter as evidence of zero failures or profitable trading.
