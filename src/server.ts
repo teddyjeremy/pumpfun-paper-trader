@@ -3,7 +3,7 @@ import { config } from "./config.js";
 import { diagnose, increment, snapshot } from "./diagnostics/registry.js";
 import { trackingSnapshot } from "./diagnostics/tracker.js";
 
-const app = Fastify({
+export const app = Fastify({
   logger: { level: config.LOG_LEVEL, redact: ["*.HELIUS_API_KEY", "*.apiKey", "*.secret", "*.authorization"] }
 });
 
@@ -91,9 +91,13 @@ app.addHook("onReady", async () => {
   app.log.info({ mode: "paper", ready: false }, "Service started in safe degraded mode; live adapters are not connected");
 });
 
-try {
-  await app.listen({ host: config.HOST, port: config.PORT });
-} catch (error) {
-  app.log.error(error);
-  process.exit(1);
+// Vercel invokes the exported Fastify handler through api/index.ts.
+// Persistent deployments (for example Google Cloud) start the HTTP listener here.
+if (process.env.VERCEL !== "1") {
+  try {
+    await app.listen({ host: config.HOST, port: config.PORT });
+  } catch (error) {
+    app.log.error(error);
+    process.exit(1);
+  }
 }
