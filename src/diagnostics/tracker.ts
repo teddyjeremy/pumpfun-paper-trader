@@ -83,7 +83,7 @@ export function trackStage(mint: string, stage: FunnelStage, fields: Partial<Omi
     expectedNetProfitPct: fields.expectedNetProfitPct ?? previous?.expectedNetProfitPct ?? null
   };
   candidates.set(mint, record);
-  bump(`funnel.${stage}`);
+  if (previous?.stage !== stage) bump(`funnel.${stage}`);
   pushEvent(`candidate.${stage}`, mint);
   while (candidates.size > MAX_CANDIDATES) candidates.delete(candidates.keys().next().value as string);
   return record;
@@ -105,7 +105,7 @@ export function trackDecision(mint: string, decision: CandidateRecord["decision"
     roundTripCostPct: fields.roundTripCostPct ?? previous?.roundTripCostPct ?? null,
     expectedNetProfitPct: fields.expectedNetProfitPct ?? previous?.expectedNetProfitPct ?? null
   });
-  if (decision === "reject") {
+  if (decision === "reject" && previous?.decision !== "reject") {
     bump("candidate.rejected");
     for (const reason of reasons.length ? reasons : ["other" as DecisionReason]) {
       rejectionCounts.set(reason, (rejectionCounts.get(reason) ?? 0) + 1);
