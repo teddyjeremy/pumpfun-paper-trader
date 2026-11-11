@@ -4,8 +4,8 @@
 
 The live listener remains disabled until the selective pipeline is deployed and tested. This service is paper-only: no wallet keys, signing, transaction submission, or real fills.
 
-- PumpPortal is used only for its free `subscribeNewToken` and `subscribeMigration` discovery events.
-- Do not subscribe to PumpPortal `subscribeTokenTrade` or `subscribeAccountTrade`; these are metered.
+- PumpPortal is used only for its free `subscribeNewToken` and `subscribeMigration` discovery events. The documented WebSocket URL includes an API key; store it only as a Worker secret.
+- PumpPortal states that new-token and migration events are not charged. Do not subscribe to `subscribeTokenTrade` or `subscribeAccountTrade`; these are metered at 0.01 SOL per 10,000 streamed events. Its docs attach a 0.02 SOL linked-wallet minimum to token/account subscriptions; this pipeline does not use either subscription type. Re-check the provider's current terms before enabling the connection.
 - Helius Free standard Solana WebSockets and JSON-RPC are used for verification and selective monitoring. Do not use Enhanced WebSockets / `transactionSubscribe`.
 - Keep Helius RPC below its 10 requests/second ceiling, with a configurable safety margin in production.
 - Do not subscribe to all Pump.fun program logs. Discover launches first, then monitor only admitted candidates and open positions.
@@ -31,10 +31,16 @@ The initial TypeScript ingestion primitives provide:
 
 These primitives are not a provider adapter and do not make the worker trading-ready. Production integration must persist queue overflow and missed deadlines; in-memory queue state alone is not sufficient across restarts.
 
+## Decoder status
+
+- `src/ingestion/pump-events.ts` now decodes Pump.fun `CreateEvent` and `TradeEvent` log payloads using the official IDL discriminators and field order.
+- Amounts and reserve values remain raw integers (`bigint`); the decoder does not convert units or treat non-SOL quote amounts as SOL.
+- The decoder is not yet wired into a provider adapter. Its caller must first establish transaction success (`meta.err === null`) and retain signature, slot, and provider provenance. A failed or missing transaction must never produce a candidate/trade observation.
+
 ## Not yet enabled
 
-- PumpPortal WebSocket credentials/configuration and reconnect/backoff.
-- Official Pump IDL decoder and transaction-level event extraction.
+- PumpPortal WebSocket secret/configuration, connection validation, and reconnect/backoff.
+- Transaction-level extraction that calls the decoder only for successful Pump.fun transactions.
 - Verified bonding-curve PDA derivation and account decoder.
 - Candidate admission limits selected from measured launch volume and Cloudflare budget.
 - Helius backfill/reconciliation for reconnect gaps.
