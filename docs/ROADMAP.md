@@ -7,6 +7,7 @@
 - [x] Vercel project linked to the repository
 - [ ] Verify current Pump.fun official SDK/program interfaces and implement launch decoder
 - [ ] Helius stream adapter with reconnect, backfill and slot-lag measurement
+- [x] Free-tier ingestion design and bounded RPC budget/priority queue primitives
 - [ ] Pump.fun bonding-curve state reader and authoritative graduation detector
 - [ ] Migrated-pool discovery and verified PumpSwap quote adapter
 - [ ] Quote-only adapter with dynamic protocol/creator fee, network, priority, impact and slippage accounting
