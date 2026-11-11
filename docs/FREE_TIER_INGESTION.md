@@ -35,7 +35,8 @@ These primitives are not a provider adapter and do not make the worker trading-r
 
 - `src/ingestion/pump-events.ts` now decodes Pump.fun `CreateEvent` and `TradeEvent` log payloads using the official IDL discriminators and field order.
 - Amounts and reserve values remain raw integers (`bigint`); the decoder does not convert units or treat non-SOL quote amounts as SOL.
-- The decoder is not yet wired into a provider adapter. Its caller must first establish transaction success (`meta.err === null`) and retain signature, slot, and provider provenance. A failed or missing transaction must never produce a candidate/trade observation.
+- `decodeSuccessfulPumpTransaction` now gates event decoding on a successful Solana transaction (`meta.err === null`) and carries signature and slot. Failed transactions return `FAILED_TRANSACTION`; missing metadata/logs or malformed event bytes return `DATA_INCOMPLETE`. Provider provenance and RPC commitment still need to be attached by the future adapter.
+- The decoder is not yet wired into a provider adapter or observation-window builder.
 
 ## Not yet enabled
 
