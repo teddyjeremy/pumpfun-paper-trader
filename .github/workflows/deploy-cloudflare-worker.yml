@@ -2,9 +2,16 @@ name: Deploy Cloudflare paper worker
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
+
+concurrency:
+  group: cloudflare-paper-worker-production
+  cancel-in-progress: false
 
 jobs:
   deploy:
