@@ -15,7 +15,8 @@
 - [ ] PostgreSQL migrations, append-only event/trade ledger, idempotency and worker leader lease
 - [ ] Deterministic paper executor and migration-aware position state machine
 - [ ] Dynamic exhaustion exit signal backtest/calibration; no maximum holding duration
-- [ ] Portfolio sizing/capacity policy and invariant tests
+- [x] Pure portfolio sizing/capacity policy and unit tests
+- [ ] Connect portfolio policy to durable live equity and open-slot reservations
 - [ ] Authenticated read-only Vercel dashboard backed by durable records
 - [ ] Google Cloud resources, Secret Manager, monitoring, alerts, backups and budget guardrails
 - [ ] Historical replay and paper-forward validation before any strategy changes
