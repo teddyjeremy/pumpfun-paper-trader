@@ -253,7 +253,7 @@ export async function getTradingDashboardSnapshot() {
       simulationProfile: String(row.simulation_profile), simulatedLatencyMs: Number(row.simulated_latency_ms),
       strategyVersion: String(row.strategy_version)
     }))
-  };  };
+  };
   } catch {
     return unavailable("Ledger tables are unavailable or the dashboard query failed; inspect database migrations and service logs");
   }
