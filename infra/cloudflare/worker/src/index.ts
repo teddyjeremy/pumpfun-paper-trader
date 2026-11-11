@@ -68,6 +68,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private discovery: DiscoveryStoreState = emptyDiscoveryStore();
   private hydrated = false;
   private pendingWrites = 0;
+  private persistChain: Promise<void> = Promise.resolve();
   private connectingSinceMs = 0;
 
   private async hydrate(): Promise<void> {
@@ -202,7 +203,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           this.discovery.incomplete += 1;
           this.pendingWrites += 1;
           this.syncCounts();
-          if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist();
+          if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist().catch(() => undefined);
           return;
         }
 
@@ -258,13 +259,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private async persist(): Promise<void> {
-    this.discovery.lastPersistedAt = new Date().toISOString();
-    this.syncCounts();
-    await this.ctx.storage.put({
-      status: this.status,
-      discovery_state: this.discovery
-    });
+    const pendingAtStart = this.pendingWrites;
     this.pendingWrites = 0;
+    const snapshot = structuredClone(this.discovery);
+    snapshot.lastPersistedAt = new Date().toISOString();
+    this.discovery.lastPersistedAt = snapshot.lastPersistedAt;
+    this.syncCounts();
+    const statusSnapshot = { ...this.status };
+    const write = this.persistChain.then(() => this.ctx.storage.put({
+      status: statusSnapshot,
+      discovery_state: snapshot
+    }));
+    this.persistChain = write.catch(() => undefined);
+    try {
+      await write;
+    } catch (error) {
+      this.pendingWrites += pendingAtStart;
+      this.status.lastError = "Unable to persist discovery state; ingestion may be incomplete.";
+      throw error;
+    }
   }
 }
 
