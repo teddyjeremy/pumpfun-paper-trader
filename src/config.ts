@@ -8,10 +8,9 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().optional().default(""),
   HELIUS_API_KEY: z.string().optional().default(""),
   PUMPFUN_MODE: z.literal("paper").default("paper"),
-  PAPER_STARTING_BALANCE_USD: z.coerce.number().positive().default(8),
+  PAPER_STARTING_BALANCE_USD: z.coerce.number().positive().default(2.7),
   PAPER_POSITION_SIZE_USD: z.coerce.number().positive().default(1),
-  PAPER_MAX_OPEN_POSITIONS: z.coerce.number().int().min(1).max(3).default(3),
-  PAPER_MAX_HOLD_SECONDS: z.coerce.number().int().positive().max(60).default(60),
+  PAPER_MAX_OPEN_POSITIONS: z.coerce.number().int().min(1).max(3).default(1),
   DIAGNOSTICS_RETENTION_HOURS: z.coerce.number().int().positive().default(24)
 });
 
