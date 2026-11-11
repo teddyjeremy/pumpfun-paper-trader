@@ -38,7 +38,9 @@ export interface CandidateRecord {
 export interface LatencySample { name: string; ms: number; at: string }
 export interface PositionTelemetry {
   mint: string;
-  state: "buy_pending" | "open" | "sell_pending" | "closed" | "exit_unexecutable";
+  state: "buy_pending" | "open" | "migration_pending" | "open_migrated" | "sell_pending" | "exit_blocked" | "closed" | "exit_unexecutable";
+  marketPhase?: "bonding_curve" | "migration_pending" | "migrated_market" | "exit_blocked" | "closed";
+  venue?: "pumpfun_curve" | "pumpswap" | null;
   openedAt: string | null;
   closedAt: string | null;
   entryCostUsd: number | null;
@@ -147,7 +149,7 @@ export function trackProvider(state: "connected" | "disconnected" | "reconnected
   }
 }
 
-export function trackGraduation(mint: string, state: "approaching" | "graduated" | "curve_unavailable"): void {
+export function trackGraduation(mint: string, state: "approaching" | "graduated" | "curve_unavailable" | "migrated_market_verified" | "migration_exit_blocked" | "migrated_market_quote_recovered"): void {
   bump(`graduation.${state}`);
   pushEvent(`graduation.${state}`, mint);
 }
@@ -191,7 +193,7 @@ export function trackingSnapshot() {
   const pnl = closed.reduce((sum, p) => sum + (p.realizedNetPnlUsd ?? 0), 0);
   const reasons = [...rejectionCounts.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
   const funnel = Object.fromEntries(["discovered", "enriched", "risk_passed", "quoted", "watchlisted", "entered", "exited"].map(stage => [stage, counters.get(`funnel.${stage}`) ?? 0]));
-  const open = pos.filter(p => ["buy_pending", "open", "sell_pending", "exit_unexecutable"].includes(p.state));
+  const open = pos.filter(p => ["buy_pending", "open", "migration_pending", "open_migrated", "sell_pending", "exit_blocked", "exit_unexecutable"].includes(p.state));
   return {
     generatedAt: now(),
     persistence: "in_memory_volatile",
@@ -230,10 +232,17 @@ export function trackingSnapshot() {
     graduation: {
       approaching: counters.get("graduation.approaching") ?? 0,
       graduated: counters.get("graduation.graduated") ?? 0,
-      curveUnavailable: counters.get("graduation.curve_unavailable") ?? 0
+      curveUnavailable: counters.get("graduation.curve_unavailable") ?? 0,
+      migratedMarketVerified: counters.get("graduation.migrated_market_verified") ?? 0,
+      migrationExitBlocked: counters.get("graduation.migration_exit_blocked") ?? 0,
+      migratedMarketQuoteRecovered: counters.get("graduation.migrated_market_quote_recovered") ?? 0
     },
     positions: {
       open: open.length,
+      openOnCurve: pos.filter(p => p.state === "open" && (p.marketPhase ?? "bonding_curve") === "bonding_curve").length,
+      migrationPending: pos.filter(p => p.state === "migration_pending" || p.marketPhase === "migration_pending").length,
+      openMigrated: pos.filter(p => p.state === "open_migrated" || p.marketPhase === "migrated_market").length,
+      exitBlocked: pos.filter(p => p.state === "exit_blocked" || p.marketPhase === "exit_blocked" || p.state === "exit_unexecutable").length,
       records: pos,
       realizedNetPnlUsd: closed.length ? pnl : null,
       closedWithZeroBalance: closed.filter(p => p.tokenBalanceZeroConfirmed).length,
