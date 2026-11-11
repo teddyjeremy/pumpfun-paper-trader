@@ -1,0 +1,49 @@
+name: Deploy paper-trading worker to Google Cloud
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: paper-worker
+    steps:
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+      - name: Validate deployment configuration
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_VM_INSTANCE: ${{ vars.GCP_VM_INSTANCE }}
+          GCP_VM_ZONE: ${{ vars.GCP_VM_ZONE }}
+        run: |
+          set -euo pipefail
+          for name in GCP_PROJECT_ID GCP_VM_INSTANCE GCP_VM_ZONE; do
+            if [ -z "${!name:-}" ]; then echo "::error::Missing repository variable: $name"; exit 1; fi
+          done
+          gcloud config set project "$GCP_PROJECT_ID"
+      - name: Update worker and verify health
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_VM_INSTANCE: ${{ vars.GCP_VM_INSTANCE }}
+          GCP_VM_ZONE: ${{ vars.GCP_VM_ZONE }}
+        run: |
+          set -euo pipefail
+          gcloud compute ssh "$GCP_VM_INSTANCE" --project "$GCP_PROJECT_ID" --zone "$GCP_VM_ZONE" --command='set -euo pipefail
+            cd /opt/pumpfun-paper-trader
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
+            npm install
+            npm run check
+            npm run build
+            sudo systemctl restart pumpfun-paper-trader
+            sleep 3
+            sudo systemctl is-active --quiet pumpfun-paper-trader
+            curl --fail --silent --show-error http://127.0.0.1:8080/health
+          '
