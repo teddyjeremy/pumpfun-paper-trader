@@ -76,6 +76,25 @@ describe("migration-aware paper exit policy", () => {
     expect(result.buyVolumeDeclineFraction).toBeGreaterThanOrEqual(0.5);
   });
 
+  it("honors a two-window confirmation configuration", () => {
+    const pressure: ExitWindow = {
+      buyVolumeLamports: 20, sellVolumeLamports: 50,
+      uniqueBuyers: 2, uniqueSellers: 5, priceChangePct: -1
+    };
+    const result = evaluateExitPolicy({
+      entryPrice: 1, currentPrice: 1.1, highestCompletedPrice: 1.2,
+      venue: "bonding_curve", migrationDetected: false, migratedPoolVerified: false,
+      baselineWindows: [neutral(), neutral(), neutral()],
+      recentWindows: [neutral(), pressure, pressure]
+    }, {
+      buyVolumeDeclineFraction: 0.5,
+      sellToBuyVolumeRatio: 1.5,
+      consecutiveSellPressureWindows: 2
+    });
+    expect(result.action).toBe("SELL");
+    expect(result.exitSignal).toBe("SELL_PRESSURE");
+  });
+
   it("does not sell on a quiet market without sustained sell pressure", () => {
     const quiet: ExitWindow = {
       buyVolumeLamports: 20, sellVolumeLamports: 10,
