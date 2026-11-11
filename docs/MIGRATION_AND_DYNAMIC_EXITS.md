@@ -28,16 +28,16 @@ Track rolling windows at 2s, 5s, 10s, and 30s. Store quote-volume values separat
 
 A soft exhaustion exit requires at least two independent bearish signals, confirmed across consecutive observations. A single low-volume or empty window is not enough. Do not count a missing provider window as zero buys.
 
-### Initial paper-calibration candidates (not locked strategy thresholds)
+### Initial paper-only calibration profile
 
-Test thresholds rather than silently selecting one:
+The current code uses the following starting profile for paper observation only:
 
-- Buy/sell ratio below 1.0, 1.2, or 1.5.
-- Buy-volume decline of 30%, 40%, or 50% against the prior comparable window.
-- Buyer-rate decline of 30%, 40%, or 50%.
-- Confirmation over two or three consecutive windows.
+- Buy/sell quote-volume ratio below 1.0.
+- Buy-volume decline of at least 40% against the prior comparable window.
+- Unique-buyer-rate decline of at least 40%.
+- At least two of the three bearish signals in each of two consecutive windows.
 
-Compare false exits, maximum adverse excursion, profit captured, post-exit continuation, and missed rug exits. The final threshold set must be versioned and explicitly approved before it becomes the production paper strategy.
+This is a calibration profile, not a proven optimum. Compare false exits, maximum adverse excursion, profit captured, post-exit continuation, and missed rug exits. Version every threshold change and keep the strategy paper-only while measuring outcomes.
 
 ## Protective exits retained
 
