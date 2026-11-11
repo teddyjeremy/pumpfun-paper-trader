@@ -28,6 +28,10 @@ All on-chain amounts are represented as integer base units / lamports or exact P
 
 The initial schema was prepared and successfully tested on an isolated Neon temporary branch on 2026-11-04. The production `main` branch has not yet received the migration. Apply it only after the operator explicitly approves the production database change. The temporary test branch must be finalized (apply or discard) so it is cleaned up.
 
+## Migration-aware ledger extension
+
+Migration `0002_migration_aware_dynamic_exits.sql` adds position market phase, migrated venue/pool identity, migration slot/time, last verified market quote, blocked-exit reason, monotonic stop state and append-only exit-evaluation evidence. Market windows and quotes are venue-aware so curve and migrated-pool observations are not conflated. Apply only after reviewing the migration against the production schema and backing up the database.
+
 ## Current limitations
 
 The database connection diagnostic is wired into the dashboard, but the trading pipeline does not yet write opportunities, quotes, positions, or trades. Do not interpret an empty ledger as zero losses or zero profit. The dashboard must continue to show unavailable PnL until real paper executions are persisted.
