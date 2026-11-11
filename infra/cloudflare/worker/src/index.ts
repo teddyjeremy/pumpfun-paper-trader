@@ -92,8 +92,24 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
 
     if (this.socket?.readyState === WebSocket.OPEN) {
-      await this.persistStatus();
-      return this.getStatus();
+      const connectedAtMs = this.status.connectedAt
+        ? Date.parse(this.status.connectedAt)
+        : 0;
+      const connectionAgeMs = Date.now() - connectedAtMs;
+
+      // Cloudflare only guarantees that an outbound connection keeps this
+      // Durable Object alive for up to 15 minutes. Rotate it before that limit
+      // so the coordinator retains its event handlers and can keep monitoring.
+      if (connectedAtMs > 0 && connectionAgeMs < 14 * 60 * 1000) {
+        await this.persistStatus();
+        return this.getStatus();
+      }
+
+      const expiringSocket = this.socket;
+      this.socket = null;
+      this.status.connected = false;
+      this.status.subscriptionConfirmed = false;
+      expiringSocket.close(4001, "Scheduled connection rotation");
     }
 
     if (
@@ -183,9 +199,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       });
 
       socket.addEventListener("close", () => {
-        if (this.socket === socket) this.socket = null;
+        // Ignore events from a socket we deliberately replaced during rotation.
+        if (this.socket !== socket) return;
+        this.socket = null;
         this.status.connected = false;
         this.status.subscriptionConfirmed = false;
+        this.status.connectedAt = null;
         this.connectingSinceMs = 0;
       });
 
