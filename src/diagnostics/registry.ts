@@ -94,7 +94,7 @@ function actionFor(category: string): string {
     quote_stale: "Reduce quote age or refresh immediately before simulated execution.",
     quote_cost: "Inspect protocol/creator/network fees, impact and slippage; skip uneconomic trades.",
     sellability: "Check fresh sell quote, token program constraints and curve state.",
-    graduation: "Stop entries near graduation; record unavailable exits without migrating routes.",
+    graduation: "Detect graduation, verify the migrated pool and obtain a fresh sell quote; migration alone is not an exit signal.",
     execution_simulation: "Inspect simulated latency, quote refresh and raw-unit calculations.",
     persistence: "Check database connectivity, migrations and transaction boundaries.",
     internal: "Inspect structured logs and stack trace for the associated correlation ID."
