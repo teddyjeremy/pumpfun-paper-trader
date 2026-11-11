@@ -153,6 +153,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.connectingSinceMs = Date.now();
 
       socket.addEventListener("open", () => {
+        // A connection may finish opening after /stop has already detached it.
+        // Never subscribe from a stale socket or after the coordinator is disabled.
+        if (this.socket !== socket || !this.status.enabled) {
+          socket.close(1000, "Coordinator disabled before connection opened");
+          return;
+        }
         this.status.connected = true;
         this.status.subscriptionConfirmed = false;
         this.status.connectedAt = new Date().toISOString();
@@ -170,6 +176,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       });
 
       socket.addEventListener("message", (event: MessageEvent) => {
+        // WebSocket messages can already be queued when /stop closes the socket.
+        // Ignore them once the socket is detached or the coordinator is disabled.
+        if (this.socket !== socket || !this.status.enabled) return;
         if (typeof event.data !== "string") return;
         try {
           const message = JSON.parse(event.data) as {
@@ -209,6 +218,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       });
 
       socket.addEventListener("error", () => {
+        if (this.socket !== socket || !this.status.enabled) return;
         this.status.lastError = "Helius WebSocket transport error.";
       });
     } catch {
