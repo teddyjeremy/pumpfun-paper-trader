@@ -170,7 +170,7 @@ export async function getTradingDashboardSnapshot() {
         SELECT id, quoted_at, quote_status, output_amount_base_units, protocol_fee_lamports,
           creator_fee_lamports, network_fee_lamports, priority_fee_lamports
         FROM execution_quotes
-        WHERE mint = p.mint AND side = 'sell' AND quote_status = 'success'
+        WHERE mint = p.mint AND side = 'sell'
           AND input_amount_base_units >= p.token_quantity_base_units
           AND (market_phase = p.market_phase OR p.market_phase = 'migration_pending')
         ORDER BY quoted_at DESC LIMIT 1
