@@ -71,12 +71,13 @@ describe("bounded discovery candidate store", () => {
     });
   });
 
-  it("rejects a candidate beyond the configured cap and counts the gap", () => {
+  it("rejects a candidate beyond the configured cap and records its mint as a gap", () => {
     const first = applyDiscoveryEvent(emptyDiscoveryStore(), event(), { cap: 1 });
     const second = applyDiscoveryEvent(first.state, event({ mint: mintB }), { cap: 1 });
     expect(second.outcome).toBe("OVERFLOW");
     expect(second.state.candidates).toHaveLength(1);
     expect(second.state.overflow).toBe(1);
+    expect(second.state.overflowMints).toContain(mintB);
   });
 
   it("expires candidates after the retention window before admitting new ones", () => {
