@@ -6,6 +6,11 @@ describe("Helius RPC budget", () => {
     expect(() => new TokenBucket(10.1)).toThrow(/between 0 and 10/);
   });
 
+  it("supports sub-one request rates and rejects impossible batch sizes", () => {
+    const bucket = new TokenBucket(0.5);
+    expect(bucket.tryTake(2)).toThrow(/exceeds bucket capacity/);
+  });
+
   it("limits bursts and refills according to elapsed time", () => {
     let now = 0;
     const bucket = new TokenBucket(2, 2, () => now);
