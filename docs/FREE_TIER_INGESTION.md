@@ -1,0 +1,44 @@
+# Free-tier selective ingestion
+
+## Scope and hard constraints
+
+The live listener remains disabled until the selective pipeline is deployed and tested. This service is paper-only: no wallet keys, signing, transaction submission, or real fills.
+
+- PumpPortal is used only for its free `subscribeNewToken` and `subscribeMigration` discovery events.
+- Do not subscribe to PumpPortal `subscribeTokenTrade` or `subscribeAccountTrade`; these are metered.
+- Helius Free standard Solana WebSockets and JSON-RPC are used for verification and selective monitoring. Do not use Enhanced WebSockets / `transactionSubscribe`.
+- Keep Helius RPC below its 10 requests/second ceiling, with a configurable safety margin in production.
+- Do not subscribe to all Pump.fun program logs. Discover launches first, then monitor only admitted candidates and open positions.
+- The Cloudflare Durable Object must not receive a global firehose. Candidate caps and bounded queues are mandatory.
+
+## Event flow
+
+1. Consume PumpPortal new-token and migration discovery messages over one data WebSocket connection.
+2. Treat every launch message as an untrusted discovery hint, not authoritative on-chain state.
+3. Verify the creation transaction and mint/creator data through Helius within the RPC budget.
+4. Derive the bonding-curve PDA from the official Pump program interface, then verify its owner and account data on-chain. Never trust an event-supplied curve address without verification.
+5. Admit a bounded set of candidates for monitoring. Open positions have highest priority, qualified candidates next, and historical/backfill work last.
+6. Use standard Helius account/log subscriptions only for admitted bonding curves. Reconcile with transaction/account reads and track provider slot lag.
+7. Persist raw event references, processed signatures, observation windows, and provider health. Deduplicate by signature and instruction/event identity.
+8. Feed only complete, decoded observations into the existing strict strategy. If any required observation is missing, late, malformed, dropped, or outside the freshness window, mark the candidate `DATA_INCOMPLETE` / WATCH and prohibit entry.
+
+## Queue and budget behavior
+
+The initial TypeScript ingestion primitives provide:
+- A token bucket that rejects rates above 10 requests/second.
+- A bounded RPC queue prioritizing open positions, then candidates, then backfill.
+- Explicit return of rejected/evicted work so callers can persist a data-gap event.
+
+These primitives are not a provider adapter and do not make the worker trading-ready. Production integration must persist queue overflow and missed deadlines; in-memory queue state alone is not sufficient across restarts.
+
+## Not yet enabled
+
+- PumpPortal WebSocket credentials/configuration and reconnect/backoff.
+- Official Pump IDL decoder and transaction-level event extraction.
+- Verified bonding-curve PDA derivation and account decoder.
+- Candidate admission limits selected from measured launch volume and Cloudflare budget.
+- Helius backfill/reconciliation for reconnect gaps.
+- Durable queue, deduplication, observation windows, and provider-lag alerts.
+- Quotes, risk evidence, strict entry evaluator, paper execution, and ledger integration.
+
+No candidate is eligible for a paper entry until every required evidence source is complete and fresh. No reserve-delta estimate or chart price may be substituted for an executable quote.
