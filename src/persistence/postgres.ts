@@ -113,7 +113,8 @@ export async function getTradingDashboardSnapshot() {
     pool.query(`
       SELECT
         COALESCE(SUM(net_pnl_lamports) FILTER (WHERE status = 'closed'), 0)::text AS realized_pnl_lamports,
-        COALESCE(SUM(net_pnl_usd) FILTER (WHERE status = 'closed'), 0)::text AS realized_pnl_usd,
+        (COALESCE(SUM(net_pnl_lamports) FILTER (WHERE status = 'closed'), 0) / 1000000000::numeric)::text AS realized_pnl_sol,
+        SUM(net_pnl_usd) FILTER (WHERE status = 'closed')::text AS realized_pnl_usd,
         COUNT(*) FILTER (WHERE status IN ('buy_pending','open','sell_pending','exit_unexecutable'))::int AS open_positions,
         COUNT(*) FILTER (WHERE status = 'closed')::int AS closed_positions,
         COUNT(*) FILTER (WHERE status = 'closed' AND zero_balance_confirmed)::int AS confirmed_closed_positions
@@ -199,16 +200,14 @@ export async function getTradingDashboardSnapshot() {
     valuationPolicy: "Open-position valuation uses a successful sell quote no older than 15 seconds and sized for the full remaining token quantity. No chart-price mark is substituted.",
     portfolio: {
       realizedPnlLamports: String(portfolio.realized_pnl_lamports ?? "0"),
-      realizedPnlSol: (Number(portfolio.realized_pnl_lamports ?? 0) / 1_000_000_000).toFixed(9),
+      realizedPnlSol: String(portfolio.realized_pnl_sol ?? '0'),
       realizedPnlUsd: portfolio.realized_pnl_usd == null ? null : String(portfolio.realized_pnl_usd),
       openPositions: Number(portfolio.open_positions ?? 0),
       closedPositions: Number(portfolio.closed_positions ?? 0),
       confirmedClosedPositions: Number(portfolio.confirmed_closed_positions ?? 0),
-      unrealizedPnlSol: positions.every(p => p.estimatedUnrealizedPnlSol !== null)
-        ? positions.reduce((sum, p) => sum + Number(p.estimatedUnrealizedPnlSol ?? 0), 0).toFixed(9)
-        : null,
+      unrealizedPnlSol: null,
       unrealizedPnlUsd: null,
-      usdValuationNote: "Unrealized USD is unavailable until a timestamped SOL/USD price feed is persisted. SOL-denominated quote PnL remains visible."
+      usdValuationNote: "Open positions are listed individually with SOL proceeds and SOL unrealized PnL when a fresh full-size sell quote exists. Portfolio-level unrealized PnL is withheld until it can be aggregated with exact decimal arithmetic. Unrealized USD requires a timestamped SOL/USD price feed."
     },
     positions,
     trades: tradesResult.rows.map((row: Record<string, unknown>) => ({
