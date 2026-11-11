@@ -285,3 +285,68 @@ export function decodePumpTradeEvents(logs: readonly string[]): PumpTradeEvent[]
   }
   return events;
 }
+
+
+export type PumpTransactionDecodeResult =
+  | {
+      status: "DECODED";
+      signature: string;
+      slot: number;
+      createEvents: PumpCreateEvent[];
+      tradeEvents: PumpTradeEvent[];
+    }
+  | { status: "FAILED_TRANSACTION"; signature: string }
+  | { status: "DATA_INCOMPLETE"; reason: string };
+
+/**
+ * Transaction-level safety gate for standard Solana getTransaction responses.
+ * Failed transactions are never decoded as observations. Missing transaction
+ * metadata/logs are explicit data gaps, not empty/no-trade observations.
+ */
+export function decodeSuccessfulPumpTransaction(input: unknown): PumpTransactionDecodeResult {
+  if (!input || typeof input !== "object") {
+    return { status: "DATA_INCOMPLETE", reason: "Transaction response is missing or malformed." };
+  }
+
+  const transaction = input as {
+    slot?: unknown;
+    transaction?: { signatures?: unknown };
+    meta?: { err?: unknown; logMessages?: unknown };
+  };
+
+  const signatures = transaction.transaction?.signatures;
+  const signature = Array.isArray(signatures) && typeof signatures[0] === "string"
+    ? signatures[0]
+    : null;
+  if (!signature) {
+    return { status: "DATA_INCOMPLETE", reason: "Transaction signature is missing." };
+  }
+
+  if (!Number.isSafeInteger(transaction.slot) || (transaction.slot as number) < 0) {
+    return { status: "DATA_INCOMPLETE", reason: "Transaction slot is missing or invalid." };
+  }
+
+  if (!transaction.meta || !Object.prototype.hasOwnProperty.call(transaction.meta, "err")) {
+    return { status: "DATA_INCOMPLETE", reason: "Transaction execution metadata is missing." };
+  }
+  if (transaction.meta.err !== null) {
+    return { status: "FAILED_TRANSACTION", signature };
+  }
+
+  if (!Array.isArray(transaction.meta.logMessages) ||
+      !transaction.meta.logMessages.every((line): line is string => typeof line === "string")) {
+    return { status: "DATA_INCOMPLETE", reason: "Successful transaction log messages are missing." };
+  }
+
+  try {
+    return {
+      status: "DECODED",
+      signature,
+      slot: transaction.slot as number,
+      createEvents: decodePumpCreateEvents(transaction.meta.logMessages),
+      tradeEvents: decodePumpTradeEvents(transaction.meta.logMessages)
+    };
+  } catch {
+    return { status: "DATA_INCOMPLETE", reason: "A Pump event log payload could not be decoded safely." };
+  }
+}
