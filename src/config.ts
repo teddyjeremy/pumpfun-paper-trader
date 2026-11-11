@@ -8,10 +8,14 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().optional().default(""),
   HELIUS_API_KEY: z.string().optional().default(""),
   PUMPFUN_MODE: z.literal("paper").default("paper"),
-  PAPER_STARTING_BALANCE_USD: z.coerce.number().positive().default(8),
+  PAPER_STARTING_BALANCE_USD: z.coerce.number().positive().default(2.7),
   PAPER_POSITION_SIZE_USD: z.coerce.number().positive().default(1),
-  PAPER_MAX_OPEN_POSITIONS: z.coerce.number().int().min(1).max(3).default(3),
-  PAPER_MAX_HOLD_SECONDS: z.coerce.number().int().positive().max(60).default(60),
+  PAPER_FIRST_CAPACITY_THRESHOLD_USD: z.coerce.number().positive().default(5),
+  PAPER_MAX_POSITION_SIZE_USD: z.coerce.number().positive().default(100),
+  PAPER_HARD_MAX_OPEN_POSITIONS: z.coerce.number().int().min(1).max(50).default(50),
+  EXIT_BUY_VOLUME_DECLINE_FRACTION: z.coerce.number().min(0).max(1).default(0.5),
+  EXIT_SELL_TO_BUY_VOLUME_RATIO: z.coerce.number().positive().default(1.5),
+  EXIT_SELL_PRESSURE_WINDOWS: z.coerce.number().int().min(1).max(3).default(3),
   DIAGNOSTICS_RETENTION_HOURS: z.coerce.number().int().positive().default(24)
 });
 
@@ -19,8 +23,11 @@ const parsed = EnvSchema.safeParse(process.env);
 if (!parsed.success) {
   throw new Error(`Invalid environment configuration: ${parsed.error.message}`);
 }
-if (parsed.data.PAPER_POSITION_SIZE_USD * parsed.data.PAPER_MAX_OPEN_POSITIONS > parsed.data.PAPER_STARTING_BALANCE_USD) {
-  throw new Error("Maximum position allocation cannot exceed the paper starting balance.");
+if (parsed.data.PAPER_POSITION_SIZE_USD > parsed.data.PAPER_STARTING_BALANCE_USD) {
+  throw new Error("Initial position principal cannot exceed the paper starting balance.");
+}
+if (parsed.data.PAPER_MAX_POSITION_SIZE_USD < parsed.data.PAPER_POSITION_SIZE_USD) {
+  throw new Error("Maximum position size cannot be below the initial position size.");
 }
 
 export const config = Object.freeze(parsed.data);
