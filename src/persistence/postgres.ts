@@ -107,6 +107,7 @@ export interface DashboardPosition {
   tokenQuantity: string;
   latestSellQuoteAt: string | null;
   sellQuoteFresh: boolean;
+  sellQuoteStatus: string | null;
   estimatedExitSol: string | null;
   estimatedUnrealizedPnlSol: string | null;
   unrealizedValuationStatus: "fresh_executable_quote" | "quote_unavailable_or_stale";
@@ -153,12 +154,12 @@ export async function getTradingDashboardSnapshot() {
         p.token_quantity_base_units::text AS token_quantity,
         p.exit_blocked_reason, p.active_stop_net_return_pct::text,
         q.quoted_at AS latest_sell_quote_at,
-        (q.id IS NOT NULL) AS sell_quote_fresh,
-        CASE WHEN q.id IS NOT NULL THEN
+        (q.id IS NOT NULL AND q.quote_status = 'success' AND q.quoted_at >= now() - interval '15 seconds') AS sell_quote_fresh,
+        CASE WHEN q.id IS NOT NULL AND q.quote_status = 'success' AND q.quoted_at >= now() - interval '15 seconds' THEN
           ((q.output_amount_base_units - COALESCE(q.protocol_fee_lamports, 0) - COALESCE(q.creator_fee_lamports, 0)
             - COALESCE(q.network_fee_lamports, 0) - COALESCE(q.priority_fee_lamports, 0)) / 1000000000::numeric)::text
         ELSE NULL END AS estimated_exit_sol,
-        CASE WHEN q.id IS NOT NULL THEN
+        CASE WHEN q.id IS NOT NULL AND q.quote_status = 'success' AND q.quoted_at >= now() - interval '15 seconds' THEN
           ((q.output_amount_base_units - COALESCE(q.protocol_fee_lamports, 0) - COALESCE(q.creator_fee_lamports, 0)
             - COALESCE(q.network_fee_lamports, 0) - COALESCE(q.priority_fee_lamports, 0)
             - p.principal_lamports - COALESCE(buy_fees.fees, 0)) / 1000000000::numeric)::text
@@ -166,11 +167,10 @@ export async function getTradingDashboardSnapshot() {
       FROM positions p
       JOIN tokens t ON t.mint = p.mint
       LEFT JOIN LATERAL (
-        SELECT id, quoted_at, output_amount_base_units, protocol_fee_lamports,
+        SELECT id, quoted_at, quote_status, output_amount_base_units, protocol_fee_lamports,
           creator_fee_lamports, network_fee_lamports, priority_fee_lamports
         FROM execution_quotes
         WHERE mint = p.mint AND side = 'sell' AND quote_status = 'success'
-          AND quoted_at >= now() - interval '15 seconds'
           AND input_amount_base_units >= p.token_quantity_base_units
           AND (market_phase = p.market_phase OR p.market_phase = 'migration_pending')
         ORDER BY quoted_at DESC LIMIT 1
@@ -224,6 +224,7 @@ export async function getTradingDashboardSnapshot() {
     tokenQuantity: String(row.token_quantity ?? "0"),
     latestSellQuoteAt: row.latest_sell_quote_at == null ? null : new Date(String(row.latest_sell_quote_at)).toISOString(),
     sellQuoteFresh: row.sell_quote_fresh === true,
+    sellQuoteStatus: row.quote_status == null ? null : String(row.quote_status),
     estimatedExitSol: row.estimated_exit_sol == null ? null : String(row.estimated_exit_sol),
     estimatedUnrealizedPnlSol: row.estimated_unrealized_pnl_sol == null ? null : String(row.estimated_unrealized_pnl_sol),
     unrealizedValuationStatus: row.sell_quote_fresh === true ? "fresh_executable_quote" : "quote_unavailable_or_stale",
