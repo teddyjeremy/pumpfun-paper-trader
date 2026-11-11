@@ -111,11 +111,13 @@ export function evaluateExitPolicy(
     const recentBuy = sum(input.recentWindows.map(window => window.buyVolumeLamports));
     buyVolumeDeclineFraction = baselineBuy > 0 ? Math.max(0, 1 - recentBuy / baselineBuy) : 0;
 
-    const sustainedSellPressure = input.recentWindows.every(window =>
-      window.sellVolumeLamports >= window.buyVolumeLamports * policy.sellToBuyVolumeRatio
-      && window.uniqueSellers > window.uniqueBuyers
-      && window.priceChangePct <= 0
-    );
+    const confirmingWindows = input.recentWindows.slice(-policy.consecutiveSellPressureWindows);
+    const sustainedSellPressure = confirmingWindows.length === policy.consecutiveSellPressureWindows
+      && confirmingWindows.every(window =>
+        window.sellVolumeLamports >= window.buyVolumeLamports * policy.sellToBuyVolumeRatio
+        && window.uniqueSellers > window.uniqueBuyers
+        && window.priceChangePct <= 0
+      );
 
     // Multiple independent bearish signals must persist across completed windows.
     if (buyVolumeDeclineFraction >= policy.buyVolumeDeclineFraction
