@@ -1,0 +1,24 @@
+[Unit]
+Description=Pump.fun paper-trading worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pumptrader
+Group=pumptrader
+WorkingDirectory=/opt/pumpfun-paper-trader
+EnvironmentFile=/etc/pumpfun-paper-trader/worker.env
+ExecStart=/usr/bin/node /opt/pumpfun-paper-trader/dist/src/server.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pumpfun-paper-trader
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
