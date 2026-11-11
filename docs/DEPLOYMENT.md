@@ -1,27 +1,31 @@
 # Deployment architecture
 
-## Vercel
+## Vercel dashboard
 
-Vercel hosts the operator dashboard and stateless Fastify API adapter. The dashboard is protected by the Vercel team's deployment protection on the default `.vercel.app` domains.
+The Vercel project is already linked to this repository:
 
-- Project: `pumpfun-paper-trader`
+- Project: pumpfun-paper-trader
+- Repository: teddyjeremy/pumpfun-paper-trader
 - Runtime: Node.js 22.x
-- Function region: `sin1` (Singapore)
-- Entrypoint: `api/index.ts`
-- Routing: `vercel.json` forwards application paths to the Fastify handler
+- Function region: Singapore (sin1)
+- Entrypoint: api/index.ts
 
-The function must remain read-only with respect to any trading authority. It must not sign or submit Solana transactions. Process-memory diagnostics are ephemeral in serverless environments.
+The dashboard is a read-only operator surface. It must not run the persistent market listener, hold a wallet key, sign transactions, or expose write-capable execution endpoints. Keep Deployment Protection enabled. Dashboard requests must read sanitized, persisted records from the Google Cloud worker/API using server-side authentication.
 
-## Persistent worker
+## Google Cloud worker
 
-Do not run the launch listener or position manager as a Vercel function. They need a persistent Google Cloud runtime, restart supervision, bounded reconnect logic, and durable PostgreSQL state.
+Run the persistent Node.js 22 market worker on a dedicated Compute Engine VM under systemd. Use Cloud SQL PostgreSQL for the durable event, quote, position and trade ledger; Secret Manager for provider/database credentials; Cloud Logging and Monitoring for operations; and Cloud Storage for compressed raw archives and resumable checkpoints.
 
-The worker must use Secret Manager for provider credentials. The dashboard must read persisted, sanitized records through authenticated APIs; never expose Helius credentials, RPC auth headers, wallet secrets, or raw sensitive environment values.
+The worker must use a database-backed leader lease and idempotency keys. The Vercel dashboard is not the worker and cannot be relied on for continuous WebSocket subscriptions or position management.
+
+## Position lifecycle
+
+New entries are allowed only on non-migrated Pump.fun bonding curves. A position already open at graduation transitions to migration-pending, then to a verified migrated pool (initially PumpSwap). Migration does not automatically sell. Continue applying protective and dynamic exits to the migrated market. If no fresh executable quote is available, keep the position open as exit-blocked, alert, and retry; never fabricate a fill or release the position slot.
+
+There is no maximum holding duration. Protective stops and confirmed dynamic exit signals determine when a position closes.
 
 ## Deployment verification
 
-A Vercel build reaching `READY` confirms only that the artifact built and deployed. Verify runtime routes (`/`, `/health`, `/ready`, `/api/diagnostics`, `/api/tracking`) and inspect runtime logs before calling the dashboard operational.
+A Vercel build reaching READY confirms only that the dashboard artifact built and deployed. Verify runtime routes (/health, /ready, /api/diagnostics, /api/tracking, /api/results/summary), authenticated access to the cloud worker, and runtime logs before calling the dashboard operational.
 
-## Known follow-up
-
-The first framework-detected deployment built but its runtime handler was invalid because Vercel treated `src/server.ts` as a Fastify entrypoint. The project framework was changed to generic Node.js function routing so `api/index.ts` is the explicit handler. A new deployment must be checked against runtime logs before declaring the fix verified.
+Google Cloud resources are not yet provisioned. See [infra/gcp/DEPLOYMENT.md](../infra/gcp/DEPLOYMENT.md) for prerequisites and deployment plan.
