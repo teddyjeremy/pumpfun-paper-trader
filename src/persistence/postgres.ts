@@ -77,6 +77,23 @@ export async function getPersistenceStatus(): Promise<PersistenceStatus> {
 }
 
 
+function sumSolDecimals(values: string[]): string {
+  const scale = 1_000_000_000n;
+  const total = values.reduce((sum, value) => {
+    const negative = value.startsWith("-");
+    const normalized = negative ? value.slice(1) : value;
+    const [whole = "0", fraction = ""] = normalized.split(".");
+    const fractionalLamports = BigInt((fraction + "000000000").slice(0, 9));
+    const amount = BigInt(whole || "0") * scale + fractionalLamports;
+    return sum + (negative ? -amount : amount);
+  }, 0n);
+  const sign = total < 0n ? "-" : "";
+  const absolute = total < 0n ? -total : total;
+  const whole = absolute / scale;
+  const fraction = String(absolute % scale).padStart(9, "0");
+  return sign + whole.toString() + "." + fraction;
+}
+
 export interface DashboardPosition {
   id: string;
   mint: string;
@@ -224,9 +241,11 @@ export async function getTradingDashboardSnapshot() {
       openPositions: Number(portfolio.open_positions ?? 0),
       closedPositions: Number(portfolio.closed_positions ?? 0),
       confirmedClosedPositions: Number(portfolio.confirmed_closed_positions ?? 0),
-      unrealizedPnlSol: null,
+      unrealizedPnlSol: positions.every(p => p.estimatedUnrealizedPnlSol !== null)
+        ? sumSolDecimals(positions.map(p => p.estimatedUnrealizedPnlSol as string))
+        : null,
       unrealizedPnlUsd: null,
-      usdValuationNote: "Open positions are listed individually with SOL proceeds and SOL unrealized PnL when a fresh full-size sell quote exists. Portfolio-level unrealized PnL is withheld until it can be aggregated with exact decimal arithmetic. Unrealized USD requires a timestamped SOL/USD price feed."
+      usdValuationNote: "Open positions are listed individually with SOL proceeds and SOL unrealized PnL when a fresh full-size sell quote exists. Portfolio-level unrealized PnL is withheld if any open position lacks a fresh full-size sell quote. Unrealized USD requires a timestamped SOL/USD price feed."
     },
     positions,
     closedPositions: closedResult.rows.map((row: Record<string, unknown>) => ({
