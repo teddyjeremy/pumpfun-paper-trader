@@ -35,6 +35,12 @@ The worker must be restart-safe and use a database-backed leader lease so a rest
 - Back up Cloud SQL and test restore.
 - Keep paper mode enforced in code and deployment IAM; no wallet signing keys are provisioned.
 
+## Manual deployment workflow
+
+`.github/workflows/deploy-gcp.yml` provides a manual Workload Identity Federation deployment. Configure repository variables `GCP_PROJECT_ID`, `GCP_WIF_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT`, `GCP_VM_INSTANCE`, and `GCP_VM_ZONE`. The VM must already have Node.js 22, Git, this repository cloned at `/opt/pumpfun-paper-trader`, the systemd unit installed, and `/etc/pumpfun-paper-trader/worker.env` populated from Secret Manager. The workflow runs checks/build, restarts the service and checks `/health`; it does not provision billable resources or configure secrets.
+
+Restrict the WIF provider to this repository and protected main branch. The GitHub deploy identity gets only the Compute Engine SSH/OS Login permissions required. The VM runtime service account separately gets access to the exact Helius and database secrets.
+
 ## Current status
 
 This is a deployment blueprint, not a claim that Google Cloud resources have already been created. Project ID, region, billing, and cloud credentials must be supplied/configured in the user's Google Cloud account before provisioning.
