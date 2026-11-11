@@ -1,0 +1,48 @@
+substitutions:
+  _REGION: asia-southeast1
+  _SERVICE: pumpfun-paper-worker
+  _AR_REPOSITORY: pumpfun-paper
+  _HELIUS_SECRET: helius-api-key
+  _DATABASE_SECRET: database-url
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/worker:$COMMIT_SHA
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/worker:$COMMIT_SHA
+
+  # One instance prevents duplicate paper workers. PostgreSQL advisory locking
+  # must still guard leadership across restarts and deployments.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/worker:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --min=1
+      - --max=1
+      - --no-cpu-throttling
+      - --cpu=1
+      - --memory=1Gi
+      - --timeout=3600
+      - --concurrency=1
+      - --port=8080
+      - --set-env-vars=PUMPFUN_MODE=paper,LOG_LEVEL=info
+      - --set-secrets=HELIUS_API_KEY=${_HELIUS_SECRET}:latest,DATABASE_URL=${_DATABASE_SECRET}:latest
+      - --no-allow-unauthenticated
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/worker:$COMMIT_SHA
