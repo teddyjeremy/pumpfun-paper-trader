@@ -26,14 +26,18 @@ Track rolling windows at 2s, 5s, 10s, and 30s. Store quote-volume values separat
 - Liquidity / real SOL reserves and executable sell quote.
 - Creator, linked-wallet and high-concentration holder distribution.
 
-A soft exhaustion exit requires at least two independent bearish signals, confirmed across consecutive observations. A single low-volume or empty window is not enough. Do not count a missing provider window as zero buys.
+A soft exhaustion exit requires at least two independent bearish evidence families in each of two or more consecutive complete windows. Correlated measurements are grouped so that, for example, a weak buy/sell ratio, net sell flow, and rising sell volume count as one order-flow family—not three independent votes. The families are: (1) order-flow pressure, (2) participation decay, (3) liquidity/reserve drain, (4) weakening price response to buy flow, and (5) large-holder distribution. A single low-volume or empty window is not enough. Do not count a missing provider window as zero buys. A verified critical creator/linked/high-confidence-cluster distribution event is an immediate emergency exit signal, subject to a fresh executable sell quote.
 
 ### Initial paper-calibration candidates (not locked strategy thresholds)
 
-Test thresholds rather than silently selecting one:
+Test thresholds rather than silently selecting one. The dynamic exit engine groups these measurements into independent families and requires the configured family count in every confirmation window:
 
 - Buy/sell ratio below 1.0, 1.2, or 1.5.
 - Buy-volume decline of 30%, 40%, or 50% against the prior comparable window.
+- Sell-volume increase of 50%, 75%, or 100% against the prior comparable window.
+- Seller-rate increase of 50%, 75%, or 100% against the prior comparable window.
+- Price response per unit of buy volume declining by 40%, 50%, or 60%.
+- Large-holder net distribution thresholds calibrated separately from creator/linked-wallet emergency rules.
 - Buyer-rate decline of 30%, 40%, or 50%.
 - Confirmation over two or three consecutive windows.
 
