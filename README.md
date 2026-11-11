@@ -11,7 +11,7 @@ This repository is the project foundation for a persistent paper-trading worker 
 - Starting balance: **$2.70**
 - Initial position principal: **$1.00**
 - Initial maximum open positions: **1**
-- Capacity and stake grow only through the explicit portfolio-sizing policy.
+- Capacity increases by one at each portfolio-growth milestone (about $5, $10, $20, etc.); stake increases 50% at each milestone and is capped at $100. The deterministic policy is implemented in `src/strategy/portfolio-policy.ts`.
 - A position slot is released only after a valid simulated exit and zero token balance confirmation.
 - No maximum holding duration.
 - No private key or real transaction capability.
