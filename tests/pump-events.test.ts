@@ -153,6 +153,9 @@ describe("successful transaction decode gate", () => {
     expect(decodeSuccessfulPumpTransaction({
       slot: 123, transaction: { signatures: [signature] }, meta: { err: null }
     })).toMatchObject({ status: "DATA_INCOMPLETE" });
+    expect(decodeSuccessfulPumpTransaction({
+      slot: 123, transaction: { signatures: [signature] }, meta: { err: undefined, logMessages: [] }
+    })).toMatchObject({ status: "DATA_INCOMPLETE" });
   });
 
   it("marks malformed event payloads DATA_INCOMPLETE instead of emitting partial observations", () => {
