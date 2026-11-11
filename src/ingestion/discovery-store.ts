@@ -22,12 +22,14 @@ export interface DiscoveryStoreState {
   duplicates: number;
   migrations: number;
   overflow: number;
+  overflowMints: string[];
   incomplete: number;
   lastPersistedAt: string | null;
 }
 
 export const DEFAULT_DISCOVERY_CAP = 100;
 export const DEFAULT_DISCOVERY_TTL_MS = 15 * 60 * 1000;
+const MAX_RECORDED_OVERFLOW_MINTS = 100;
 
 export function emptyDiscoveryStore(): DiscoveryStoreState {
   return {
@@ -36,6 +38,7 @@ export function emptyDiscoveryStore(): DiscoveryStoreState {
     duplicates: 0,
     migrations: 0,
     overflow: 0,
+    overflowMints: [],
     incomplete: 0,
     lastPersistedAt: null
   };
@@ -98,8 +101,16 @@ export function applyDiscoveryEvent(
   }
 
   if (retained.length >= cap) {
+    const overflowMints = current.overflowMints.includes(event.mint)
+      ? current.overflowMints
+      : [...current.overflowMints, event.mint].slice(-MAX_RECORDED_OVERFLOW_MINTS);
     return {
-      state: { ...current, candidates: retained, overflow: current.overflow + 1 },
+      state: {
+        ...current,
+        candidates: retained,
+        overflow: current.overflow + 1,
+        overflowMints
+      },
       outcome: "OVERFLOW"
     };
   }
