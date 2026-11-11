@@ -19,7 +19,7 @@ The worker must be restart-safe and use a database-backed leader lease so a rest
 2. Enable Compute Engine, Cloud SQL Admin, Secret Manager, Cloud Logging, Cloud Monitoring, and Cloud Storage APIs.
 3. Choose a region close to the RPC provider and database; keep VM and Cloud SQL in the same region.
 4. Create a dedicated runtime service account with least-privilege access to only the required secrets, database connection, bucket, and logging.
-5. Create Cloud SQL PostgreSQL and apply db/migrations.
+5. Reuse the existing dedicated Neon PostgreSQL project in Singapore via its pooled connection string stored in Secret Manager. Apply reviewed migrations to the intended database only after backup and explicit approval.
 6. Store provider and database secrets in Secret Manager. Never place credentials in Git, build args, instance metadata, or dashboard variables.
 7. Provision a small VM, install Docker/Node 22, deploy the reviewed image, and enable the systemd unit.
 8. Configure Vercel server-side API credentials and allow only authenticated read-only dashboard requests.
@@ -32,7 +32,7 @@ The worker must be restart-safe and use a database-backed leader lease so a rest
 - Configure automatic VM restart and systemd restart-on-failure.
 - Configure a health endpoint and alert if the worker misses heartbeats.
 - Set budget alerts before provisioning billable resources.
-- Back up Cloud SQL and test restore.
+- Back up PostgreSQL and test restore.
 - Keep paper mode enforced in code and deployment IAM; no wallet signing keys are provisioned.
 
 ## Manual deployment workflow
