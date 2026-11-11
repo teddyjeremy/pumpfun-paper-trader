@@ -6,7 +6,8 @@
 - `GET /ready`: readiness; returns HTTP 503 while required live adapters or the ledger are missing.
 - `GET /api/diagnostics`: counters, categorized recent failures, readiness blockers, uptime and memory.
 - `GET /api/results/summary`: portfolio configuration, activity counts and diagnosis.
-- `GET /`: live-refreshing operator dashboard.
+- `GET /api/tracking`: candidate funnel, rejection reasons, quote outcomes, latency, provider health, graduation and position telemetry.
+- `GET /`: operator dashboard.
 
 ## How to interpret the results
 
@@ -17,56 +18,44 @@
 | Many quote failures | Stale curve state, RPC lag, unsupported account layout | Quote error category and source slot |
 | Many cost rejections | Fees/impact consume expected edge | Keep hard cost gate; evaluate market conditions |
 | Many risk rejections | High-risk launches or incomplete risk evidence | Inspect individual rule and missing evidence |
-| No entries, healthy quotes | Momentum/quality gates not met or expected net return insufficient | Review feature windows and decision reasons; don't lower safety gates blindly |
-| Open positions not closing | Sell quote unavailable, curve graduated, or exit loop stalled | Position state, graduation and sellability events |
+| No entries, healthy quotes | Strict momentum/quality gates not met or expected net return insufficient | Review feature windows and decision reasons; do not relax safety gates blindly |
+| Open positions not closing | Sell quote unavailable, migration transition incomplete, or exit loop stalled | Position market state, migrated-pool verification and sellability events |
 | PnL differs across runs | Different quotes, latency assumptions or config version | Compare quote snapshots, strategy version and simulator profile |
 
 ## Required event fields
 
-Every candidate decision should store: mint, observed slot/time, source, curve address/state, metadata completeness, risk score and evidence, momentum score and feature window values, quote input/output, quote age, protocol/creator/network fee breakdown, price impact, slippage assumption, decision, rejection reasons, strategy version and correlation ID.
+Every candidate decision should store: mint, observed slot/time, source, curve address/state, metadata completeness, risk score and evidence, momentum feature windows, quote input/output, quote age, protocol/creator/network fee breakdown, price impact, slippage assumption, decision, rejection reasons, strategy version and correlation ID.
 
-Every simulated fill should store raw SOL/token amounts, decimals, quote timestamp, simulated latency, refreshed quote, cost components, exit reason and realized net PnL. Do not record a fill if the curve/quote cannot be verified.
+Every simulated fill should store raw SOL/token amounts, decimals, quote timestamp, simulated latency, refreshed quote, cost components, exit reason and realized net PnL. Do not record a fill if the curve or migrated-pool quote cannot be verified.
 
-## Alert thresholds (initial, tune after observing baseline)
+## Alert thresholds
 
 - Provider disconnected for > 15 seconds.
 - Stream lag > 5 slots.
 - No successful quote for 30 seconds while discoveries continue.
-- Any stale quote used for a fill (should be zero).
-- Any attempt to route to PumpSwap (should be zero and trigger kill switch).
-- Any paper position older than configured maximum holding time.
-- Any negative balance, duplicate mint position, or slot released with nonzero token balance (invariant violation).
+- Any stale quote used for a fill (must be zero).
+- Any unverified migrated market used for a mark or exit (must be zero).
+- Any duplicate active position for a mint or duplicate worker leader.
+- Any slot released before zero token balance confirmation.
 - Persistence write failure or event-loop delay > 1 second.
+- An open position remains exit-blocked after migration; alert and keep retrying rather than fabricating a close.
 
 ## Safe operating sequence
 
 1. Start with no trading decisions enabled; validate discovery and event decoding.
-2. Verify bonding curve account state against official SDK examples and independently sampled RPC reads.
-3. Run quote-only mode; verify buy and sell quote arithmetic and full fee accounting.
-4. Replay historical/recorded events and compare deterministic results.
-5. Enable paper execution only after readiness is true and all hard gates pass.
-6. Review failure categories and rejected candidates before changing thresholds.
+2. Verify bonding-curve account state against official SDK examples and independently sampled RPC reads.
+3. Verify graduation detection and migrated-pool discovery against on-chain account state.
+4. Run quote-only mode on both bonding curve and migrated pool; verify fee accounting.
+5. Replay historical/recorded events and compare deterministic results.
+6. Enable paper execution only after readiness is true and all hard gates pass.
+7. Review failure categories and rejected candidates before changing thresholds.
 
-A three-hour test validates integration and operational behavior, not profitability.
+A multi-hour test validates integration and operational behavior, not profitability.
 
+## Instrumentation contract
 
-## Live tracking API (current foundation)
+The current tracker is process-memory only and resets on restart. It is a telemetry foundation, not a durable historical analytics system. PostgreSQL event persistence and real adapter instrumentation are required before dashboard counters represent live market activity. Never interpret an empty chart/counter as evidence of zero failures or profitable trading.
 
-- `GET /api/tracking`: candidate funnel, rejection reasons, quote outcomes and cost samples, p50/p95 latency by subsystem, provider reconnects/slot lag, graduation states, position telemetry, invariant violations and recent events.
-- The dashboard polls this endpoint every five seconds and includes the tracking output.
-- `src/diagnostics/tracker.ts` exports typed functions for discovery stages, decisions, risk, momentum, quote outcomes, latency, provider state, graduation and position state.
+## Migration-aware operations
 
-### Instrumentation contract for future adapters
-
-Call the matching tracker function at the point the event happens:
-- discovery/enrichment/risk/quote/watchlist: `trackStage`
-- final accept/reject: `trackDecision`
-- risk assessment: `trackRisk`
-- momentum score: `trackMomentum`
-- quote result: `trackQuote`
-- measured subsystem duration: `trackLatency`
-- provider connect/disconnect/reconnect and slot lag: `trackProvider`
-- graduation state: `trackGraduation`
-- position lifecycle: `trackPosition`
-
-The current tracker is process-memory only and resets on restart. It is a telemetry foundation, not yet a durable historical analytics system. PostgreSQL event persistence and real adapter instrumentation are required before these values represent live market activity. Never interpret an empty chart/counter as evidence of zero failures or profitable trading.
+Migration is not a sell signal. Positions transition from curve monitoring to a verified migrated-market monitor. If a valid migrated pool or fresh sell quote is temporarily unavailable, keep the position open in an exit-blocked state, show the last verified mark as stale, alert, and retry with bounded backoff. Do not release the position slot until a valid simulated exit and zero token balance are confirmed.
