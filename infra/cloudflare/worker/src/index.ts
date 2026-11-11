@@ -1,16 +1,25 @@
 import { DurableObject } from "cloudflare:workers";
+import {
+  applyDiscoveryEvent,
+  emptyDiscoveryStore,
+  type DiscoveryStoreState
+} from "../../../../src/ingestion/discovery-store.js";
+import {
+  buildPumpPortalDiscoveryUrl,
+  parsePumpPortalDiscoveryMessage,
+  pumpPortalDiscoverySubscriptions
+} from "../../../../src/ingestion/pumpportal.js";
 
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
-  HELIUS_API_KEY: string;
-  PUMPFUN_PROGRAM_ID: string;
   CONTROL_TOKEN: string;
 }
 
 interface CoordinatorStatus {
   mode: "paper";
+  provider: "pumpportal";
   connected: boolean;
-  subscriptionConfirmed: boolean;
+  subscriptionsSent: boolean;
   enabled: boolean;
   tradingReady: false;
   blocker: string;
@@ -18,46 +27,72 @@ interface CoordinatorStatus {
   lastMessageAt: string | null;
   lastSignature: string | null;
   notificationsSinceStart: number;
+  candidates: number;
+  acceptedCandidates: number;
+  duplicateEvents: number;
+  migrations: number;
+  overflowEvents: number;
+  incompleteEvents: number;
+  lastPersistedAt: string | null;
   lastError: string | null;
 }
 
 const INITIAL_STATUS: CoordinatorStatus = {
   mode: "paper",
+  provider: "pumpportal",
   connected: false,
-  subscriptionConfirmed: false,
+  subscriptionsSent: false,
   enabled: false,
   tradingReady: false,
-  blocker: "Transaction decoding, strategy evaluation, executable quotes and ledger integration are not connected.",
+  blocker: "On-chain verification, selective Helius monitoring, strategy evaluation, executable quotes and paper ledger are not connected.",
   connectedAt: null,
   lastMessageAt: null,
   lastSignature: null,
   notificationsSinceStart: 0,
+  candidates: 0,
+  acceptedCandidates: 0,
+  duplicateEvents: 0,
+  migrations: 0,
+  overflowEvents: 0,
+  incompleteEvents: 0,
+  lastPersistedAt: null,
   lastError: null
 };
+
+const MAX_CANDIDATES = 100;
+const PERSIST_EVERY_EVENTS = 25;
 
 export class PumpFunCoordinator extends DurableObject<Env> {
   private socket: WebSocket | null = null;
   private status: CoordinatorStatus = { ...INITIAL_STATUS };
+  private discovery: DiscoveryStoreState = emptyDiscoveryStore();
   private hydrated = false;
+  private pendingWrites = 0;
   private connectingSinceMs = 0;
 
   private async hydrate(): Promise<void> {
     if (this.hydrated) return;
-    const saved = await this.ctx.storage.get<CoordinatorStatus>("status");
-    if (saved) this.status = { ...INITIAL_STATUS, ...saved };
+    const [savedStatus, savedDiscovery, enabled] = await Promise.all([
+      this.ctx.storage.get<CoordinatorStatus>("status"),
+      this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
+      this.ctx.storage.get<boolean>("enabled")
+    ]);
+    if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
+    if (savedDiscovery) this.discovery = savedDiscovery;
+    this.status.enabled = enabled === true;
+    // Outbound sockets cannot survive a Durable Object restart.
     this.status.connected = false;
+    this.status.subscriptionsSent = false;
+    this.syncCounts();
     this.hydrated = true;
   }
 
   async start(): Promise<CoordinatorStatus> {
     await this.hydrate();
-    if (!this.env.HELIUS_API_KEY || !this.env.PUMPFUN_PROGRAM_ID) {
-      throw new Error("HELIUS_API_KEY and PUMPFUN_PROGRAM_ID must be configured.");
-    }
     await this.ctx.storage.put("enabled", true);
     this.status.enabled = true;
     this.connect();
-    await this.persistStatus();
+    await this.persist();
     return this.getStatus();
   }
 
@@ -65,185 +100,183 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     await this.hydrate();
     await this.ctx.storage.put("enabled", false);
     this.status.enabled = false;
-    this.status.connected = false;
     if (this.socket) {
       const socket = this.socket;
       this.socket = null;
-      socket.close(1000, "Paper worker stopped");
+      socket.close(1000, "Paper discovery stopped");
     }
-    await this.persistStatus();
+    this.status.connected = false;
+    this.status.subscriptionsSent = false;
+    await this.persist();
     return this.getStatus();
   }
 
   async ensureRunning(): Promise<CoordinatorStatus> {
     await this.hydrate();
-    const enabled = await this.ctx.storage.get<boolean>("enabled");
-    this.status.enabled = enabled === true;
-
     if (!this.status.enabled) {
       if (this.socket) {
         const socket = this.socket;
         this.socket = null;
-        socket.close(1000, "Paper worker disabled");
+        socket.close(1000, "Paper discovery disabled");
       }
       this.status.connected = false;
-      await this.persistStatus();
+      this.status.subscriptionsSent = false;
+      await this.persist();
       return this.getStatus();
     }
+
+    // Flush the bounded in-memory batch at least once per cron interval.
+    await this.persist();
 
     if (this.socket?.readyState === WebSocket.OPEN) {
-      const connectedAtMs = this.status.connectedAt
-        ? Date.parse(this.status.connectedAt)
-        : 0;
-      const connectionAgeMs = Date.now() - connectedAtMs;
-
-      // Cloudflare only guarantees that an outbound connection keeps this
-      // Durable Object alive for up to 15 minutes. Rotate it before that limit
-      // so the coordinator retains its event handlers and can keep monitoring.
-      if (connectedAtMs > 0 && connectionAgeMs < 14 * 60 * 1000) {
-        await this.persistStatus();
+      const connectedAtMs = this.status.connectedAt ? Date.parse(this.status.connectedAt) : 0;
+      if (connectedAtMs > 0 && Date.now() - connectedAtMs < 14 * 60 * 1000) {
         return this.getStatus();
       }
-
-      const expiringSocket = this.socket;
+      const oldSocket = this.socket;
       this.socket = null;
       this.status.connected = false;
-      this.status.subscriptionConfirmed = false;
-      expiringSocket.close(4001, "Scheduled connection rotation");
+      this.status.subscriptionsSent = false;
+      oldSocket.close(4001, "Scheduled connection rotation");
     }
 
-    if (
-      this.socket?.readyState === WebSocket.CONNECTING &&
-      Date.now() - this.connectingSinceMs < 30_000
-    ) {
-      await this.persistStatus();
+    if (this.socket?.readyState === WebSocket.CONNECTING &&
+        Date.now() - this.connectingSinceMs < 30_000) {
       return this.getStatus();
     }
-
     if (this.socket?.readyState === WebSocket.CONNECTING) {
-      const staleSocket = this.socket;
+      const oldSocket = this.socket;
       this.socket = null;
-      staleSocket.close(4000, "Connection attempt timed out");
-    }
-
-    if (!this.env.HELIUS_API_KEY || !this.env.PUMPFUN_PROGRAM_ID) {
-      this.status.lastError = "Missing Helius or Pump.fun program configuration.";
-      await this.persistStatus();
-      return this.getStatus();
+      oldSocket.close(4000, "Connection attempt timed out");
     }
 
     this.connect();
-    await this.persistStatus();
+    await this.persist();
     return this.getStatus();
   }
 
   async getStatus(): Promise<CoordinatorStatus> {
     await this.hydrate();
+    this.syncCounts();
     return { ...this.status };
+  }
+
+  async listCandidates(): Promise<DiscoveryStoreState> {
+    await this.hydrate();
+    return structuredClone(this.discovery);
   }
 
   private connect(): void {
     if (this.socket) return;
-
     try {
-      const endpoint = new URL("wss://mainnet.helius-rpc.com/");
-      endpoint.searchParams.set("api-key", this.env.HELIUS_API_KEY);
-      const socket = new WebSocket(endpoint.toString());
+      const socket = new WebSocket(buildPumpPortalDiscoveryUrl());
       this.socket = socket;
       this.connectingSinceMs = Date.now();
 
       socket.addEventListener("open", () => {
-        // A connection may finish opening after /stop has already detached it.
-        // Never subscribe from a stale socket or after the coordinator is disabled.
         if (this.socket !== socket || !this.status.enabled) {
           socket.close(1000, "Coordinator disabled before connection opened");
           return;
         }
         this.status.connected = true;
-        this.status.subscriptionConfirmed = false;
+        this.status.subscriptionsSent = false;
         this.status.connectedAt = new Date().toISOString();
         this.connectingSinceMs = 0;
         this.status.lastError = null;
-        socket.send(JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "logsSubscribe",
-          params: [
-            { mentions: [this.env.PUMPFUN_PROGRAM_ID] },
-            { commitment: "processed" }
-          ]
-        }));
+        for (const subscription of pumpPortalDiscoverySubscriptions()) {
+          socket.send(JSON.stringify(subscription));
+        }
+        this.status.subscriptionsSent = true;
       });
 
-      socket.addEventListener("message", (event: MessageEvent) => {
-        // WebSocket messages can already be queued when /stop closes the socket.
-        // Ignore them once the socket is detached or the coordinator is disabled.
+      socket.addEventListener("message", (message: MessageEvent) => {
         if (this.socket !== socket || !this.status.enabled) return;
-        if (typeof event.data !== "string") return;
-        try {
-          const message = JSON.parse(event.data) as {
-            method?: string;
-            params?: { result?: { value?: { signature?: string } } };
-            id?: number;
-            result?: number;
-            error?: unknown;
-          };
-          if (message.id === 1 && message.error) {
-            this.status.subscriptionConfirmed = false;
-            this.status.lastError = "Helius rejected the logsSubscribe request.";
-            return;
-          }
-          if (message.id === 1 && typeof message.result === "number") {
-            this.status.subscriptionConfirmed = true;
-          }
-          if (message.method === "logsNotification") {
-            this.status.notificationsSinceStart += 1;
-            this.status.lastMessageAt = new Date().toISOString();
-            this.status.lastSignature =
-              message.params?.result?.value?.signature ?? this.status.lastSignature;
-          }
-        } catch {
-          this.status.lastError = "Received a non-JSON Helius WebSocket message.";
+        this.status.notificationsSinceStart += 1;
+        this.status.lastMessageAt = new Date().toISOString();
+        const parsed = parsePumpPortalDiscoveryMessage(
+          typeof message.data === "string" ? message.data : null,
+          this.status.lastMessageAt
+        );
+        if (parsed.status === "IGNORED") return;
+        if (parsed.status === "DATA_INCOMPLETE") {
+          this.discovery.incomplete += 1;
+          this.pendingWrites += 1;
+          this.syncCounts();
+          if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist();
+          return;
         }
+
+        this.status.lastSignature = parsed.event.signature ?? this.status.lastSignature;
+        const result = applyDiscoveryEvent(this.discovery, {
+          kind: parsed.event.kind,
+          mint: parsed.event.mint,
+          signature: parsed.event.signature,
+          creator: parsed.event.creator,
+          bondingCurve: parsed.event.bondingCurve,
+          name: parsed.event.name,
+          symbol: parsed.event.symbol,
+          receivedAt: parsed.event.receivedAt
+        }, { cap: MAX_CANDIDATES, now: this.status.lastMessageAt });
+        this.discovery = result.state;
+        this.pendingWrites += 1;
+        this.syncCounts();
+        if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist();
       });
 
       socket.addEventListener("close", () => {
-        // Ignore events from a socket we deliberately replaced during rotation.
         if (this.socket !== socket) return;
         this.socket = null;
         this.status.connected = false;
-        this.status.subscriptionConfirmed = false;
+        this.status.subscriptionsSent = false;
         this.status.connectedAt = null;
         this.connectingSinceMs = 0;
+        void this.persist();
       });
 
       socket.addEventListener("error", () => {
         if (this.socket !== socket || !this.status.enabled) return;
-        this.status.lastError = "Helius WebSocket transport error.";
+        this.status.lastError = "PumpPortal WebSocket transport error.";
+        void this.persist();
       });
     } catch {
       this.socket = null;
       this.status.connected = false;
-      this.status.subscriptionConfirmed = false;
+      this.status.subscriptionsSent = false;
       this.connectingSinceMs = 0;
-      this.status.lastError = "Unable to create the Helius WebSocket connection.";
+      this.status.lastError = "Unable to create the PumpPortal WebSocket connection.";
     }
   }
 
-  private async persistStatus(): Promise<void> {
-    await this.ctx.storage.put("status", this.status);
+  private syncCounts(): void {
+    this.status.candidates = this.discovery.candidates.length;
+    this.status.acceptedCandidates = this.discovery.accepted;
+    this.status.duplicateEvents = this.discovery.duplicates;
+    this.status.migrations = this.discovery.migrations;
+    this.status.overflowEvents = this.discovery.overflow;
+    this.status.incompleteEvents = this.discovery.incomplete;
+    this.status.lastPersistedAt = this.discovery.lastPersistedAt;
+  }
+
+  private async persist(): Promise<void> {
+    this.discovery.lastPersistedAt = new Date().toISOString();
+    this.syncCounts();
+    await this.ctx.storage.put({
+      status: this.status,
+      discovery_state: this.discovery
+    });
+    this.pendingWrites = 0;
   }
 }
 
 function authorized(request: Request, env: Env): boolean {
-  return Boolean(env.CONTROL_TOKEN) && request.headers.get("authorization") === "Bearer " + env.CONTROL_TOKEN;
+  return Boolean(env.CONTROL_TOKEN) &&
+    request.headers.get("authorization") === "Bearer " + env.CONTROL_TOKEN;
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const id = env.COORDINATOR.idFromName("primary");
-    const coordinator = env.COORDINATOR.get(id);
+    const coordinator = env.COORDINATOR.get(env.COORDINATOR.idFromName("primary"));
 
     if (url.pathname === "/health" && request.method === "GET") {
       const status = await coordinator.getStatus();
@@ -251,7 +284,9 @@ export default {
         service: "pumpfun-paper-worker",
         mode: "paper",
         ready: false,
+        provider: "pumpportal",
         connected: status.connected,
+        candidates: status.candidates,
         blocker: status.blocker
       });
     }
@@ -259,7 +294,6 @@ export default {
     if (!authorized(request, env)) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-
     if (url.pathname === "/start" && request.method === "POST") {
       return Response.json(await coordinator.start());
     }
@@ -269,6 +303,9 @@ export default {
     if (url.pathname === "/status" && request.method === "GET") {
       return Response.json(await coordinator.getStatus());
     }
+    if (url.pathname === "/candidates" && request.method === "GET") {
+      return Response.json(await coordinator.listCandidates());
+    }
     return Response.json({ error: "Not found" }, { status: 404 });
   },
 
@@ -277,8 +314,7 @@ export default {
     env: Env,
     context: ExecutionContext
   ): Promise<void> {
-    const id = env.COORDINATOR.idFromName("primary");
-    const coordinator = env.COORDINATOR.get(id);
+    const coordinator = env.COORDINATOR.get(env.COORDINATOR.idFromName("primary"));
     context.waitUntil(coordinator.ensureRunning());
   }
 };
