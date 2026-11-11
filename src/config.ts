@@ -10,8 +10,10 @@ const EnvSchema = z.object({
   PUMPFUN_MODE: z.literal("paper").default("paper"),
   PAPER_STARTING_BALANCE_USD: z.coerce.number().positive().default(8),
   PAPER_POSITION_SIZE_USD: z.coerce.number().positive().default(1),
-  PAPER_MAX_OPEN_POSITIONS: z.coerce.number().int().min(1).max(3).default(3),
-  PAPER_MAX_HOLD_SECONDS: z.coerce.number().int().positive().max(60).default(60),
+  PAPER_MAX_OPEN_POSITIONS: z.coerce.number().int().min(1).max(3).default(1),
+  EXIT_BUY_VOLUME_DECLINE_FRACTION: z.coerce.number().min(0).max(1).default(0.5),
+  EXIT_SELL_TO_BUY_VOLUME_RATIO: z.coerce.number().positive().default(1.5),
+  EXIT_SELL_PRESSURE_WINDOWS: z.coerce.number().int().min(1).max(10).default(3),
   DIAGNOSTICS_RETENTION_HOURS: z.coerce.number().int().positive().default(24)
 });
 
