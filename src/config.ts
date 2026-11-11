@@ -13,9 +13,12 @@ const EnvSchema = z.object({
   PAPER_FIRST_CAPACITY_THRESHOLD_USD: z.coerce.number().positive().default(5),
   PAPER_MAX_POSITION_SIZE_USD: z.coerce.number().positive().default(100),
   PAPER_HARD_MAX_OPEN_POSITIONS: z.coerce.number().int().min(1).max(50).default(50),
-  EXIT_BUY_VOLUME_DECLINE_FRACTION: z.coerce.number().min(0).max(1).default(0.5),
-  EXIT_SELL_TO_BUY_VOLUME_RATIO: z.coerce.number().positive().default(1.5),
-  EXIT_SELL_PRESSURE_WINDOWS: z.coerce.number().int().min(1).max(3).default(3),
+  EXIT_BUY_SELL_RATIO_MAX: z.coerce.number().positive().default(1.2),
+  EXIT_BUY_VOLUME_DECLINE_PCT_MIN: z.coerce.number().min(0).max(100).default(40),
+  EXIT_BUYER_RATE_DECLINE_PCT_MIN: z.coerce.number().min(0).max(100).default(40),
+  EXIT_LIQUIDITY_DECLINE_PCT_MIN: z.coerce.number().min(0).max(100).default(20),
+  EXIT_CONFIRMATION_WINDOWS: z.coerce.number().int().min(1).max(3).default(2),
+  EXIT_MIN_BEARISH_SIGNALS_PER_WINDOW: z.coerce.number().int().min(1).max(5).default(2),
   DIAGNOSTICS_RETENTION_HOURS: z.coerce.number().int().positive().default(24)
 });
 
