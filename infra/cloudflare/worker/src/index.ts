@@ -10,6 +10,7 @@ interface Env {
 interface CoordinatorStatus {
   mode: "paper";
   connected: boolean;
+  subscriptionConfirmed: boolean;
   enabled: boolean;
   tradingReady: false;
   blocker: string;
@@ -23,6 +24,7 @@ interface CoordinatorStatus {
 const INITIAL_STATUS: CoordinatorStatus = {
   mode: "paper",
   connected: false,
+  subscriptionConfirmed: false,
   enabled: false,
   tradingReady: false,
   blocker: "Transaction decoding, strategy evaluation, executable quotes and ledger integration are not connected.",
@@ -37,6 +39,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private socket: WebSocket | null = null;
   private status: CoordinatorStatus = { ...INITIAL_STATUS };
   private hydrated = false;
+  private connectingSinceMs = 0;
 
   private async hydrate(): Promise<void> {
     if (this.hydrated) return;
@@ -88,13 +91,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       return this.getStatus();
     }
 
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      await this.persistStatus();
+      return this.getStatus();
+    }
+
     if (
-      this.socket &&
-      (this.socket.readyState === WebSocket.OPEN ||
-        this.socket.readyState === WebSocket.CONNECTING)
+      this.socket?.readyState === WebSocket.CONNECTING &&
+      Date.now() - this.connectingSinceMs < 30_000
     ) {
       await this.persistStatus();
       return this.getStatus();
+    }
+
+    if (this.socket?.readyState === WebSocket.CONNECTING) {
+      const staleSocket = this.socket;
+      this.socket = null;
+      staleSocket.close(4000, "Connection attempt timed out");
     }
 
     if (!this.env.HELIUS_API_KEY || !this.env.PUMPFUN_PROGRAM_ID) {
@@ -121,10 +134,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       endpoint.searchParams.set("api-key", this.env.HELIUS_API_KEY);
       const socket = new WebSocket(endpoint.toString());
       this.socket = socket;
+      this.connectingSinceMs = Date.now();
 
       socket.addEventListener("open", () => {
         this.status.connected = true;
+        this.status.subscriptionConfirmed = false;
         this.status.connectedAt = new Date().toISOString();
+        this.connectingSinceMs = 0;
         this.status.lastError = null;
         socket.send(JSON.stringify({
           jsonrpc: "2.0",
@@ -147,8 +163,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             error?: unknown;
           };
           if (message.id === 1 && message.error) {
+            this.status.subscriptionConfirmed = false;
             this.status.lastError = "Helius rejected the logsSubscribe request.";
             return;
+          }
+          if (message.id === 1 && typeof message.result === "number") {
+            this.status.subscriptionConfirmed = true;
           }
           if (message.method === "logsNotification") {
             this.status.notificationsSinceStart += 1;
@@ -164,6 +184,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       socket.addEventListener("close", () => {
         if (this.socket === socket) this.socket = null;
         this.status.connected = false;
+        this.status.subscriptionConfirmed = false;
+        this.connectingSinceMs = 0;
       });
 
       socket.addEventListener("error", () => {
@@ -172,7 +194,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     } catch {
       this.socket = null;
       this.status.connected = false;
-      this.status.lastError = "Unable to create the Helius WebSocket connection.";
+      this.status.subscriptionConfirmed = false;
+      this.connectingSinceMs = 0;
+      this.status.lastError = "Unable to create the Helius WebSocket connection."
     }
   }
 
@@ -182,7 +206,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 }
 
 function authorized(request: Request, env: Env): boolean {
-  return request.headers.get("authorization") === "Bearer " + env.CONTROL_TOKEN;
+  return Boolean(env.CONTROL_TOKEN) && request.headers.get("authorization") === "Bearer " + env.CONTROL_TOKEN;
 }
 
 export default {
