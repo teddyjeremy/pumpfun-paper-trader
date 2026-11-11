@@ -38,7 +38,10 @@ export interface CandidateRecord {
 export interface LatencySample { name: string; ms: number; at: string }
 export interface PositionTelemetry {
   mint: string;
-  state: "buy_pending" | "open" | "sell_pending" | "closed" | "exit_unexecutable";
+  state: "buy_pending" | "open" | "migration_pending" | "open_migrated" | "sell_pending" | "exit_blocked" | "closed" | "exit_unexecutable";
+  activeVenue?: "bonding_curve" | "pumpswap" | "unknown";
+  activeStopPriceUsd?: number | null;
+  lastExitSignal?: string | null;
   openedAt: string | null;
   closedAt: string | null;
   entryCostUsd: number | null;
@@ -191,7 +194,7 @@ export function trackingSnapshot() {
   const pnl = closed.reduce((sum, p) => sum + (p.realizedNetPnlUsd ?? 0), 0);
   const reasons = [...rejectionCounts.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
   const funnel = Object.fromEntries(["discovered", "enriched", "risk_passed", "quoted", "watchlisted", "entered", "exited"].map(stage => [stage, counters.get(`funnel.${stage}`) ?? 0]));
-  const open = pos.filter(p => ["buy_pending", "open", "sell_pending", "exit_unexecutable"].includes(p.state));
+  const open = pos.filter(p => ["buy_pending", "open", "migration_pending", "open_migrated", "sell_pending", "exit_blocked", "exit_unexecutable"].includes(p.state));
   return {
     generatedAt: now(),
     persistence: "in_memory_volatile",
