@@ -81,76 +81,144 @@ export interface ExitObservation {
   buyVolumeDeclinePct: number | null;
   buyerRateDeclinePct: number | null;
   netSellFlow: boolean | null;
+  sellVolumeIncreasePct: number | null;
+  sellerRateIncreasePct: number | null;
   liquidityDeclinePct: number | null;
+  priceResponseDeclinePct: number | null;
+  largeHolderSellPct: number | null;
+  criticalDistributionDetected: boolean;
 }
 
 export interface DynamicExitThresholds {
   buySellRatioMax: number;
   buyVolumeDeclinePctMin: number;
   buyerRateDeclinePctMin: number;
+  sellVolumeIncreasePctMin: number;
+  sellerRateIncreasePctMin: number;
   liquidityDeclinePctMin: number;
+  priceResponseDeclinePctMin: number;
+  largeHolderSellPctMin: number;
   confirmationWindows: number;
-  minimumBearishSignalsPerWindow: number;
+  minimumBearishFamiliesPerWindow: number;
 }
 
 export interface DynamicExitResult {
   triggered: boolean;
+  immediate: boolean;
   confirmedWindows: number;
-  signalCounts: number[];
+  familyCounts: number[];
+  signalFamilies: string[][];
   reasons: string[];
 }
 
+/**
+ * Dynamic exhaustion uses independent evidence families, not raw signal counts.
+ * Several correlated flow measurements in one family cannot manufacture a
+ * multi-signal exit. Protective hard/trailing/profit stops remain independent
+ * immediate exits and are evaluated by calculateProtectiveExit().
+ */
 export function evaluateDynamicExhaustionExit(
   observations: ExitObservation[],
   thresholds: DynamicExitThresholds
 ): DynamicExitResult {
   const count = thresholds.confirmationWindows;
-  if (count < 1 || observations.length < count) {
-    return { triggered: false, confirmedWindows: 0, signalCounts: [], reasons: [] };
+  const empty = {
+    triggered: false,
+    immediate: false,
+    confirmedWindows: 0,
+    familyCounts: [] as number[],
+    signalFamilies: [] as string[][],
+    reasons: [] as string[]
+  };
+
+  // A verified creator/linked/high-confidence-cluster distribution event is
+  // an emergency signal and does not wait for rolling-window confirmation.
+  if (observations.some(observation => observation.criticalDistributionDetected)) {
+    return {
+      ...empty,
+      triggered: true,
+      immediate: true,
+      reasons: ["critical_wallet_distribution"]
+    };
   }
 
+  if (count < 1 || observations.length < count) return empty;
   const recent = observations.slice(-count);
-  if (recent.some(observation => !observation.complete)) {
-    return { triggered: false, confirmedWindows: 0, signalCounts: [], reasons: [] };
-  }
+  if (recent.some(observation => !observation.complete)) return empty;
 
-  const signalCounts: number[] = [];
+  const signalFamilies: string[][] = [];
   const reasons = new Set<string>();
 
   for (const observation of recent) {
-    let signals = 0;
-    if (observation.buySellRatio !== null && observation.buySellRatio <= thresholds.buySellRatioMax) {
-      signals += 1;
-      reasons.add("buy_sell_pressure_weakened");
+    const families = new Set<string>();
+
+    // Family 1: order-flow balance. These measurements are correlated and
+    // deliberately count as one family even if several deteriorate together.
+    if (
+      (observation.buySellRatio !== null && observation.buySellRatio <= thresholds.buySellRatioMax) ||
+      observation.netSellFlow === true ||
+      (observation.sellVolumeIncreasePct !== null &&
+        observation.sellVolumeIncreasePct >= thresholds.sellVolumeIncreasePctMin)
+    ) {
+      families.add("flow_pressure");
+      if (observation.buySellRatio !== null && observation.buySellRatio <= thresholds.buySellRatioMax) reasons.add("buy_sell_pressure_weakened");
+      if (observation.netSellFlow === true) reasons.add("net_sell_flow");
+      if (observation.sellVolumeIncreasePct !== null && observation.sellVolumeIncreasePct >= thresholds.sellVolumeIncreasePctMin) reasons.add("sell_volume_increased");
     }
-    if (observation.buyVolumeDeclinePct !== null && observation.buyVolumeDeclinePct >= thresholds.buyVolumeDeclinePctMin) {
-      signals += 1;
-      reasons.add("buy_volume_declined");
+
+    // Family 2: participation. Falling buyer activity and rising seller
+    // participation are one family, not multiple votes for the same event.
+    if (
+      (observation.buyVolumeDeclinePct !== null &&
+        observation.buyVolumeDeclinePct >= thresholds.buyVolumeDeclinePctMin) ||
+      (observation.buyerRateDeclinePct !== null &&
+        observation.buyerRateDeclinePct >= thresholds.buyerRateDeclinePctMin) ||
+      (observation.sellerRateIncreasePct !== null &&
+        observation.sellerRateIncreasePct >= thresholds.sellerRateIncreasePctMin)
+    ) {
+      families.add("participation_decay");
+      if (observation.buyVolumeDeclinePct !== null && observation.buyVolumeDeclinePct >= thresholds.buyVolumeDeclinePctMin) reasons.add("buy_volume_declined");
+      if (observation.buyerRateDeclinePct !== null && observation.buyerRateDeclinePct >= thresholds.buyerRateDeclinePctMin) reasons.add("buyer_rate_declined");
+      if (observation.sellerRateIncreasePct !== null && observation.sellerRateIncreasePct >= thresholds.sellerRateIncreasePctMin) reasons.add("seller_rate_increased");
     }
-    if (observation.buyerRateDeclinePct !== null && observation.buyerRateDeclinePct >= thresholds.buyerRateDeclinePctMin) {
-      signals += 1;
-      reasons.add("buyer_rate_declined");
-    }
-    if (observation.netSellFlow === true) {
-      signals += 1;
-      reasons.add("net_sell_flow");
-    }
-    if (observation.liquidityDeclinePct !== null && observation.liquidityDeclinePct >= thresholds.liquidityDeclinePctMin) {
-      signals += 1;
+
+    // Family 3: liquidity/reserve deterioration.
+    if (observation.liquidityDeclinePct !== null &&
+      observation.liquidityDeclinePct >= thresholds.liquidityDeclinePctMin) {
+      families.add("liquidity_drain");
       reasons.add("liquidity_declined");
     }
-    signalCounts.push(signals);
+
+    // Family 4: price no longer responds efficiently to incoming buy flow.
+    if (observation.priceResponseDeclinePct !== null &&
+      observation.priceResponseDeclinePct >= thresholds.priceResponseDeclinePctMin) {
+      families.add("price_response_decay");
+      reasons.add("price_response_weakened");
+    }
+
+    // Family 5: large-holder distribution. Critical creator/linked-wallet
+    // events are handled above; this family captures material holder selling.
+    if (observation.largeHolderSellPct !== null &&
+      observation.largeHolderSellPct >= thresholds.largeHolderSellPctMin) {
+      families.add("large_holder_distribution");
+      reasons.add("large_holder_distribution");
+    }
+
+    signalFamilies.push([...families].sort());
   }
 
-  const triggered = signalCounts.every(
-    signalCount => signalCount >= thresholds.minimumBearishSignalsPerWindow
+  const familyCounts = signalFamilies.map(families => families.length);
+  const triggered = familyCounts.every(
+    familyCount => familyCount >= thresholds.minimumBearishFamiliesPerWindow
   );
 
   return {
     triggered,
+    immediate: false,
     confirmedWindows: triggered ? count : 0,
-    signalCounts,
-    reasons: triggered ? [...reasons] : []
+    familyCounts,
+    signalFamilies,
+    reasons: triggered ? [...reasons].sort() : []
   };
 }
 

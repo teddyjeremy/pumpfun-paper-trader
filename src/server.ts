@@ -87,8 +87,8 @@ main{max-width:1440px;margin:auto;padding:26px clamp(16px,4vw,54px) 60px}.intro{
 <main>
 <div class="intro"><div><div class="eyebrow">Operations / overview</div><h2>Trading control room</h2><div class="muted small">Observe discovery, screening, execution quality and system health.</div></div><div class="pill">PAPER MODE · NO WALLET SIGNING · NO REAL ORDERS</div></div>
 <div class="grid">
-<section class="panel"><div class="metric-label">Starting paper balance</div><div class="metric">$8.00</div><div class="metric-note">Fixed initial test capital</div></section>
-<section class="panel"><div class="metric-label">Position principal</div><div class="metric">$1.00</div><div class="metric-note">Maximum 3 simultaneous positions</div></section>
+<section class="panel"><div class="metric-label">Starting paper balance</div><div class="metric" id="startingBalance">—</div><div class="metric-note">Configured initial paper equity</div></section>
+<section class="panel"><div class="metric-label">Position principal</div><div class="metric" id="positionPrincipal">—</div><div class="metric-note" id="positionCapacity">Loading portfolio policy…</div></section>
 <section class="panel"><div class="metric-label">Realized net PnL</div><div class="metric" id="pnl">—</div><div class="metric-note" id="pnlNote">Waiting for persistent trade ledger</div></section>
 <section class="panel"><div class="metric-label">Open positions</div><div class="metric" id="openPositions">—</div><div class="metric-note">Slot releases require zero-balance confirmation</div></section>
 </div>
@@ -127,6 +127,7 @@ function list(items,empty){return items.length?items.map(x=>'<div class="list-it
 function latency(x){return x&&x.samples?num(x.p50Ms)+' / '+num(x.p95Ms)+' ms':'—'}
 async function refresh(){try{
  const [d,r,t,db]=await Promise.all([fetch('/api/diagnostics',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Diagnostics '+x.status);return x.json()}),fetch('/api/results/summary',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Summary '+x.status);return x.json()}),fetch('/api/tracking',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Tracking '+x.status);return x.json()}),fetch('/api/persistence',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Persistence '+x.status);return x.json()})]);
+ const portfolio=r.portfolio||{};const usd2=v=>v===null||v===undefined?'—':'$'+Number(v).toFixed(2);$('#startingBalance').textContent=usd2(portfolio.startingBalanceUsd);$('#positionPrincipal').textContent=usd2(portfolio.positionSizeUsd);const slots=Number(portfolio.maxOpenPositions);$('#positionCapacity').textContent=Number.isFinite(slots)?'Maximum '+slots+' simultaneous position'+(slots===1?'':'s'):'Position capacity unavailable';
  const ready=!!d.readiness?.ready;$('#healthDot').className='dot '+(ready?'good':'bad');$('#healthText').textContent=ready?'READY':'DEGRADED';$('#readyTag').className='tag '+(ready?'good':'warn');$('#readyTag').textContent=ready?'READY':'NOT READY';
  $('#diagnosis').textContent=d.diagnosis?.status||'Unknown';$('#diagnosisDetail').textContent=(d.diagnosis?.notes||[]).join(' ')||'No diagnosis details';
  const blockers=d.readiness?.blockers||[];$('#blockers').innerHTML=blockers.length?blockers.map(x=>'<div class="list-item"><span>'+esc(x)+'</span>'+tag('blocked')+'</div>').join(''):'<div class="empty">No readiness blockers reported</div>';
