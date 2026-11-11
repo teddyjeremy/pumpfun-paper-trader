@@ -104,7 +104,7 @@ describe("Pump.fun TradeEvent decoder", () => {
       creatorFee: 5_000n,
       ixName: "buy",
       quoteAmount: 5_000_000n,
-      shareholders: [{ address: "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8", shareBps: 500 }]
+      shareholders: [{ address: "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY", shareBps: 500 }]
     });
   });
 
