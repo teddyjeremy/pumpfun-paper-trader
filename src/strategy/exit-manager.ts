@@ -152,7 +152,7 @@ export function evaluateExit(
   const needsEmergencyExit = !!observation.creatorOrLinkedSellDetected || !!observation.marketInvalid;
 
   if (!quoteUsable) {
-    if (marketState === "migrated_pool" || marketState === "migration_pending") marketState = "exit_blocked";
+    if (marketState === "migrated_pool") marketState = "exit_blocked";
     return {
       action: "exit_blocked",
       reason: "fresh_verified_position_sized_sell_quote_unavailable",
