@@ -4,23 +4,23 @@
 
 The live listener remains disabled until the selective pipeline is deployed and tested. This service is paper-only: no wallet keys, signing, transaction submission, or real fills.
 
-- PumpPortal is used only for its free `subscribeNewToken` and `subscribeMigration` discovery events. The official Data API examples show an API-key placeholder in the URL, but the same page specifically says the key and 0.02 SOL linked-wallet minimum apply to token/account subscriptions; the Fees page says the two discovery methods are uncharged. The adapter therefore uses `wss://pumpportal.fun/api/data` without a key or linked wallet. A deployed Worker connection check is still required before treating the provider as operational.
-- PumpPortal states that new-token and migration events are not charged. Do not subscribe to `subscribeTokenTrade` or `subscribeAccountTrade`; these are metered at 0.01 SOL per 10,000 streamed events. Its docs attach a 0.02 SOL linked-wallet minimum to token/account subscriptions; this pipeline does not use either subscription type. Re-check the provider's current terms before enabling the connection.
-- Helius Free standard Solana WebSockets and JSON-RPC are used for verification and selective monitoring. Do not use Enhanced WebSockets / `transactionSubscribe`.
+- PumpPortal is used only for its free `subscribeNewToken` and `subscribeMigration` discovery events. The Worker uses `wss://pumpportal.fun/api/data` without a key or linked wallet. This no-key handshake still needs to be verified in the deployed Worker before provider operation is considered confirmed.
+- Do not subscribe to `subscribeTokenTrade` or `subscribeAccountTrade`; these are metered at 0.01 SOL per 10,000 streamed events. The pipeline does not use PumpPortal trading endpoints.
+- Helius Free standard Solana WebSockets and JSON-RPC are reserved for verification and selective monitoring. Do not use Enhanced WebSockets / `transactionSubscribe`.
 - Keep Helius RPC below its 10 requests/second ceiling, with a configurable safety margin in production.
 - Do not subscribe to all Pump.fun program logs. Discover launches first, then monitor only admitted candidates and open positions.
 - The Cloudflare Durable Object must not receive a global firehose. Candidate caps and bounded queues are mandatory.
 
-## Event flow
+## Implemented discovery path
 
-1. Consume PumpPortal new-token and migration discovery messages over one data WebSocket connection.
-2. Treat every launch message as an untrusted discovery hint, not authoritative on-chain state.
-3. Verify the creation transaction and mint/creator data through Helius within the RPC budget.
-4. Derive the bonding-curve PDA from the official Pump program interface, then verify its owner and account data on-chain. Never trust an event-supplied curve address without verification.
-5. Admit a bounded set of candidates for monitoring. Open positions have highest priority, qualified candidates next, and historical/backfill work last.
-6. Use standard Helius account/log subscriptions only for admitted bonding curves. Reconcile with transaction/account reads and track provider slot lag.
-7. Persist raw event references, processed signatures, observation windows, and provider health. Deduplicate by signature and instruction/event identity.
-8. Feed only complete, decoded observations into the existing strict strategy. If any required observation is missing, late, malformed, dropped, or outside the freshness window, mark the candidate `DATA_INCOMPLETE` / WATCH and prohibit entry.
+1. The Worker connects to one PumpPortal Data API WebSocket.
+2. It sends only `subscribeNewToken` and `subscribeMigration`.
+3. `src/ingestion/pumpportal.ts` parses `create` and `migrate` discovery messages. Trade messages are ignored.
+4. `src/ingestion/discovery-store.ts` deduplicates by mint, retains a bounded candidate set (initial cap 100), expires entries after 15 minutes, and records duplicate, migration, overflow and incomplete counts.
+5. The Durable Object stores the candidate snapshot and status in one storage batch. It flushes after 25 relevant events and on the minute cron, stop, and socket close. Writes are serialized to avoid an older snapshot overwriting a newer one.
+6. Authenticated `GET /candidates` returns the bounded discovery snapshot. `GET /status` reports candidate and data-gap counters.
+
+Provider receipt time is local receipt time, not a chain timestamp. PumpPortal messages remain untrusted hints: missing creator/signature values are retained as null and must be established through chain verification. A candidate is not an entry signal.
 
 ## Queue and budget behavior
 
@@ -29,30 +29,25 @@ The initial TypeScript ingestion primitives provide:
 - A bounded RPC queue prioritizing open positions, then candidates, then backfill.
 - Explicit return of rejected/evicted work so callers can persist a data-gap event.
 
-These primitives are not a provider adapter and do not make the worker trading-ready. Production integration must persist queue overflow and missed deadlines; in-memory queue state alone is not sufficient across restarts.
+These RPC primitives are not yet wired into the Worker. The new candidate store is bounded and durable, but it is not the complete Helius work queue and does not yet schedule selective account subscriptions.
 
 ## Decoder status
 
-- `src/ingestion/pump-events.ts` now decodes Pump.fun `CreateEvent` and `TradeEvent` log payloads using the official IDL discriminators and field order.
+- `src/ingestion/pump-events.ts` decodes Pump.fun `CreateEvent` and `TradeEvent` log payloads using the official IDL discriminators and field order.
 - Amounts and reserve values remain raw integers (`bigint`); the decoder does not convert units or treat non-SOL quote amounts as SOL.
-- `decodeSuccessfulPumpTransaction` now gates event decoding on a successful Solana transaction (`meta.err === null`) and carries signature and slot. Failed transactions return `FAILED_TRANSACTION`; missing metadata/logs or malformed event bytes return `DATA_INCOMPLETE`. Provider provenance and RPC commitment still need to be attached by the future adapter.
-- The decoder is not yet wired into a provider adapter or observation-window builder.
+- `decodeSuccessfulPumpTransaction` gates event decoding on a successful Solana transaction (`meta.err === null`) and carries signature and slot. Failed transactions return `FAILED_TRANSACTION`; missing metadata/logs or malformed event bytes return `DATA_INCOMPLETE`.
+- The decoder is not yet wired to a Helius transaction-fetch adapter or observation-window builder. Provider provenance and RPC commitment must be attached by that adapter.
 
-## Discovery adapter status
+## Not yet enabled / incomplete
 
-- `src/ingestion/pumpportal.ts` provides a no-key discovery URL, an allowlist containing only `subscribeNewToken` and `subscribeMigration`, and a strict parser for `create` / `migrate` messages.
-- Trade messages are ignored; no token/account trade subscription is emitted by this adapter.
-- Provider receipt time is explicitly local receipt time, not a chain timestamp. Missing mint or malformed optional addresses become `DATA_INCOMPLETE`; missing creator/signature values remain null for later on-chain verification.
-- The parser is a tested pure module. It is not yet connected to the Durable Object, and the deployed no-key handshake has not yet been verified.
-
-## Not yet enabled
-
-- PumpPortal live WebSocket connection validation in the deployed Worker, reconnect/backoff, and durable discovery-event persistence.
-- Transaction-level extraction that calls the decoder only for successful Pump.fun transactions.
+- Deployed no-key PumpPortal handshake and real connection verification.
+- Exponential reconnect/backoff, connection health and provider-gap reconciliation.
+- Helius transaction verification and selective bonding-curve account monitoring.
 - Verified bonding-curve PDA derivation and account decoder.
 - Candidate admission limits selected from measured launch volume and Cloudflare budget.
 - Helius backfill/reconciliation for reconnect gaps.
-- Durable queue, deduplication, observation windows, and provider-lag alerts.
-- Quotes, risk evidence, strict entry evaluator, paper execution, and ledger integration.
+- Observation windows and strict strategy evaluation.
+- Creator/linked-wallet/cluster risk evidence.
+- Executable quotes, fee/impact accounting, paper execution and ledger integration.
 
-No candidate is eligible for a paper entry until every required evidence source is complete and fresh. No reserve-delta estimate or chart price may be substituted for an executable quote.
+No candidate is eligible for a paper entry until every required evidence source is complete and fresh. If capacity overflows, the counter is visible and affected candidates must remain WATCH / DATA_INCOMPLETE; no silent drop may become an entry. No reserve-delta estimate or chart price may be substituted for an executable quote.
