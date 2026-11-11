@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import { config } from "./config.js";
 import { diagnose, increment, snapshot } from "./diagnostics/registry.js";
 import { trackingSnapshot } from "./diagnostics/tracker.js";
-import { getPersistenceStatus } from "./persistence/postgres.js";
+import { getPersistenceStatus, getTradingDashboardSnapshot } from "./persistence/postgres.js";
 
 export const app = Fastify({
   logger: { level: config.LOG_LEVEL, redact: ["*.HELIUS_API_KEY", "*.apiKey", "*.secret", "*.authorization"] }
@@ -33,6 +33,7 @@ app.get("/api/diagnostics", async () => ({
 
 app.get("/api/tracking", async () => trackingSnapshot());
 app.get("/api/persistence", async () => getPersistenceStatus());
+app.get("/api/portfolio", async () => getTradingDashboardSnapshot());
 
 app.get("/api/results/summary", async () => {
   const state = snapshot();
@@ -112,6 +113,17 @@ main{max-width:1440px;margin:auto;padding:26px clamp(16px,4vw,54px) 60px}.intro{
 <div class="section panel"><div class="section-head"><h3>Database persistence</h3><span class="tag warn" id="dbTag">CHECKING</span></div><div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div><div class="metric-label">PostgreSQL</div><div class="metric" id="dbConnected">—</div></div><div><div class="metric-label">Schema</div><div class="metric" id="dbSchema">—</div></div><div><div class="metric-label">Migration</div><div class="metric" id="dbMigration">—</div></div></div><div class="metric-note" id="dbNote">Connection status is checked without exposing credentials.</div></div>
 <div class="section panel"><div class="section-head"><h3>Recent candidates</h3><span class="muted small">Latest 100 tracked records</span></div><div class="table-wrap"><table><thead><tr><th>Mint</th><th>Stage</th><th>Decision</th><th>Risk</th><th>Momentum</th><th>Round-trip cost</th><th>Updated</th></tr></thead><tbody id="candidates"><tr><td colspan="7" class="empty">No candidate records yet</td></tr></tbody></table></div></div>
 <div class="section panel"><div class="section-head"><h3>Positions</h3><span class="muted small">Paper positions only</span></div><div class="table-wrap"><table><thead><tr><th>Mint</th><th>State</th><th>Market phase</th><th>Venue</th><th>Entry cost</th><th>Exit value</th><th>Fees</th><th>Net PnL</th><th>Zero balance</th></tr></thead><tbody id="positions"><tr><td colspan="9" class="empty">No paper positions recorded</td></tr></tbody></table></div></div>
+<div class="section panel"><div class="section-head"><h3>Ledger portfolio · realized and unrealized</h3><span class="tag warn" id="ledgerTag">LEDGER CHECKING</span></div>
+<div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+<div><div class="metric-label">Realized PnL · SOL</div><div class="metric" id="ledgerRealizedSol">—</div></div>
+<div><div class="metric-label">Realized PnL · USD</div><div class="metric" id="ledgerRealizedUsd">—</div></div>
+<div><div class="metric-label">Unrealized PnL · SOL</div><div class="metric" id="ledgerUnrealizedSol">—</div></div>
+<div><div class="metric-label">Unrealized PnL · USD</div><div class="metric" id="ledgerUnrealizedUsd">Unavailable</div></div></div>
+<div class="metric-note" id="ledgerValuationNote">USD unrealized valuation requires a fresh, persisted SOL/USD oracle price. Open-position SOL values require a fresh full-size sell quote.</div></div>
+<div class="section panel"><div class="section-head"><h3>Open paper positions · contract addresses</h3><span class="muted small">Full CA is copyable; values are not chart-price estimates</span></div>
+<div class="table-wrap"><table><thead><tr><th>Token / CA</th><th>Status</th><th>Market</th><th>Token quantity</th><th>Entry · SOL</th><th>Exit quote · SOL</th><th>Unrealized · SOL</th><th>Quote</th><th>Stop</th></tr></thead><tbody id="ledgerPositions"><tr><td colspan="9" class="empty">Waiting for persistent ledger</td></tr></tbody></table></div></div>
+<div class="section panel"><div class="section-head"><h3>Trade history</h3><span class="muted small">Latest 200 persisted paper fills</span></div>
+<div class="table-wrap"><table><thead><tr><th>Time</th><th>Token / CA</th><th>Side</th><th>Token quantity</th><th>Value · SOL</th><th>Fees · SOL</th><th>Impact</th><th>Slippage</th><th>Profile</th><th>Latency</th></tr></thead><tbody id="ledgerTrades"><tr><td colspan="10" class="empty">No persisted paper trades</td></tr></tbody></table></div></div>
 <div class="foot"><span>Auto-refresh every 5 seconds · All values are telemetry, not trading advice.</span><span id="updatedAt">Last updated —</span></div>
 </main>
 <script>
@@ -126,7 +138,7 @@ function bars(obj){const entries=Object.entries(obj||{});const max=Math.max(1,..
 function list(items,empty){return items.length?items.map(x=>'<div class="list-item"><span>'+esc(x[0])+'</span><b>'+esc(x[1])+'</b></div>').join(''):'<div class="empty">'+empty+'</div>'}
 function latency(x){return x&&x.samples?num(x.p50Ms)+' / '+num(x.p95Ms)+' ms':'—'}
 async function refresh(){try{
- const [d,r,t,db]=await Promise.all([fetch('/api/diagnostics',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Diagnostics '+x.status);return x.json()}),fetch('/api/results/summary',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Summary '+x.status);return x.json()}),fetch('/api/tracking',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Tracking '+x.status);return x.json()}),fetch('/api/persistence',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Persistence '+x.status);return x.json()})]);
+ const [d,r,t,db,ledger]=await Promise.all([fetch('/api/diagnostics',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Diagnostics '+x.status);return x.json()}),fetch('/api/results/summary',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Summary '+x.status);return x.json()}),fetch('/api/tracking',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Tracking '+x.status);return x.json()}),fetch('/api/persistence',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Persistence '+x.status);return x.json()}),fetch('/api/portfolio',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Portfolio '+x.status);return x.json()})]);
  const portfolio=r.portfolio||{};const usd2=v=>v===null||v===undefined?'—':'$'+Number(v).toFixed(2);$('#startingBalance').textContent=usd2(portfolio.startingBalanceUsd);$('#positionPrincipal').textContent=usd2(portfolio.positionSizeUsd);const slots=Number(portfolio.maxOpenPositions);$('#positionCapacity').textContent=Number.isFinite(slots)?'Maximum '+slots+' simultaneous position'+(slots===1?'':'s'):'Position capacity unavailable';
  const ready=!!d.readiness?.ready;$('#healthDot').className='dot '+(ready?'good':'bad');$('#healthText').textContent=ready?'READY':'DEGRADED';$('#readyTag').className='tag '+(ready?'good':'warn');$('#readyTag').textContent=ready?'READY':'NOT READY';
  $('#diagnosis').textContent=d.diagnosis?.status||'Unknown';$('#diagnosisDetail').textContent=(d.diagnosis?.notes||[]).join(' ')||'No diagnosis details';
@@ -142,6 +154,12 @@ async function refresh(){try{
  $('#openPositions').textContent=num(t.positions?.open??0);
  $('#dbConnected').textContent=db.connected?'Connected':db.configured?'Offline':'Not configured';$('#dbSchema').textContent=db.schemaReady?'Ready':'Pending';$('#dbMigration').textContent=db.migrationVersion||'—';$('#dbTag').className='tag '+(db.schemaReady?'good':db.connected?'warn':'bad');$('#dbTag').textContent=db.schemaReady?'PERSISTENT':db.connected?'SCHEMA PENDING':'OFFLINE';$('#dbNote').textContent=db.error||'Database connection and migration status verified.';
  const pnl=t.positions?.realizedNetPnlUsd??r.portfolio?.realizedNetPnlUsd;$('#pnl').textContent=money(pnl);$('#pnlNote').textContent=pnl===null?'No realized PnL until persisted trades exist':'Net of recorded fees and execution costs';
+ const ledgerPortfolio=ledger.portfolio||{};$('#ledgerTag').className='tag '+(ledger.available?'good':'warn');$('#ledgerTag').textContent=ledger.available?'PERSISTENT LEDGER':'LEDGER UNAVAILABLE';
+ $('#ledgerRealizedSol').textContent=ledger.available?(ledgerPortfolio.realizedPnlSol+' SOL'):'—';$('#ledgerRealizedUsd').textContent=ledgerPortfolio.realizedPnlUsd===null?'—':usd2(ledgerPortfolio.realizedPnlUsd);
+ $('#ledgerUnrealizedSol').textContent=ledgerPortfolio.unrealizedPnlSol===null?'—':ledgerPortfolio.unrealizedPnlSol+' SOL';$('#ledgerUnrealizedUsd').textContent=ledgerPortfolio.unrealizedPnlUsd===null?'Unavailable':usd2(ledgerPortfolio.unrealizedPnlUsd);
+ $('#ledgerValuationNote').textContent=ledgerPortfolio.usdValuationNote||ledger.reason||'USD valuation unavailable';
+ const lp=ledger.positions||[];$('#ledgerPositions').innerHTML=lp.length?lp.map(p=>'<tr><td><b>'+esc(p.name||p.symbol||'Unknown token')+'</b><br><span class="muted small">'+esc(p.mint)+'</span></td><td>'+tag(p.status)+'</td><td>'+tag(p.marketPhase)+'<br>'+esc(p.venue||'—')+'</td><td>'+esc(p.tokenQuantity)+'</td><td>'+esc(p.principalSol)+'</td><td>'+(p.estimatedExitSol===null?'—':esc(p.estimatedExitSol))+'</td><td>'+(p.estimatedUnrealizedPnlSol===null?'—':esc(p.estimatedUnrealizedPnlSol))+'</td><td>'+tag(p.sellQuoteFresh?'fresh quote':'stale / missing')+'</td><td>'+(p.activeStopNetReturnPct===null?'—':esc(p.activeStopNetReturnPct)+'%')+'</td></tr>').join(''):'<tr><td colspan="9" class="empty">'+esc(ledger.reason||'No open positions in persistent ledger')+'</td></tr>';
+ const lt=ledger.trades||[];$('#ledgerTrades').innerHTML=lt.length?lt.map(x=>'<tr><td>'+esc(new Date(x.executedAt).toLocaleString())+'</td><td><b>'+esc(x.name||x.symbol||'Unknown token')+'</b><br><span class="muted small">'+esc(x.mint)+'</span></td><td>'+tag(x.side)+'</td><td>'+esc(x.tokenAmount)+'</td><td>'+esc(x.solAmount)+'</td><td>'+esc(x.feesSol)+'</td><td>'+pct(x.priceImpactPct)+'</td><td>'+pct(x.slippagePct)+'</td><td>'+esc(x.simulationProfile)+'</td><td>'+num(x.simulatedLatencyMs)+' ms</td></tr>').join(''):'<tr><td colspan="10" class="empty">No persisted paper trades yet</td></tr>';
  $('#updatedAt').textContent='Last updated '+new Date().toLocaleTimeString();
  }catch(e){$('#healthDot').className='dot bad';$('#healthText').textContent='API ERROR';$('#diagnosis').textContent='Dashboard API unavailable';$('#diagnosisDetail').textContent=String(e)}}
 $('#refresh').addEventListener('click',refresh);refresh();setInterval(refresh,5000);
