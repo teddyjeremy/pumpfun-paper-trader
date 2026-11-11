@@ -154,8 +154,8 @@ export async function getTradingDashboardSnapshot() {
         q.quoted_at AS latest_sell_quote_at,
         (q.id IS NOT NULL) AS sell_quote_fresh,
         CASE WHEN q.id IS NOT NULL THEN
-          ((q.output_amount_base_units - q.protocol_fee_lamports - q.creator_fee_lamports
-            - q.network_fee_lamports - q.priority_fee_lamports) / 1000000000::numeric)::text
+          ((q.output_amount_base_units - COALESCE(q.protocol_fee_lamports, 0) - COALESCE(q.creator_fee_lamports, 0)
+            - COALESCE(q.network_fee_lamports, 0) - COALESCE(q.priority_fee_lamports, 0)) / 1000000000::numeric)::text
         ELSE NULL END AS estimated_exit_sol,
         CASE WHEN q.id IS NOT NULL THEN
           ((q.output_amount_base_units - q.protocol_fee_lamports - q.creator_fee_lamports
@@ -175,7 +175,7 @@ export async function getTradingDashboardSnapshot() {
         ORDER BY quoted_at DESC LIMIT 1
       ) q ON true
       LEFT JOIN LATERAL (
-        SELECT COALESCE(SUM(protocol_fee_lamports + creator_fee_lamports + network_fee_lamports + priority_fee_lamports), 0) AS fees
+        SELECT COALESCE(SUM(COALESCE(protocol_fee_lamports, 0) + COALESCE(creator_fee_lamports, 0) + COALESCE(network_fee_lamports, 0) + COALESCE(priority_fee_lamports, 0)), 0) AS fees
         FROM trades WHERE position_id = p.id AND side = 'buy'
       ) buy_fees ON true
       WHERE p.status IN ('buy_pending','open','sell_pending','exit_unexecutable')
@@ -185,8 +185,8 @@ export async function getTradingDashboardSnapshot() {
       SELECT tr.id::text, tr.position_id::text, tr.mint, t.name, t.symbol,
         tr.side, tr.executed_at, tr.token_amount_base_units::text AS token_amount,
         (tr.sol_amount_lamports / 1000000000::numeric)::text AS sol_amount,
-        ((tr.protocol_fee_lamports + tr.creator_fee_lamports
-          + tr.network_fee_lamports + tr.priority_fee_lamports)
+        ((COALESCE(tr.protocol_fee_lamports, 0) + COALESCE(tr.creator_fee_lamports, 0)
+          + COALESCE(tr.network_fee_lamports, 0) + COALESCE(tr.priority_fee_lamports, 0))
           / 1000000000::numeric)::text AS fees_sol,
         tr.price_impact_pct::text, tr.slippage_pct::text,
         tr.simulation_profile, tr.simulated_latency_ms, tr.strategy_version
