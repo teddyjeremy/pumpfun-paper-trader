@@ -29,8 +29,14 @@ export const DEFAULT_EXIT_POLICY: ExitPolicy = {
     { reachedPct: 100, lockPct: 40 },
     { reachedPct: 200, lockPct: 80 }
   ],
-  // Deliberately disabled until thresholds are calibrated on reliable live quote-volume data.
-  dynamic: null
+  // Initial paper-only calibration profile. Requires 2 of 3 independent bearish signals
+  // in 2 consecutive windows. Recalibrate from recorded quote-volume outcomes.
+  dynamic: {
+    buySellRatioBelow: 1.0,
+    buyVolumeDeclinePctAtLeast: 40,
+    buyerRateDeclinePctAtLeast: 40,
+    consecutiveWindows: 2
+  }
 };
 
 export type PositionExitState = {
