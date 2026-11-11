@@ -3,6 +3,9 @@
   "name": "pumpfun-paper-worker",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-11",
+  "vars": {
+    "PUMPFUN_PROGRAM_ID": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+  },
   "triggers": { "crons": ["* * * * *"] },
   "durable_objects": {
     "bindings": [{ "name": "COORDINATOR", "class_name": "PumpFunCoordinator" }]
