@@ -62,9 +62,15 @@ Include current protocol and creator fees, network/priority fees, price impact, 
 
 ## Position sizing and portfolio controls
 
-Initial paper portfolio: $2.70. Initial stake: $1.00. Initial maximum concurrent positions: one.
+Initial paper portfolio: $2.70. Initial stake: $1.00. Initial maximum concurrent positions: one. The current agreed growth checkpoints are:
 
-The agreed growth plan is to increase position capacity as the portfolio grows (two positions around $5 and three around $10) and scale stake conservatively. Implement sizing and concurrency as a deterministic portfolio policy, not hard-coded UI values. Never allow committed principal plus fees to exceed available paper equity. Only a fully closed position with confirmed zero token balance releases a slot. Never enter the same mint twice.
+| Portfolio equity | Maximum concurrent positions | Stake per trade |
+|---:|---:|---:|
+| $2.70 initial | 1 | $1.00 |
+| $5 | 2 | $1.50 |
+| $10 | 3 | $2.00 |
+
+Implement sizing and concurrency as a deterministic portfolio policy, not hard-coded UI values. Apply the portfolio-doubling rule for later growth, increase stake by 50% at each doubling, and cap stake at $100. Never allow committed principal plus fees to exceed available paper equity. Only a fully closed position with confirmed zero token balance releases a slot. Never enter the same mint twice.
 
 ## Exit — adaptive, no holding-time cap
 
