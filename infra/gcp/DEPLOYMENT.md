@@ -1,3 +1,5 @@
+> **DEPRECATED — DO NOT USE FOR THIS DEPLOYMENT.** Google Cloud was dropped because this project must remain zero-cost and must not require a payment card. No GCP resources were provisioned. Use [the Cloudflare Free deployment guide](../cloudflare/DEPLOYMENT.md) instead. The remainder of this file is retained only as historical reference.
+
 # Google Cloud deployment guide
 
 ## Deployment target
