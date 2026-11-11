@@ -124,6 +124,26 @@ describe("dynamic exhaustion exit", () => {
     expect(result.triggered).toBe(false); // one family alone is not enough
   });
 
+  it("can exit on a sustained single-family demand fade when configured for confirmation", () => {
+    const demandFade: ExitObservation = {
+      ...neutral,
+      buyVolumeDeclinePct: 60,
+      buyerRateDeclinePct: 55
+    };
+    const persistentThresholds = {
+      ...thresholds,
+      confirmationWindows: 3,
+      minimumBearishFamiliesPerWindow: 1
+    };
+    const result = evaluateDynamicExhaustionExit(
+      [demandFade, demandFade, demandFade],
+      persistentThresholds
+    );
+    expect(result.triggered).toBe(true);
+    expect(result.confirmedWindows).toBe(3);
+    expect(result.signalFamilies.every(families => families.includes("participation_decay"))).toBe(true);
+  });
+
   it("exits immediately on verified critical creator/linked-wallet distribution", () => {
     const critical: ExitObservation = {
       ...neutral,
