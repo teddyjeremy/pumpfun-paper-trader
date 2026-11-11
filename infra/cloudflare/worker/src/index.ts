@@ -160,6 +160,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             method?: string;
             params?: { result?: { value?: { signature?: string } } };
             id?: number;
+            result?: number;
             error?: unknown;
           };
           if (message.id === 1 && message.error) {
@@ -196,7 +197,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.status.connected = false;
       this.status.subscriptionConfirmed = false;
       this.connectingSinceMs = 0;
-      this.status.lastError = "Unable to create the Helius WebSocket connection."
+      this.status.lastError = "Unable to create the Helius WebSocket connection.";
     }
   }
 
