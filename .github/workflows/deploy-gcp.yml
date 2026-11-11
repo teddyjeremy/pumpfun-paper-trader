@@ -34,7 +34,7 @@ jobs:
           GCP_VM_ZONE: ${{ vars.GCP_VM_ZONE }}
         run: |
           set -euo pipefail
-          gcloud compute ssh "$GCP_VM_INSTANCE" --project "$GCP_PROJECT_ID" --zone "$GCP_VM_ZONE" --command='set -euo pipefail
+          gcloud compute ssh "$GCP_VM_INSTANCE" --project "$GCP_PROJECT_ID" --zone "$GCP_VM_ZONE" --tunnel-through-iap --command='set -euo pipefail
             cd /opt/pumpfun-paper-trader
             git fetch origin main
             git checkout main
