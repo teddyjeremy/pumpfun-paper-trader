@@ -10,7 +10,7 @@ const position = (overrides: Partial<PositionExitState> = {}): PositionExitState
   ...overrides
 });
 
-const observation = (overrides: Parameters<typeof evaluateExit>[1] = {}) => ({
+const observation = (overrides: Partial<Parameters<typeof evaluateExit>[1]> = {}) => ({
   markPriceUsd: 1.05,
   observedMarketState: "bonding_curve" as const,
   sellQuoteFresh: true,
