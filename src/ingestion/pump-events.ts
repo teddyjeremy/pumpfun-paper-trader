@@ -326,7 +326,8 @@ export function decodeSuccessfulPumpTransaction(input: unknown): PumpTransaction
     return { status: "DATA_INCOMPLETE", reason: "Transaction slot is missing or invalid." };
   }
 
-  if (!transaction.meta || !Object.prototype.hasOwnProperty.call(transaction.meta, "err")) {
+  if (!transaction.meta || !Object.prototype.hasOwnProperty.call(transaction.meta, "err") ||
+      transaction.meta.err === undefined) {
     return { status: "DATA_INCOMPLETE", reason: "Transaction execution metadata is missing." };
   }
   if (transaction.meta.err !== null) {
