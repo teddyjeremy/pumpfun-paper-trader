@@ -87,8 +87,8 @@ main{max-width:1440px;margin:auto;padding:26px clamp(16px,4vw,54px) 60px}.intro{
 <main>
 <div class="intro"><div><div class="eyebrow">Operations / overview</div><h2>Trading control room</h2><div class="muted small">Observe discovery, screening, execution quality and system health.</div></div><div class="pill">PAPER MODE · NO WALLET SIGNING · NO REAL ORDERS</div></div>
 <div class="grid">
-<section class="panel"><div class="metric-label">Starting paper balance</div><div class="metric">$8.00</div><div class="metric-note">Fixed initial test capital</div></section>
-<section class="panel"><div class="metric-label">Position principal</div><div class="metric">$1.00</div><div class="metric-note">Maximum 3 simultaneous positions</div></section>
+<section class="panel"><div class="metric-label">Starting paper balance</div><div class="metric" id="startingBalance">$2.70</div><div class="metric-note">Configured paper test capital</div></section>
+<section class="panel"><div class="metric-label">Position principal</div><div class="metric" id="positionPrincipal">$1.00</div><div class="metric-note" id="maxPositions">Maximum 1 simultaneous position</div></section>
 <section class="panel"><div class="metric-label">Realized net PnL</div><div class="metric" id="pnl">—</div><div class="metric-note" id="pnlNote">Waiting for persistent trade ledger</div></section>
 <section class="panel"><div class="metric-label">Open positions</div><div class="metric" id="openPositions">—</div><div class="metric-note">Slot releases require zero-balance confirmation</div></section>
 </div>
@@ -116,7 +116,101 @@ main{max-width:1440px;margin:auto;padding:26px clamp(16px,4vw,54px) 60px}.intro{
 </main>
 <script>
 const $=s=>document.querySelector(s);
-const money=v=>v===null||v===undefined?'—':'$'+Number(v).toFixed(4);
+const money=v=>v===null||v===undefined?'—':'
+const pct=v=>v===null||v===undefined?'—':Number(v).toFixed(2)+'%';
+const num=v=>v===null||v===undefined?'—':Number(v).toLocaleString();
+const short=v=>!v?'—':String(v).length>15?String(v).slice(0,6)+'…'+String(v).slice(-5):String(v);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const tag=(v)=>'<span class="tag '+(v==='reject'||v==='exit_unexecutable'?'bad':v==='open'||v==='paper_entry'?'good':v==='watch'||v==='sell_pending'?'warn':'')+'">'+esc(v||'unknown')+'</span>';
+function bars(obj){const entries=Object.entries(obj||{});const max=Math.max(1,...entries.map(x=>Number(x[1])||0));return entries.map(([k,v])=>'<div class="bar-row"><span>'+esc(k.replaceAll('_',' '))+'</span><div class="track"><div class="fill" style="width:'+Math.max(0,Math.min(100,(Number(v)||0)/max*100))+'%"></div></div><b>'+num(v)+'</b></div>').join('')||'<div class="empty">No funnel data yet</div>'}
+function list(items,empty){return items.length?items.map(x=>'<div class="list-item"><span>'+esc(x[0])+'</span><b>'+esc(x[1])+'</b></div>').join(''):'<div class="empty">'+empty+'</div>'}
+function latency(x){return x&&x.samples?num(x.p50Ms)+' / '+num(x.p95Ms)+' ms':'—'}
+async function refresh(){try{
+ const [d,r,t,db]=await Promise.all([fetch('/api/diagnostics',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Diagnostics '+x.status);return x.json()}),fetch('/api/results/summary',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Summary '+x.status);return x.json()}),fetch('/api/tracking',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Tracking '+x.status);return x.json()}),fetch('/api/persistence',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Persistence '+x.status);return x.json()})]);
+ $('#startingBalance').textContent=moneyShort(r.portfolio?.startingBalanceUsd);$('#positionPrincipal').textContent=moneyShort(r.portfolio?.positionSizeUsd);$('#maxPositions').textContent='Maximum '+num(r.portfolio?.maxOpenPositions)+' simultaneous position'+(r.portfolio?.maxOpenPositions===1?'':'s');\n const ready=!!d.readiness?.ready;$('#healthDot').className='dot '+(ready?'good':'bad');$('#healthText').textContent=ready?'READY':'DEGRADED';$('#readyTag').className='tag '+(ready?'good':'warn');$('#readyTag').textContent=ready?'READY':'NOT READY';
+ $('#diagnosis').textContent=d.diagnosis?.status||'Unknown';$('#diagnosisDetail').textContent=(d.diagnosis?.notes||[]).join(' ')||'No diagnosis details';
+ const blockers=d.readiness?.blockers||[];$('#blockers').innerHTML=blockers.length?blockers.map(x=>'<div class="list-item"><span>'+esc(x)+'</span>'+tag('blocked')+'</div>').join(''):'<div class="empty">No readiness blockers reported</div>';
+ const f=t.funnel||{};$('#funnel').innerHTML=bars(f);$('#funnelTotal').textContent=num(f.discovered||0)+' discovered';
+ const reasons=(t.decisions?.rejectionReasons||[]).map(x=>[x.reason,x.count]);$('#rejections').innerHTML=list(reasons,'No rejections recorded');
+ const q=t.quotes||{};$('#quoteSuccess').textContent=num(q.success||0);$('#quoteFailed').textContent=num((q.missing||0)+(q.stale||0));$('#quoteCost').textContent=num(q.costRejected||0);$('#quoteSell').textContent=num(q.sellabilityFailed||0);$('#roundTrip').textContent=pct(q.averageRoundTripCostPct);
+ const p=t.provider||{};$('#providerState').textContent=p.connected?'Connected':'Not connected';$('#providerLag').textContent=p.latestSlotLag===null?'No provider telemetry':'Latest slot lag: '+num(p.latestSlotLag)+' · reconnects '+num(p.reconnects);
+ const g=t.graduation||{};$('#graduationCount').textContent=num(g.approaching||0)+' / '+num(g.graduated||0)+' / '+num(g.curveUnavailable||0);$('#graduationDetail').textContent='Approaching / graduated / curve unavailable';
+ const l=t.latency||{};$('#latency').innerHTML=list([['Discovery',latency(l.discovery)],['Enrichment',latency(l.enrichment)],['Risk',latency(l.risk)],['Buy quote',latency(l.buyQuote)],['Sell quote',latency(l.sellQuote)],['Simulation',latency(l.simulatedExecution)]],'No latency samples');
+ const candidates=t.candidates||[];$('#candidates').innerHTML=candidates.length?candidates.slice(0,30).map(c=>'<tr><td title="'+esc(c.mint)+'">'+esc(short(c.mint))+'</td><td>'+tag(c.stage)+'</td><td>'+tag(c.decision)+'</td><td>'+num(c.riskScore)+'</td><td>'+num(c.momentumScore)+'</td><td>'+pct(c.roundTripCostPct)+'</td><td>'+esc(new Date(c.lastUpdatedAt).toLocaleTimeString())+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">No candidate records yet — market adapters are not connected.</td></tr>';
+ const positions=t.positions?.records||[];$('#positions').innerHTML=positions.length?positions.slice().reverse().map(p=>'<tr><td>'+esc(short(p.mint))+'</td><td>'+tag(p.state)+'</td><td>'+money(p.entryCostUsd)+'</td><td>'+money(p.exitValueUsd)+'</td><td>'+money(p.feesUsd)+'</td><td>'+money(p.realizedNetPnlUsd)+'</td><td>'+tag(p.tokenBalanceZeroConfirmed?'confirmed':'pending')+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">No paper positions recorded</td></tr>';
+ $('#openPositions').textContent=num(t.positions?.open??0);
+ $('#dbConnected').textContent=db.connected?'Connected':db.configured?'Offline':'Not configured';$('#dbSchema').textContent=db.schemaReady?'Ready':'Pending';$('#dbMigration').textContent=db.migrationVersion||'—';$('#dbTag').className='tag '+(db.schemaReady?'good':db.connected?'warn':'bad');$('#dbTag').textContent=db.schemaReady?'PERSISTENT':db.connected?'SCHEMA PENDING':'OFFLINE';$('#dbNote').textContent=db.error||'Database connection and migration status verified.';
+ const pnl=t.positions?.realizedNetPnlUsd??r.portfolio?.realizedNetPnlUsd;$('#pnl').textContent=money(pnl);$('#pnlNote').textContent=pnl===null?'No realized PnL until persisted trades exist':'Net of recorded fees and execution costs';
+ $('#updatedAt').textContent='Last updated '+new Date().toLocaleTimeString();
+ }catch(e){$('#healthDot').className='dot bad';$('#healthText').textContent='API ERROR';$('#diagnosis').textContent='Dashboard API unavailable';$('#diagnosisDetail').textContent=String(e)}}
+$('#refresh').addEventListener('click',refresh);refresh();setInterval(refresh,5000);
+</script></body></html>`;
+
+app.get("/", async (_request, reply) => reply.type("text/html; charset=utf-8").send(dashboardHtml));
+
+app.addHook("onReady", async () => {
+  increment("service.started");
+  app.log.info({ mode: "paper", ready: false }, "Service started in safe degraded mode; live adapters are not connected");
+});
+
+// Vercel invokes the exported Fastify handler through api/index.ts.
+// Persistent deployments (for example Google Cloud) start the HTTP listener here.
+if (process.env.VERCEL !== "1") {
+  try {
+    await app.listen({ host: config.HOST, port: config.PORT });
+  } catch (error) {
+    app.log.error(error);
+    process.exit(1);
+  }
+}
++Number(v).toFixed(4);\nconst moneyShort=v=>v===null||v===undefined?'—':'
+const pct=v=>v===null||v===undefined?'—':Number(v).toFixed(2)+'%';
+const num=v=>v===null||v===undefined?'—':Number(v).toLocaleString();
+const short=v=>!v?'—':String(v).length>15?String(v).slice(0,6)+'…'+String(v).slice(-5):String(v);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const tag=(v)=>'<span class="tag '+(v==='reject'||v==='exit_unexecutable'?'bad':v==='open'||v==='paper_entry'?'good':v==='watch'||v==='sell_pending'?'warn':'')+'">'+esc(v||'unknown')+'</span>';
+function bars(obj){const entries=Object.entries(obj||{});const max=Math.max(1,...entries.map(x=>Number(x[1])||0));return entries.map(([k,v])=>'<div class="bar-row"><span>'+esc(k.replaceAll('_',' '))+'</span><div class="track"><div class="fill" style="width:'+Math.max(0,Math.min(100,(Number(v)||0)/max*100))+'%"></div></div><b>'+num(v)+'</b></div>').join('')||'<div class="empty">No funnel data yet</div>'}
+function list(items,empty){return items.length?items.map(x=>'<div class="list-item"><span>'+esc(x[0])+'</span><b>'+esc(x[1])+'</b></div>').join(''):'<div class="empty">'+empty+'</div>'}
+function latency(x){return x&&x.samples?num(x.p50Ms)+' / '+num(x.p95Ms)+' ms':'—'}
+async function refresh(){try{
+ const [d,r,t,db]=await Promise.all([fetch('/api/diagnostics',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Diagnostics '+x.status);return x.json()}),fetch('/api/results/summary',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Summary '+x.status);return x.json()}),fetch('/api/tracking',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Tracking '+x.status);return x.json()}),fetch('/api/persistence',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Persistence '+x.status);return x.json()})]);
+ const ready=!!d.readiness?.ready;$('#healthDot').className='dot '+(ready?'good':'bad');$('#healthText').textContent=ready?'READY':'DEGRADED';$('#readyTag').className='tag '+(ready?'good':'warn');$('#readyTag').textContent=ready?'READY':'NOT READY';
+ $('#diagnosis').textContent=d.diagnosis?.status||'Unknown';$('#diagnosisDetail').textContent=(d.diagnosis?.notes||[]).join(' ')||'No diagnosis details';
+ const blockers=d.readiness?.blockers||[];$('#blockers').innerHTML=blockers.length?blockers.map(x=>'<div class="list-item"><span>'+esc(x)+'</span>'+tag('blocked')+'</div>').join(''):'<div class="empty">No readiness blockers reported</div>';
+ const f=t.funnel||{};$('#funnel').innerHTML=bars(f);$('#funnelTotal').textContent=num(f.discovered||0)+' discovered';
+ const reasons=(t.decisions?.rejectionReasons||[]).map(x=>[x.reason,x.count]);$('#rejections').innerHTML=list(reasons,'No rejections recorded');
+ const q=t.quotes||{};$('#quoteSuccess').textContent=num(q.success||0);$('#quoteFailed').textContent=num((q.missing||0)+(q.stale||0));$('#quoteCost').textContent=num(q.costRejected||0);$('#quoteSell').textContent=num(q.sellabilityFailed||0);$('#roundTrip').textContent=pct(q.averageRoundTripCostPct);
+ const p=t.provider||{};$('#providerState').textContent=p.connected?'Connected':'Not connected';$('#providerLag').textContent=p.latestSlotLag===null?'No provider telemetry':'Latest slot lag: '+num(p.latestSlotLag)+' · reconnects '+num(p.reconnects);
+ const g=t.graduation||{};$('#graduationCount').textContent=num(g.approaching||0)+' / '+num(g.graduated||0)+' / '+num(g.curveUnavailable||0);$('#graduationDetail').textContent='Approaching / graduated / curve unavailable';
+ const l=t.latency||{};$('#latency').innerHTML=list([['Discovery',latency(l.discovery)],['Enrichment',latency(l.enrichment)],['Risk',latency(l.risk)],['Buy quote',latency(l.buyQuote)],['Sell quote',latency(l.sellQuote)],['Simulation',latency(l.simulatedExecution)]],'No latency samples');
+ const candidates=t.candidates||[];$('#candidates').innerHTML=candidates.length?candidates.slice(0,30).map(c=>'<tr><td title="'+esc(c.mint)+'">'+esc(short(c.mint))+'</td><td>'+tag(c.stage)+'</td><td>'+tag(c.decision)+'</td><td>'+num(c.riskScore)+'</td><td>'+num(c.momentumScore)+'</td><td>'+pct(c.roundTripCostPct)+'</td><td>'+esc(new Date(c.lastUpdatedAt).toLocaleTimeString())+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">No candidate records yet — market adapters are not connected.</td></tr>';
+ const positions=t.positions?.records||[];$('#positions').innerHTML=positions.length?positions.slice().reverse().map(p=>'<tr><td>'+esc(short(p.mint))+'</td><td>'+tag(p.state)+'</td><td>'+money(p.entryCostUsd)+'</td><td>'+money(p.exitValueUsd)+'</td><td>'+money(p.feesUsd)+'</td><td>'+money(p.realizedNetPnlUsd)+'</td><td>'+tag(p.tokenBalanceZeroConfirmed?'confirmed':'pending')+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">No paper positions recorded</td></tr>';
+ $('#openPositions').textContent=num(t.positions?.open??0);
+ $('#dbConnected').textContent=db.connected?'Connected':db.configured?'Offline':'Not configured';$('#dbSchema').textContent=db.schemaReady?'Ready':'Pending';$('#dbMigration').textContent=db.migrationVersion||'—';$('#dbTag').className='tag '+(db.schemaReady?'good':db.connected?'warn':'bad');$('#dbTag').textContent=db.schemaReady?'PERSISTENT':db.connected?'SCHEMA PENDING':'OFFLINE';$('#dbNote').textContent=db.error||'Database connection and migration status verified.';
+ const pnl=t.positions?.realizedNetPnlUsd??r.portfolio?.realizedNetPnlUsd;$('#pnl').textContent=money(pnl);$('#pnlNote').textContent=pnl===null?'No realized PnL until persisted trades exist':'Net of recorded fees and execution costs';
+ $('#updatedAt').textContent='Last updated '+new Date().toLocaleTimeString();
+ }catch(e){$('#healthDot').className='dot bad';$('#healthText').textContent='API ERROR';$('#diagnosis').textContent='Dashboard API unavailable';$('#diagnosisDetail').textContent=String(e)}}
+$('#refresh').addEventListener('click',refresh);refresh();setInterval(refresh,5000);
+</script></body></html>`;
+
+app.get("/", async (_request, reply) => reply.type("text/html; charset=utf-8").send(dashboardHtml));
+
+app.addHook("onReady", async () => {
+  increment("service.started");
+  app.log.info({ mode: "paper", ready: false }, "Service started in safe degraded mode; live adapters are not connected");
+});
+
+// Vercel invokes the exported Fastify handler through api/index.ts.
+// Persistent deployments (for example Google Cloud) start the HTTP listener here.
+if (process.env.VERCEL !== "1") {
+  try {
+    await app.listen({ host: config.HOST, port: config.PORT });
+  } catch (error) {
+    app.log.error(error);
+    process.exit(1);
+  }
+}
++Number(v).toFixed(2);
 const pct=v=>v===null||v===undefined?'—':Number(v).toFixed(2)+'%';
 const num=v=>v===null||v===undefined?'—':Number(v).toLocaleString();
 const short=v=>!v?'—':String(v).length>15?String(v).slice(0,6)+'…'+String(v).slice(-5):String(v);
