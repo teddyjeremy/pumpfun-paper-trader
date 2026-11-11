@@ -8,7 +8,7 @@ describe("Helius RPC budget", () => {
 
   it("supports sub-one request rates and rejects impossible batch sizes", () => {
     const bucket = new TokenBucket(0.5);
-    expect(bucket.tryTake(2)).toThrow(/exceeds bucket capacity/);
+    expect(() => bucket.tryTake(2)).toThrow(/exceeds bucket capacity/);
   });
 
   it("limits bursts and refills according to elapsed time", () => {
