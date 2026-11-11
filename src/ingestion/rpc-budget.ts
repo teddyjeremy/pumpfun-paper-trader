@@ -12,7 +12,7 @@ export class TokenBucket {
 
   constructor(
     readonly requestsPerSecond: number,
-    readonly capacity = requestsPerSecond,
+    readonly capacity = Math.max(1, requestsPerSecond),
     private readonly now: () => number = Date.now
   ) {
     if (!Number.isFinite(requestsPerSecond) || requestsPerSecond <= 0 || requestsPerSecond > 10) {
@@ -27,6 +27,7 @@ export class TokenBucket {
 
   tryTake(count = 1): boolean {
     if (!Number.isInteger(count) || count < 1) throw new Error("Token count must be a positive integer.");
+    if (count > this.capacity) throw new Error("Requested token count exceeds bucket capacity.");
     this.refill();
     if (this.tokens < count) return false;
     this.tokens -= count;
