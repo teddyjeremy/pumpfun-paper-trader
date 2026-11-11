@@ -1,18 +1,23 @@
 # Roadmap
 
 - [x] Safe paper-only project scope and invariants
-- [x] Strict configuration and service health endpoints
-- [x] Categorized diagnostic event registry and operator dashboard
+- [x] Strict original strategy specification; experimental relaxed entry path excluded
+- [x] Migration-aware holding and no-time-cap exit specification
+- [x] Google Cloud worker deployment blueprint and systemd unit
+- [x] Vercel project linked to the repository
 - [ ] Verify current Pump.fun official SDK/program interfaces and implement launch decoder
 - [ ] Helius stream adapter with reconnect, backfill and slot-lag measurement
-- [ ] Pump.fun bonding-curve state reader and graduation detector
-- [ ] Quote-only adapter with protocol, creator, network, priority, impact and slippage accounting
-- [ ] Risk evidence collection and hard rejection rules
-- [ ] Market windows and explainable momentum ranking
-- [ ] PostgreSQL migrations and append-only event/trade ledger
-- [ ] Deterministic paper executor and position state machine
-- [ ] Replay harness and strategy evaluation
-- [ ] Full results dashboard (positions, net PnL, costs, latency, rejected opportunities)
-- [ ] Google Cloud deployment, Secret Manager, monitoring and alerts
+- [ ] Pump.fun bonding-curve state reader and authoritative graduation detector
+- [ ] Migrated-pool discovery and verified PumpSwap quote adapter
+- [ ] Quote-only adapter with dynamic protocol/creator fee, network, priority, impact and slippage accounting
+- [ ] Creator/linked-wallet/cluster evidence and hard rejection rules
+- [ ] Exact original entry feature windows and explainable decisions
+- [ ] PostgreSQL migrations, append-only event/trade ledger, idempotency and worker leader lease
+- [ ] Deterministic paper executor and migration-aware position state machine
+- [ ] Dynamic exhaustion exit signal backtest/calibration; no maximum holding duration
+- [ ] Portfolio sizing/capacity policy and invariant tests
+- [ ] Authenticated read-only Vercel dashboard backed by durable records
+- [ ] Google Cloud resources, Secret Manager, monitoring, alerts, backups and budget guardrails
+- [ ] Historical replay and paper-forward validation before any strategy changes
 
-No later stage may bypass the paper-only, bonding-curve-only, fail-closed invariants.
+No implementation stage may bypass paper-only, strict-entry, fail-closed, no-fabricated-fill, or migration-aware exit invariants.
