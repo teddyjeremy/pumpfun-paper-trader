@@ -8,7 +8,7 @@
 - GitHub: source of truth, CI, and manual deployment workflow.
 - No AWS or Google Cloud VM: the Cloudflare Free account does not require a payment card.
 
-The Durable Object subscribes to Pump.fun program logs through Helius. A one-minute Cron Trigger checks the coordinator and reconnects after a disconnect or runtime restart.
+The Durable Object subscribes to Pump.fun program logs through Helius. A one-minute Cron Trigger checks the coordinator, reconnects after a disconnect or runtime restart, and rotates the outbound WebSocket before Cloudflare's 15-minute outbound-connection keep-alive limit.
 
 ## Important: transport scaffold only
 
@@ -48,11 +48,10 @@ Cloudflare can restart Durable Objects and does not provide a dedicated-VM uptim
 From the repository root, set the secrets using Wrangler. Never paste these values into GitHub issues, source files, or ChatGPT.
 
     npx wrangler@4 secret put HELIUS_API_KEY --config infra/cloudflare/worker/wrangler.jsonc
-    npx wrangler@4 secret put PUMPFUN_PROGRAM_ID --config infra/cloudflare/worker/wrangler.jsonc
     npx wrangler@4 secret put CONTROL_TOKEN --config infra/cloudflare/worker/wrangler.jsonc
 
 - HELIUS_API_KEY: the Helius RPC API key.
-- PUMPFUN_PROGRAM_ID: the official Pump.fun program address used for the logs subscription.
+- PUMPFUN_PROGRAM_ID is a public configuration value already set in wrangler.jsonc to the official Pump bonding-curve program address. It is not a secret.
 - CONTROL_TOKEN: a long random bearer token used to protect start, stop, and status endpoints.
 
 ## Deploy manually
