@@ -10,6 +10,5 @@
       "source": "/(.*)",
       "destination": "/api/index"
     }
-  ],
-  "outputDirectory": "public"
+  ]
 }
