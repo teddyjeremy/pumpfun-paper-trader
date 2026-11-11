@@ -33,6 +33,45 @@ export interface PumpCreateEvent {
   depth: number;
 }
 
+
+export interface PumpTradeEvent {
+  mint: string;
+  solAmount: bigint;
+  tokenAmount: bigint;
+  isBuy: boolean;
+  user: string;
+  timestamp: bigint;
+  virtualSolReserves: bigint;
+  virtualTokenReserves: bigint;
+  realSolReserves: bigint;
+  realTokenReserves: bigint;
+  feeRecipient: string;
+  feeBasisPoints: bigint;
+  fee: bigint;
+  creator: string;
+  creatorFeeBasisPoints: bigint;
+  creatorFee: bigint;
+  trackVolume: boolean;
+  totalUnclaimedTokens: bigint;
+  totalClaimedTokens: bigint;
+  currentSolVolume: bigint;
+  lastUpdateTimestamp: bigint;
+  ixName: string;
+  mayhemMode: boolean;
+  cashbackFeeBasisPoints: bigint;
+  cashback: bigint;
+  buybackFeeBasisPoints: bigint;
+  buybackFee: bigint;
+  shareholders: Array<{ address: string; shareBps: number }>;
+  quoteMint: string;
+  quoteAmount: bigint;
+  virtualQuoteReserves: bigint;
+  realQuoteReserves: bigint;
+  holderRewardsBps: bigint;
+  holderRewards: bigint;
+  creatorFeeUnclaimed: bigint;
+}
+
 class BorshReader {
   private offset = 0;
   constructor(private readonly bytes: Uint8Array) {}
@@ -40,6 +79,13 @@ class BorshReader {
   readU8(): number {
     this.require(1);
     return this.bytes[this.offset++]!;
+  }
+
+  readU16(): number {
+    this.require(2);
+    const value = new DataView(this.bytes.buffer, this.bytes.byteOffset + this.offset, 2).getUint16(0, true);
+    this.offset += 2;
+    return value;
   }
 
   readBool(): boolean {
@@ -158,6 +204,84 @@ export function decodePumpCreateEvents(logs: readonly string[]): PumpCreateEvent
       depth: reader.readU8()
     });
     reader.finish();
+  }
+  return events;
+}
+
+
+const TRADE_EVENT_DISCRIMINATOR = Uint8Array.from([189, 219, 127, 211, 78, 230, 97, 238]);
+
+/** Decode Pump.fun TradeEvent payloads using the official IDL field order. */
+export function decodePumpTradeEvents(logs: readonly string[]): PumpTradeEvent[] {
+  const events: PumpTradeEvent[] = [];
+  for (const log of logs) {
+    const marker = "Program data: ";
+    const markerIndex = log.indexOf(marker);
+    if (markerIndex < 0) continue;
+    const encoded = log.slice(markerIndex + marker.length).trim();
+    if (!encoded) continue;
+    const bytes = decodeBase64(encoded);
+    if (bytes.length < TRADE_EVENT_DISCRIMINATOR.length) continue;
+
+    let matches = true;
+    for (let index = 0; index < TRADE_EVENT_DISCRIMINATOR.length; index += 1) {
+      if (bytes[index] !== TRADE_EVENT_DISCRIMINATOR[index]) { matches = false; break; }
+    }
+    if (!matches) continue;
+
+    const reader = new BorshReader(bytes.subarray(TRADE_EVENT_DISCRIMINATOR.length));
+    const mint = reader.readPubkey();
+    const solAmount = reader.readU64();
+    const tokenAmount = reader.readU64();
+    const isBuy = reader.readBool();
+    const user = reader.readPubkey();
+    const timestamp = reader.readI64();
+    const virtualSolReserves = reader.readU64();
+    const virtualTokenReserves = reader.readU64();
+    const realSolReserves = reader.readU64();
+    const realTokenReserves = reader.readU64();
+    const feeRecipient = reader.readPubkey();
+    const feeBasisPoints = reader.readU64();
+    const fee = reader.readU64();
+    const creator = reader.readPubkey();
+    const creatorFeeBasisPoints = reader.readU64();
+    const creatorFee = reader.readU64();
+    const trackVolume = reader.readBool();
+    const totalUnclaimedTokens = reader.readU64();
+    const totalClaimedTokens = reader.readU64();
+    const currentSolVolume = reader.readU64();
+    const lastUpdateTimestamp = reader.readI64();
+    const ixName = reader.readString();
+    const mayhemMode = reader.readBool();
+    const cashbackFeeBasisPoints = reader.readU64();
+    const cashback = reader.readU64();
+    const buybackFeeBasisPoints = reader.readU64();
+    const buybackFee = reader.readU64();
+    const shareholderCount = reader.readU32();
+    if (shareholderCount > 10_000) throw new Error("Pump TradeEvent shareholder vector exceeds the decoder limit.");
+    const shareholders = Array.from({ length: shareholderCount }, () => ({
+      address: reader.readPubkey(),
+      shareBps: reader.readU16()
+    }));
+    const quoteMint = reader.readPubkey();
+    const quoteAmount = reader.readU64();
+    const virtualQuoteReserves = reader.readU64();
+    const realQuoteReserves = reader.readU64();
+    const holderRewardsBps = reader.readU64();
+    const holderRewards = reader.readU64();
+    const creatorFeeUnclaimed = reader.readU64();
+    reader.finish();
+
+    events.push({
+      mint, solAmount, tokenAmount, isBuy, user, timestamp,
+      virtualSolReserves, virtualTokenReserves, realSolReserves, realTokenReserves,
+      feeRecipient, feeBasisPoints, fee, creator, creatorFeeBasisPoints, creatorFee,
+      trackVolume, totalUnclaimedTokens, totalClaimedTokens, currentSolVolume,
+      lastUpdateTimestamp, ixName, mayhemMode, cashbackFeeBasisPoints, cashback,
+      buybackFeeBasisPoints, buybackFee, shareholders, quoteMint, quoteAmount,
+      virtualQuoteReserves, realQuoteReserves, holderRewardsBps, holderRewards,
+      creatorFeeUnclaimed
+    });
   }
   return events;
 }
