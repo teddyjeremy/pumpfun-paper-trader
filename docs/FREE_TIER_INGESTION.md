@@ -4,7 +4,7 @@
 
 The live listener remains disabled until the selective pipeline is deployed and tested. This service is paper-only: no wallet keys, signing, transaction submission, or real fills.
 
-- PumpPortal is used only for its free `subscribeNewToken` and `subscribeMigration` discovery events. The documented WebSocket URL includes an API key; store it only as a Worker secret.
+- PumpPortal is used only for its free `subscribeNewToken` and `subscribeMigration` discovery events. The official Data API examples show an API-key placeholder in the URL, but the same page specifically says the key and 0.02 SOL linked-wallet minimum apply to token/account subscriptions; the Fees page says the two discovery methods are uncharged. The adapter therefore uses `wss://pumpportal.fun/api/data` without a key or linked wallet. A deployed Worker connection check is still required before treating the provider as operational.
 - PumpPortal states that new-token and migration events are not charged. Do not subscribe to `subscribeTokenTrade` or `subscribeAccountTrade`; these are metered at 0.01 SOL per 10,000 streamed events. Its docs attach a 0.02 SOL linked-wallet minimum to token/account subscriptions; this pipeline does not use either subscription type. Re-check the provider's current terms before enabling the connection.
 - Helius Free standard Solana WebSockets and JSON-RPC are used for verification and selective monitoring. Do not use Enhanced WebSockets / `transactionSubscribe`.
 - Keep Helius RPC below its 10 requests/second ceiling, with a configurable safety margin in production.
@@ -38,9 +38,16 @@ These primitives are not a provider adapter and do not make the worker trading-r
 - `decodeSuccessfulPumpTransaction` now gates event decoding on a successful Solana transaction (`meta.err === null`) and carries signature and slot. Failed transactions return `FAILED_TRANSACTION`; missing metadata/logs or malformed event bytes return `DATA_INCOMPLETE`. Provider provenance and RPC commitment still need to be attached by the future adapter.
 - The decoder is not yet wired into a provider adapter or observation-window builder.
 
+## Discovery adapter status
+
+- `src/ingestion/pumpportal.ts` provides a no-key discovery URL, an allowlist containing only `subscribeNewToken` and `subscribeMigration`, and a strict parser for `create` / `migrate` messages.
+- Trade messages are ignored; no token/account trade subscription is emitted by this adapter.
+- Provider receipt time is explicitly local receipt time, not a chain timestamp. Missing mint or malformed optional addresses become `DATA_INCOMPLETE`; missing creator/signature values remain null for later on-chain verification.
+- The parser is a tested pure module. It is not yet connected to the Durable Object, and the deployed no-key handshake has not yet been verified.
+
 ## Not yet enabled
 
-- PumpPortal WebSocket secret/configuration, connection validation, and reconnect/backoff.
+- PumpPortal live WebSocket connection validation in the deployed Worker, reconnect/backoff, and durable discovery-event persistence.
 - Transaction-level extraction that calls the decoder only for successful Pump.fun transactions.
 - Verified bonding-curve PDA derivation and account decoder.
 - Candidate admission limits selected from measured launch volume and Cloudflare budget.
