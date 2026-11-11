@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodePumpCreateEvents, decodePumpTradeEvents } from "../src/ingestion/pump-events.js";
+import { decodePumpCreateEvents, decodePumpTradeEvents, decodeSuccessfulPumpTransaction } from "../src/ingestion/pump-events.js";
 
 const discriminator = [27, 114, 169, 77, 222, 235, 99, 118];
 function encodeBase64(bytes: number[]): string {
@@ -110,5 +110,57 @@ describe("Pump.fun TradeEvent decoder", () => {
 
   it("rejects truncated matching trade events", () => {
     expect(() => decodePumpTradeEvents(["Program data: " + encodeBase64(tradeDiscriminator)])).toThrow(/Truncated/);
+  });
+});
+
+
+describe("successful transaction decode gate", () => {
+  const signature = "5".repeat(88);
+
+  it("returns signature, slot and decoded events only for successful transactions", () => {
+    const result = decodeSuccessfulPumpTransaction({
+      slot: 123,
+      transaction: { signatures: [signature] },
+      meta: {
+        err: null,
+        logMessages: [
+          "Program data: " + encodeBase64(createEventPayload()),
+          "Program data: " + encodeBase64(tradeEventPayload())
+        ]
+      }
+    });
+    expect(result.status).toBe("DECODED");
+    if (result.status !== "DECODED") return;
+    expect(result.signature).toBe(signature);
+    expect(result.slot).toBe(123);
+    expect(result.createEvents).toHaveLength(1);
+    expect(result.tradeEvents).toHaveLength(1);
+  });
+
+  it("never decodes logs from a failed transaction", () => {
+    const result = decodeSuccessfulPumpTransaction({
+      slot: 123,
+      transaction: { signatures: [signature] },
+      meta: { err: { InstructionError: [0, "Custom"] }, logMessages: ["Program data: " + encodeBase64(createEventPayload())] }
+    });
+    expect(result).toEqual({ status: "FAILED_TRANSACTION", signature });
+  });
+
+  it("marks missing metadata or logs as DATA_INCOMPLETE", () => {
+    expect(decodeSuccessfulPumpTransaction({
+      slot: 123, transaction: { signatures: [signature] }
+    })).toMatchObject({ status: "DATA_INCOMPLETE" });
+    expect(decodeSuccessfulPumpTransaction({
+      slot: 123, transaction: { signatures: [signature] }, meta: { err: null }
+    })).toMatchObject({ status: "DATA_INCOMPLETE" });
+  });
+
+  it("marks malformed event payloads DATA_INCOMPLETE instead of emitting partial observations", () => {
+    const result = decodeSuccessfulPumpTransaction({
+      slot: 123,
+      transaction: { signatures: [signature] },
+      meta: { err: null, logMessages: ["Program data: !!!"] }
+    });
+    expect(result).toMatchObject({ status: "DATA_INCOMPLETE" });
   });
 });
