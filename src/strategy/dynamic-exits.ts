@@ -1,3 +1,4 @@
+import { dynamicExitConfig } from "../config.js";
 export interface DynamicExitConfig {
   enabled: boolean; confirmationWindows: number; minBearishSignalsPerWindow: number;
   buySellRatioBelow: number; buyVolumeDeclinePct: number; buyerRateDeclinePct: number;
@@ -56,7 +57,7 @@ function exhaustion(windows:ExitWindowObservation[],c:DynamicExitConfig) {
   const signals=recent.map(w=>bearish(w,c));
   return {ok:signals.every(s=>s.length>=c.minBearishSignalsPerWindow),counts:signals.map(s=>s.length),evidence:[...new Set(signals.flat())]};
 }
-export function evaluateExit(input:ExitEvaluationInput,c:DynamicExitConfig=DYNAMIC_EXIT_CALIBRATION_V1):ExitEvaluation {
+export function evaluateExit(input:ExitEvaluationInput,c:DynamicExitConfig=dynamicExitConfig):ExitEvaluation {
   const stop=calculateActiveStopPct(input.highestCompletedNetReturnPct,input.previousActiveStopPct??null);
   let reason:ExitEvaluation["reason"]="no_signal", evidence:string[]=[], counts:number[]=[];
   if(input.emergencyReason){reason="emergency_risk";evidence=[input.emergencyReason];}
