@@ -27,6 +27,13 @@ describe("protective exit policy", () => {
     expect(result.triggered).toBe(true);
   });
 
+  it("triggers the trailing stop after a large run-up and a 40% giveback", () => {
+    const result = calculateProtectiveExit(1, 2.39, 4);
+    expect(result.trailingStopPrice).toBeCloseTo(2.4);
+    expect(result.activeStopPrice).toBeCloseTo(2.4);
+    expect(result.triggered).toBe(true);
+  });
+
   it("does not impose a holding-time expiry", () => {
     // Holding duration is intentionally absent from the protective exit API.
     const result = calculateProtectiveExit(1, 1.02, 1.02);
