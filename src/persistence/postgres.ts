@@ -158,8 +158,8 @@ export async function getTradingDashboardSnapshot() {
             - COALESCE(q.network_fee_lamports, 0) - COALESCE(q.priority_fee_lamports, 0)) / 1000000000::numeric)::text
         ELSE NULL END AS estimated_exit_sol,
         CASE WHEN q.id IS NOT NULL THEN
-          ((q.output_amount_base_units - q.protocol_fee_lamports - q.creator_fee_lamports
-            - q.network_fee_lamports - q.priority_fee_lamports
+          ((q.output_amount_base_units - COALESCE(q.protocol_fee_lamports, 0) - COALESCE(q.creator_fee_lamports, 0)
+            - COALESCE(q.network_fee_lamports, 0) - COALESCE(q.priority_fee_lamports, 0)
             - p.principal_lamports - COALESCE(buy_fees.fees, 0)) / 1000000000::numeric)::text
         ELSE NULL END AS estimated_unrealized_pnl_sol
       FROM positions p
