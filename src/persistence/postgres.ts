@@ -109,7 +109,7 @@ export async function getTradingDashboardSnapshot() {
     };
   }
 
-  const [portfolioResult, positionsResult, tradesResult] = await Promise.all([
+  const [portfolioResult, positionsResult, tradesResult, closedResult] = await Promise.all([
     pool.query(`
       SELECT
         COALESCE(SUM(net_pnl_lamports) FILTER (WHERE status = 'closed'), 0)::text AS realized_pnl_lamports,
@@ -170,6 +170,18 @@ export async function getTradingDashboardSnapshot() {
       JOIN tokens t ON t.mint = tr.mint
       ORDER BY tr.executed_at DESC
       LIMIT 200
+    `),
+    pool.query(`
+      SELECT p.id::text, p.mint, t.name, t.symbol, p.opened_at, p.closed_at,
+        (p.principal_lamports / 1000000000::numeric)::text AS principal_sol,
+        (p.gross_pnl_lamports / 1000000000::numeric)::text AS gross_pnl_sol,
+        (p.total_cost_lamports / 1000000000::numeric)::text AS costs_sol,
+        (p.net_pnl_lamports / 1000000000::numeric)::text AS net_pnl_sol,
+        p.net_pnl_usd::text AS net_pnl_usd, p.exit_reason, p.zero_balance_confirmed
+      FROM positions p JOIN tokens t ON t.mint = p.mint
+      WHERE p.status = 'closed'
+      ORDER BY p.closed_at DESC NULLS LAST
+      LIMIT 100
     `)
   ]);
 
@@ -210,6 +222,20 @@ export async function getTradingDashboardSnapshot() {
       usdValuationNote: "Open positions are listed individually with SOL proceeds and SOL unrealized PnL when a fresh full-size sell quote exists. Portfolio-level unrealized PnL is withheld until it can be aggregated with exact decimal arithmetic. Unrealized USD requires a timestamped SOL/USD price feed."
     },
     positions,
+    closedPositions: closedResult.rows.map((row: Record<string, unknown>) => ({
+      id: String(row.id), mint: String(row.mint),
+      name: row.name == null ? null : String(row.name),
+      symbol: row.symbol == null ? null : String(row.symbol),
+      openedAt: row.opened_at == null ? null : new Date(String(row.opened_at)).toISOString(),
+      closedAt: row.closed_at == null ? null : new Date(String(row.closed_at)).toISOString(),
+      principalSol: String(row.principal_sol ?? "0"),
+      grossPnlSol: row.gross_pnl_sol == null ? null : String(row.gross_pnl_sol),
+      costsSol: row.costs_sol == null ? null : String(row.costs_sol),
+      netPnlSol: row.net_pnl_sol == null ? null : String(row.net_pnl_sol),
+      netPnlUsd: row.net_pnl_usd == null ? null : String(row.net_pnl_usd),
+      exitReason: row.exit_reason == null ? null : String(row.exit_reason),
+      zeroBalanceConfirmed: row.zero_balance_confirmed === true
+    })),
     trades: tradesResult.rows.map((row: Record<string, unknown>) => ({
       id: String(row.id), positionId: String(row.position_id), mint: String(row.mint),
       name: row.name == null ? null : String(row.name), symbol: row.symbol == null ? null : String(row.symbol),
