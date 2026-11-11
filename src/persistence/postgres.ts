@@ -98,17 +98,24 @@ export interface DashboardPosition {
 }
 
 export async function getTradingDashboardSnapshot() {
-  if (!pool) {
-    return {
-      available: false,
-      reason: "DATABASE_URL is not configured",
-      generatedAt: new Date().toISOString(),
-      portfolio: null,
-      positions: [],
-      trades: []
-    };
+  const unavailable = (reason: string) => ({
+    available: false,
+    reason,
+    generatedAt: new Date().toISOString(),
+    portfolio: null,
+    positions: [],
+    closedPositions: [],
+    trades: []
+  });
+  if (!pool) return unavailable("DATABASE_URL is not configured");
+
+  const persistence = await getPersistenceStatus();
+  if (!persistence.connected) return unavailable("PostgreSQL is not connected");
+  if (persistence.migrationVersion !== "0002_migration_aware_dynamic_exits") {
+    return unavailable("Required ledger migrations 0001 and 0002 are not both applied");
   }
 
+  try {
   const [portfolioResult, positionsResult, tradesResult, closedResult] = await Promise.all([
     pool.query(`
       SELECT
@@ -246,5 +253,8 @@ export async function getTradingDashboardSnapshot() {
       simulationProfile: String(row.simulation_profile), simulatedLatencyMs: Number(row.simulated_latency_ms),
       strategyVersion: String(row.strategy_version)
     }))
-  };
+  };  };
+  } catch {
+    return unavailable("Ledger tables are unavailable or the dashboard query failed; inspect database migrations and service logs");
+  }
 }
