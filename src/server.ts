@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import { diagnose, increment, snapshot } from "./diagnostics/registry.js";
 import { trackingSnapshot } from "./diagnostics/tracker.js";
 import { getPersistenceStatus } from "./persistence/postgres.js";
+import { calculatePortfolioPolicy } from "./strategy/portfolio-policy.js";
 
 export const app = Fastify({
   logger: { level: config.LOG_LEVEL, redact: ["*.HELIUS_API_KEY", "*.apiKey", "*.secret", "*.authorization"] }
@@ -37,16 +38,22 @@ app.get("/api/persistence", async () => getPersistenceStatus());
 app.get("/api/results/summary", async () => {
   const state = snapshot();
   const counters = state.counters;
+  const initialPortfolioPolicy = calculatePortfolioPolicy(config.PAPER_STARTING_BALANCE_USD, {
+    initialStakeUsd: config.PAPER_POSITION_SIZE_USD,
+    firstCapacityThresholdUsd: config.PAPER_FIRST_CAPACITY_THRESHOLD_USD,
+    maxStakeUsd: config.PAPER_MAX_POSITION_SIZE_USD,
+    hardMaxOpenPositions: config.PAPER_HARD_MAX_OPEN_POSITIONS
+  });
   return {
     mode: "paper",
     portfolio: {
       startingBalanceUsd: config.PAPER_STARTING_BALANCE_USD,
-      positionSizeUsd: config.PAPER_POSITION_SIZE_USD,
-      maxOpenPositions: config.PAPER_MAX_OPEN_POSITIONS,
-      maxAllocatedUsd: config.PAPER_POSITION_SIZE_USD * config.PAPER_MAX_OPEN_POSITIONS,
+      positionSizeUsd: initialPortfolioPolicy.stakePerPositionUsd,
+      maxOpenPositions: initialPortfolioPolicy.maxConcurrentPositions,
+      maxAllocatedUsd: initialPortfolioPolicy.stakePerPositionUsd * initialPortfolioPolicy.maxConcurrentPositions,
       realizedNetPnlUsd: null,
       openPositions: null,
-      note: "Portfolio ledger is not connected yet; PnL is intentionally null, not guessed."
+      note: "Shows initial-equity sizing until durable live equity is connected; PnL is intentionally null, not guessed."
     },
     activity: {
       discovered: counters["candidate.discovered"] ?? 0,
@@ -85,10 +92,10 @@ main{max-width:1440px;margin:auto;padding:26px clamp(16px,4vw,54px) 60px}.intro{
 <header><div class="brand"><div class="mark">P</div><div><h1>Pump.fun Paper Trader</h1><div class="sub">Bonding-curve research · paper execution only</div></div></div>
 <div class="actions"><span class="pill"><span class="dot" id="healthDot"></span><span id="healthText">Connecting</span></span><button id="refresh">Refresh</button></div></header>
 <main>
-<div class="intro"><div><div class="eyebrow">Operations / overview</div><h2>Trading control room</h2><div class="muted small">Observe discovery, screening, execution quality and system health.</div></div><div class="pill">PAPER MODE · NO WALLET SIGNING · NO REAL ORDERS</div></div>
+<div class="intro"><div><div class="eyebrow">Operations / overview</div><h2>Trading control room</h2><div class="muted small">Observe discovery, screening, execution quality and system health.</div></div><div class="pill">PAPER MODE · NO WALLET SIGNING · NO REAL ORDERS · NO TIME CAP</div></div>
 <div class="grid">
-<section class="panel"><div class="metric-label">Starting paper balance</div><div class="metric">$8.00</div><div class="metric-note">Fixed initial test capital</div></section>
-<section class="panel"><div class="metric-label">Position principal</div><div class="metric">$1.00</div><div class="metric-note">Maximum 3 simultaneous positions</div></section>
+<section class="panel"><div class="metric-label">Starting paper balance</div><div class="metric">$2.70</div><div class="metric-note">Initial paper equity</div></section>
+<section class="panel"><div class="metric-label">Position principal</div><div class="metric">$1.00</div><div class="metric-note">Initial stake · scales with equity</div></section>
 <section class="panel"><div class="metric-label">Realized net PnL</div><div class="metric" id="pnl">—</div><div class="metric-note" id="pnlNote">Waiting for persistent trade ledger</div></section>
 <section class="panel"><div class="metric-label">Open positions</div><div class="metric" id="openPositions">—</div><div class="metric-note">Slot releases require zero-balance confirmation</div></section>
 </div>
@@ -111,7 +118,7 @@ main{max-width:1440px;margin:auto;padding:26px clamp(16px,4vw,54px) 60px}.intro{
 </div>
 <div class="section panel"><div class="section-head"><h3>Database persistence</h3><span class="tag warn" id="dbTag">CHECKING</span></div><div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div><div class="metric-label">PostgreSQL</div><div class="metric" id="dbConnected">—</div></div><div><div class="metric-label">Schema</div><div class="metric" id="dbSchema">—</div></div><div><div class="metric-label">Migration</div><div class="metric" id="dbMigration">—</div></div></div><div class="metric-note" id="dbNote">Connection status is checked without exposing credentials.</div></div>
 <div class="section panel"><div class="section-head"><h3>Recent candidates</h3><span class="muted small">Latest 100 tracked records</span></div><div class="table-wrap"><table><thead><tr><th>Mint</th><th>Stage</th><th>Decision</th><th>Risk</th><th>Momentum</th><th>Round-trip cost</th><th>Updated</th></tr></thead><tbody id="candidates"><tr><td colspan="7" class="empty">No candidate records yet</td></tr></tbody></table></div></div>
-<div class="section panel"><div class="section-head"><h3>Positions</h3><span class="muted small">Paper positions only</span></div><div class="table-wrap"><table><thead><tr><th>Mint</th><th>State</th><th>Entry cost</th><th>Exit value</th><th>Fees</th><th>Net PnL</th><th>Zero balance</th></tr></thead><tbody id="positions"><tr><td colspan="7" class="empty">No paper positions recorded</td></tr></tbody></table></div></div>
+<div class="section panel"><div class="section-head"><h3>Positions</h3><span class="muted small">Graduation changes venue, not the sell decision · no holding-time cap</span></div><div class="table-wrap"><table><thead><tr><th>Mint</th><th>State</th><th>Venue</th><th>Active stop</th><th>Last exit signal</th><th>Entry cost</th><th>Exit value</th><th>Fees</th><th>Net PnL</th><th>Zero balance</th></tr></thead><tbody id="positions"><tr><td colspan="10" class="empty">No paper positions recorded</td></tr></tbody></table></div></div>
 <div class="foot"><span>Auto-refresh every 5 seconds · All values are telemetry, not trading advice.</span><span id="updatedAt">Last updated —</span></div>
 </main>
 <script>
@@ -121,7 +128,7 @@ const pct=v=>v===null||v===undefined?'—':Number(v).toFixed(2)+'%';
 const num=v=>v===null||v===undefined?'—':Number(v).toLocaleString();
 const short=v=>!v?'—':String(v).length>15?String(v).slice(0,6)+'…'+String(v).slice(-5):String(v);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const tag=(v)=>'<span class="tag '+(v==='reject'||v==='exit_unexecutable'?'bad':v==='open'||v==='paper_entry'?'good':v==='watch'||v==='sell_pending'?'warn':'')+'">'+esc(v||'unknown')+'</span>';
+const tag=(v)=>'<span class="tag '+(v==='reject'||v==='exit_unexecutable'||v==='exit_blocked'?'bad':v==='open'||v==='open_migrated'||v==='paper_entry'?'good':v==='watch'||v==='sell_pending'||v==='migration_pending'?'warn':'')+'">'+esc(v||'unknown')+'</span>';
 function bars(obj){const entries=Object.entries(obj||{});const max=Math.max(1,...entries.map(x=>Number(x[1])||0));return entries.map(([k,v])=>'<div class="bar-row"><span>'+esc(k.replaceAll('_',' '))+'</span><div class="track"><div class="fill" style="width:'+Math.max(0,Math.min(100,(Number(v)||0)/max*100))+'%"></div></div><b>'+num(v)+'</b></div>').join('')||'<div class="empty">No funnel data yet</div>'}
 function list(items,empty){return items.length?items.map(x=>'<div class="list-item"><span>'+esc(x[0])+'</span><b>'+esc(x[1])+'</b></div>').join(''):'<div class="empty">'+empty+'</div>'}
 function latency(x){return x&&x.samples?num(x.p50Ms)+' / '+num(x.p95Ms)+' ms':'—'}
@@ -137,7 +144,7 @@ async function refresh(){try{
  const g=t.graduation||{};$('#graduationCount').textContent=num(g.approaching||0)+' / '+num(g.graduated||0)+' / '+num(g.curveUnavailable||0);$('#graduationDetail').textContent='Approaching / graduated / curve unavailable';
  const l=t.latency||{};$('#latency').innerHTML=list([['Discovery',latency(l.discovery)],['Enrichment',latency(l.enrichment)],['Risk',latency(l.risk)],['Buy quote',latency(l.buyQuote)],['Sell quote',latency(l.sellQuote)],['Simulation',latency(l.simulatedExecution)]],'No latency samples');
  const candidates=t.candidates||[];$('#candidates').innerHTML=candidates.length?candidates.slice(0,30).map(c=>'<tr><td title="'+esc(c.mint)+'">'+esc(short(c.mint))+'</td><td>'+tag(c.stage)+'</td><td>'+tag(c.decision)+'</td><td>'+num(c.riskScore)+'</td><td>'+num(c.momentumScore)+'</td><td>'+pct(c.roundTripCostPct)+'</td><td>'+esc(new Date(c.lastUpdatedAt).toLocaleTimeString())+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">No candidate records yet — market adapters are not connected.</td></tr>';
- const positions=t.positions?.records||[];$('#positions').innerHTML=positions.length?positions.slice().reverse().map(p=>'<tr><td>'+esc(short(p.mint))+'</td><td>'+tag(p.state)+'</td><td>'+money(p.entryCostUsd)+'</td><td>'+money(p.exitValueUsd)+'</td><td>'+money(p.feesUsd)+'</td><td>'+money(p.realizedNetPnlUsd)+'</td><td>'+tag(p.tokenBalanceZeroConfirmed?'confirmed':'pending')+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">No paper positions recorded</td></tr>';
+ const positions=t.positions?.records||[];$('#positions').innerHTML=positions.length?positions.slice().reverse().map(p=>'<tr><td>'+esc(short(p.mint))+'</td><td>'+tag(p.state)+'</td><td>'+tag(p.activeVenue||'unknown')+'</td><td>'+money(p.activeStopPriceUsd)+'</td><td>'+tag(p.lastExitSignal||'none')+'</td><td>'+money(p.entryCostUsd)+'</td><td>'+money(p.exitValueUsd)+'</td><td>'+money(p.feesUsd)+'</td><td>'+money(p.realizedNetPnlUsd)+'</td><td>'+tag(p.tokenBalanceZeroConfirmed?'confirmed':'pending')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">No paper positions recorded</td></tr>';
  $('#openPositions').textContent=num(t.positions?.open??0);
  $('#dbConnected').textContent=db.connected?'Connected':db.configured?'Offline':'Not configured';$('#dbSchema').textContent=db.schemaReady?'Ready':'Pending';$('#dbMigration').textContent=db.migrationVersion||'—';$('#dbTag').className='tag '+(db.schemaReady?'good':db.connected?'warn':'bad');$('#dbTag').textContent=db.schemaReady?'PERSISTENT':db.connected?'SCHEMA PENDING':'OFFLINE';$('#dbNote').textContent=db.error||'Database connection and migration status verified.';
  const pnl=t.positions?.realizedNetPnlUsd??r.portfolio?.realizedNetPnlUsd;$('#pnl').textContent=money(pnl);$('#pnlNote').textContent=pnl===null?'No realized PnL until persisted trades exist':'Net of recorded fees and execution costs';
