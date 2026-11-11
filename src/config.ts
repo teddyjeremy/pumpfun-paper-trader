@@ -11,6 +11,15 @@ const EnvSchema = z.object({
   PAPER_STARTING_BALANCE_USD: z.coerce.number().positive().default(2.7),
   PAPER_POSITION_SIZE_USD: z.coerce.number().positive().default(1),
   PAPER_MAX_OPEN_POSITIONS: z.coerce.number().int().min(1).max(3).default(1),
+  DYNAMIC_EXIT_ENABLED: z.enum(["true", "false"]).default("true").transform(value => value === "true"),
+  DYNAMIC_EXIT_CONFIRMATION_WINDOWS: z.coerce.number().int().min(2).max(5).default(2),
+  DYNAMIC_EXIT_MIN_BEARISH_SIGNALS: z.coerce.number().int().min(2).max(7).default(2),
+  DYNAMIC_EXIT_BUY_SELL_RATIO_BELOW: z.coerce.number().positive().default(1),
+  DYNAMIC_EXIT_BUY_VOLUME_DECLINE_PCT: z.coerce.number().positive().max(100).default(40),
+  DYNAMIC_EXIT_BUYER_RATE_DECLINE_PCT: z.coerce.number().positive().max(100).default(40),
+  DYNAMIC_EXIT_SELL_VOLUME_EXPANSION_PCT: z.coerce.number().positive().default(50),
+  DYNAMIC_EXIT_PRICE_RESPONSE_DECLINE_PCT: z.coerce.number().positive().max(100).default(40),
+  DYNAMIC_EXIT_LIQUIDITY_DROP_PCT: z.coerce.number().positive().max(100).default(20),
   DIAGNOSTICS_RETENTION_HOURS: z.coerce.number().int().positive().default(24)
 });
 
@@ -23,3 +32,16 @@ if (parsed.data.PAPER_POSITION_SIZE_USD * parsed.data.PAPER_MAX_OPEN_POSITIONS >
 }
 
 export const config = Object.freeze(parsed.data);
+
+/** Paper calibration profile; callers must persist these values with each exit decision. */
+export const dynamicExitConfig = Object.freeze({
+  enabled: config.DYNAMIC_EXIT_ENABLED,
+  confirmationWindows: config.DYNAMIC_EXIT_CONFIRMATION_WINDOWS,
+  minBearishSignalsPerWindow: config.DYNAMIC_EXIT_MIN_BEARISH_SIGNALS,
+  buySellRatioBelow: config.DYNAMIC_EXIT_BUY_SELL_RATIO_BELOW,
+  buyVolumeDeclinePct: config.DYNAMIC_EXIT_BUY_VOLUME_DECLINE_PCT,
+  buyerRateDeclinePct: config.DYNAMIC_EXIT_BUYER_RATE_DECLINE_PCT,
+  sellVolumeExpansionPct: config.DYNAMIC_EXIT_SELL_VOLUME_EXPANSION_PCT,
+  priceResponseDeclinePct: config.DYNAMIC_EXIT_PRICE_RESPONSE_DECLINE_PCT,
+  liquidityDropPct: config.DYNAMIC_EXIT_LIQUIDITY_DROP_PCT
+});
