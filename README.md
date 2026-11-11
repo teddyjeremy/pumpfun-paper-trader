@@ -1,57 +1,54 @@
 # Pump.fun Paper Trader
 
-A **paper-only** Pump.fun bonding-curve research and execution simulator. It does not sign transactions, hold a wallet key, submit transactions, or route to PumpSwap.
+A **paper-only** Pump.fun bonding-curve trading research and simulation system. It does not sign transactions, hold a wallet key, submit transactions, or execute real trades.
 
 ## Current status
 
-This repository starts as an observability-first foundation. Live launch ingestion, official SDK quote integration, persistence, and the dashboard are implemented in subsequent milestones. Until those adapters are connected and tested, the service must report itself as **not ready** and must not simulate fills from invented prices.
+This repository is the project foundation for a persistent paper-trading worker and operator dashboard. The Vercel project is already linked to this repository. Google Cloud deployment is scaffolded in `infra/gcp`; cloud resources have not yet been provisioned. Live discovery, official SDK quote integration, durable execution, and the full market-data loop remain implementation milestones. Until all required adapters and the ledger are verified, readiness must remain false and the system must not invent fills.
 
-## Fixed paper portfolio
+## Fixed initial paper portfolio
 
-- Starting balance: $8.00
-- Position principal: $1.00
-- Maximum open positions: 3 ($3.00 allocated maximum)
-- Maximum one buy in flight; sells may run concurrently (maximum 3)
-- A slot is released only after the sell is complete and token balance is confirmed zero
-- Maximum holding time: 60 seconds (initial experiment)
-- No private key required
+- Starting balance: **$2.70**
+- Initial position principal: **$1.00**
+- Initial maximum open positions: **1**
+- Capacity and stake grow only through the explicit portfolio-sizing policy.
+- A position slot is released only after a valid simulated exit and zero token balance confirmation.
+- No maximum holding duration.
+- No private key or real transaction capability.
+
+## Strategy
+
+The strict original entry strategy is the only enabled entry path. The experimental concentrated-flow relaxation is excluded. See [docs/STRATEGY.md](docs/STRATEGY.md).
+
+Entry is limited to non-migrated Pump.fun bonding-curve tokens. If a held token graduates, migration is a market-state transition, **not an automatic sell**. The position must be monitored on a verified migrated market and exited using the same protective/dynamic exit manager. See [docs/MIGRATION_AND_DYNAMIC_EXITS.md](docs/MIGRATION_AND_DYNAMIC_EXITS.md).
 
 ## Safety invariants
 
-1. Only Pump.fun bonding-curve tokens are eligible.
-2. Never trade PumpSwap or migrated tokens.
-3. Graduation stops new entries. If the curve is unavailable at exit, record an unexecutable exit; never fabricate a fill or route elsewhere.
-4. Unknown fees, missing quotes, stale quotes, failed sellability checks, or missing critical risk data mean **skip**.
-5. Net PnL includes entry/exit protocol and creator fees, network/priority fees, price impact, and slippage.
-6. Money uses integer raw units / decimal arithmetic, never binary floating-point for accounting.
-7. No real transactions or wallet signing exist in this project.
+1. Paper mode is enforced in code. No wallet signer or transaction submission exists.
+2. Only Pump.fun bonding-curve tokens may be entered; migration while holding does not force an immediate exit.
+3. Missing critical risk evidence, stale market data, unknown costs, missing quotes, or failed sellability checks block new entries.
+4. Never fabricate a fill from chart prices, reserve-delta proxies, or stale quotes.
+5. Net PnL includes protocol/creator fees, network/priority fees, impact, slippage, and simulated latency.
+6. Accounting uses integer raw units / decimal arithmetic, never binary floating-point.
+7. One active worker leader lease and idempotent entry/exit transitions prevent duplicate positions.
+8. A migration or temporary quote outage never silently closes a position or releases a slot.
+9. A global paper kill switch blocks new entries but continues monitoring open positions.
 
-## Results and failure analysis
+## Deployment layout
 
-The service is designed to expose:
-- health/readiness and provider connectivity;
-- event counters, ingestion lag, quote latency, stale quote rate and failures;
-- every candidate's decision, risk/momentum scores and exact rejection reasons;
-- paper positions, quote snapshots, cost breakdown and realized net PnL;
-- categorized errors (provider, decode, risk, quote, execution simulation, graduation, persistence);
-- a diagnostic summary that identifies the highest-volume failure categories.
-
-The dashboard must distinguish **no opportunity**, **rejected opportunity**, **provider outage**, and **strategy bug**. A quiet bot is not automatically a broken bot.
-
-## Configuration
-
-Copy `.env.example` to `.env`. Keep API keys out of source control. In Google Cloud, use Secret Manager and grant the runtime service account access to the secret. Never paste keys into GitHub issues or commits.
+- **Google Cloud:** persistent Node.js 22 worker, PostgreSQL ledger, Secret Manager, Cloud Logging/Monitoring, and Cloud Storage checkpoints/archive.
+- **Vercel:** protected operator dashboard and read-only API surface. It does not host the always-on market listener.
+- Deployment blueprint: [infra/gcp/DEPLOYMENT.md](infra/gcp/DEPLOYMENT.md).
 
 ## Development
 
-- Node.js LTS
+- Node.js 22
 - TypeScript strict mode
 - Fastify API
 - Zod configuration validation
 - Pino structured logs
 - Vitest
-- PostgreSQL persistence (migration/adapter milestone)
-- Next.js dashboard (dashboard milestone)
+- PostgreSQL persistence
 
 ```bash
 npm install
@@ -62,19 +59,8 @@ npm run typecheck
 
 ## Readiness
 
-The initial service intentionally starts in safe degraded mode until live provider adapters and quote verification are configured. See [docs/OPERATIONS.md](docs/OPERATIONS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+The service intentionally reports not-ready until live discovery, verified curve/pool quotes, risk evidence, and durable ledger adapters are connected. See [docs/OPERATIONS.md](docs/OPERATIONS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Disclaimer
 
-This is a research and simulation tool, not investment advice. Paper fills are estimates, not evidence of real-world profitability. A three-hour run is an integration smoke test, not a strategy validation.
-
-
-## Vercel dashboard deployment
-
-The operator dashboard is deployed as a stateless Vercel Node.js function. The deployment is for viewing diagnostics and the current process snapshot; it is **not** the always-on Pump.fun listener or paper execution worker. In-memory counters reset between serverless instances and must not be treated as durable trading history.
-
-Production dashboard: https://pumpfun-paper-trader.vercel.app
-
-The Vercel project uses Node.js 22.x and Singapore function region. Deployment Protection is enabled for the default Vercel domains. Keep it protected unless you intentionally configure an authenticated public dashboard.
-
-The persistent market worker, provider stream, and PostgreSQL ledger belong on Google Cloud (or another persistent runtime). Connect that worker to durable storage and expose a narrowly scoped authenticated dashboard API before presenting live results.
+This is a research and simulation tool, not investment advice. Paper fills are estimates, not evidence of real-world profitability. A successful deployment or multi-hour run validates integration and operations, not strategy profitability.
