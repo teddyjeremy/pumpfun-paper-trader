@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [main]
+    branches: [main, paper-live-runtime]
   pull_request:
     branches: [main]
 permissions:
