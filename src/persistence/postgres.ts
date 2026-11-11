@@ -138,7 +138,8 @@ export async function getTradingDashboardSnapshot() {
       SELECT
         COALESCE(SUM(net_pnl_lamports) FILTER (WHERE status = 'closed'), 0)::text AS realized_pnl_lamports,
         (COALESCE(SUM(net_pnl_lamports) FILTER (WHERE status = 'closed'), 0) / 1000000000::numeric)::text AS realized_pnl_sol,
-        SUM(net_pnl_usd) FILTER (WHERE status = 'closed')::text AS realized_pnl_usd,
+        CASE WHEN COUNT(*) FILTER (WHERE status = 'closed' AND net_pnl_usd IS NULL) = 0
+          THEN SUM(net_pnl_usd) FILTER (WHERE status = 'closed')::text ELSE NULL END AS realized_pnl_usd,
         COUNT(*) FILTER (WHERE status IN ('buy_pending','open','sell_pending','exit_unexecutable'))::int AS open_positions,
         COUNT(*) FILTER (WHERE status = 'closed')::int AS closed_positions,
         COUNT(*) FILTER (WHERE status = 'closed' AND zero_balance_confirmed)::int AS confirmed_closed_positions
