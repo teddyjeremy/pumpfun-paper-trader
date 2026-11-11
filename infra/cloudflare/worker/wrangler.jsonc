@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pumpfun-paper-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-11",
+  "triggers": { "crons": ["* * * * *"] },
+  "durable_objects": {
+    "bindings": [{ "name": "COORDINATOR", "class_name": "PumpFunCoordinator" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PumpFunCoordinator"] }],
+  "observability": { "enabled": true }
+}
