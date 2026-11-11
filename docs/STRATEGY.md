@@ -87,7 +87,14 @@ Add dynamic market-exhaustion exits, but do not exit on one noisy observation. T
 - Real SOL reserves / pool liquidity and executable sell quote.
 - Large-holder, creator and linked-wallet distribution.
 
-A dynamic sell signal must be confirmed by multiple independent bearish observations over consecutive windows. Initial signal thresholds are configuration candidates for paper calibration, not established strategy rules. Persist the exact features and reason for every exit. The hard stop and trailing/profit locks remain immediate protective exits; dynamic exhaustion signals use confirmation to avoid reacting to a single thin window.
+The initial paper-only dynamic exit profile is enabled for calibration (not a final production threshold set):
+
+- Buy/sell quote-volume ratio below 1.0.
+- Buy quote-volume decline of at least 40% against the immediately preceding comparable window.
+- Unique-buyer-rate decline of at least 40% against the preceding comparable window.
+- At least two of those three independent bearish signals must be present in each of two consecutive observations.
+
+Missing or stale windows are unknown, never zero, and reset the confirmation streak. Persist the exact features and reason for every exit. The hard stop and trailing/profit locks remain immediate protective exits; dynamic exhaustion signals use confirmation to avoid reacting to a single thin window. Recalibrate these paper-only thresholds using false exits, maximum adverse excursion, profit captured, post-exit continuation, and missed rug exits before treating them as final.
 
 ## Migration while holding
 
