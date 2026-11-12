@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS helius_backfill_jobs (
   signature_count INTEGER NOT NULL DEFAULT 0 CHECK (signature_count >= 0),
   signature_state JSONB NOT NULL DEFAULT '[]'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (session_id, mint)
+  PRIMARY KEY (session_id, mint),
+  CHECK (status = 'INCOMPLETE' OR launch_block_time IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS helius_backfill_jobs_session_status_idx
   ON helius_backfill_jobs(session_id,status,updated_at DESC);
