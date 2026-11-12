@@ -795,6 +795,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.syncCounts();
     this.status.monitoredCandidates = this.heliusState.subscriptions.length;
     this.status.queuedHeliusSignatures = this.heliusState.queue.length;
+    this.status.blocker = "Live discovery, verified transaction decoding and strategy/risk audits are active; executable quote authorization and scheduled paper entry/exit execution are not connected.";
     return { ...this.status };
   }
 
