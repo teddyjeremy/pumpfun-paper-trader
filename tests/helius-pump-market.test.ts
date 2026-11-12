@@ -77,6 +77,7 @@ function harness(options: { complete: boolean; missingPool?: boolean; missingVau
         ] });
       }
       return rpcResponse({ context: { slot: SLOT }, value: [
+        account(PUMP_PROGRAM_ID, curveData(options.complete)),
         account(PUMP_AMM_PROGRAM_ID, poolData()),
         options.missingVault ? null : account(SPL_TOKEN_PROGRAM_ID,
           tokenAccount(BASE_MINT, 10_000n, options.badVaultAuthority ? creator : poolAddress)),
