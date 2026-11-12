@@ -551,7 +551,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         ? -1 : profile.buckets.findIndex(bucket => bucket.endTime === profile.reclaimTime);
       const previousCompletedHigh = reclaimBucketIndex > 0
         ? profile!.buckets[reclaimBucketIndex - 1]!.highPrice : null;
-      const nowSeconds = Date.now() / 1000;
       const nextObservationPrices = this.verifiedTransactions.flatMap(transaction => transaction.tradeEvents)
         .filter(event => event.mint === mint && event.quoteMint === SOL_QUOTE_MINT &&
           Number(event.timestamp) > (profile?.reclaimTime ?? Number.POSITIVE_INFINITY))
