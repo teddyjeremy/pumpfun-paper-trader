@@ -7,7 +7,8 @@ class MemoryDurableStorage {
   private values: Stored = new Map();
   private transactionTail: Promise<unknown> = Promise.resolve();
   failNextPut = false;
-  lastAlarmAt: number | null = null;\n  async setAlarm(timestamp: number): Promise<void> { this.lastAlarmAt = timestamp; }
+  lastAlarmAt: number | null = null;
+  async setAlarm(timestamp: number): Promise<void> { this.lastAlarmAt = timestamp; }
 
   seed(key: string, value: unknown): void {
     this.values.set(key, structuredClone(value));
