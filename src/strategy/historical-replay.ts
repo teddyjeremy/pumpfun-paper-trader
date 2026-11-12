@@ -361,8 +361,9 @@ export function replayHistoricalCoin(
   const status = !input.decodeComplete ? "INCOMPLETE"
     : !firstSetup ? "NO_SETUP"
       : !firstSetup.riskClearedSetupEligible ? "RISK_NOT_CLEARED"
+        : entryAt === null ? "NO_FORWARD_ENTRY"
         : !hasCompleteHistoricalEntryEvidence({
-          entryAt: entryAt ?? Number.MAX_SAFE_INTEGER,
+          entryAt,
           ...(input.entryEvidenceCompleteAt === undefined ? {} : {
             entryEvidenceCompleteAt: input.entryEvidenceCompleteAt
           })
