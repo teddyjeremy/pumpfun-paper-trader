@@ -24,7 +24,18 @@ import {
   derivePumpSwapPoolVaultAuthority
 } from "./pump-pdas.js";
 import { verifyCanonicalPumpSwapPoolSnapshot } from "./pump-account-decoder.js";
-import type { VerifiedPumpQuoteSnapshot } from "./pump-quote-snapshot.js";
+import {
+  GLOBAL_CONFIG_PDA,
+  PUMP_AMM_FEE_CONFIG_PDA
+} from "@pump-fun/pump-sdk/swap";
+import {
+  fetchHeliusMultipleAccounts,
+  type HeliusAccountReadConfig
+} from "./helius-accounts.js";
+import {
+  fetchVerifiedPumpQuoteAccountSnapshot,
+  type VerifiedPumpQuoteSnapshot
+} from "./pump-quote-snapshot.js";
 
 const PUMP_FEE_PROGRAM_ID = "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ";
 const BPS = new BN(10_000);
@@ -333,4 +344,47 @@ export function quotePumpSwapSellFromSnapshot(
     transferTaxVerifiedZero: true, executionReady: false,
     blockers: ["network fee and priority fee estimates are not attached", "SOL/USD valuation is not attached", "simulated execution latency is not attached"]
   };
+}
+
+
+/**
+ * Discover the pool's vault addresses, then re-fetch the pool, both vaults,
+ * both mints and the SDK fee/config accounts in one final Helius context slot.
+ * The first read is discovery only; it is never used for pricing.
+ */
+export async function fetchPumpSwapSdkQuote(input: {
+  mint: string;
+  poolAddress: string;
+  side: "BUY" | "SELL";
+  amountBaseUnits: string;
+  config: HeliusAccountReadConfig;
+}): Promise<PumpSdkSwapQuote> {
+  const discovery = await fetchHeliusMultipleAccounts([input.poolAddress], input.config);
+  const marketAccount = discovery.accounts[0];
+  if (!marketAccount) throw new Error("Canonical PumpSwap pool account is not available.");
+
+  const decodedPool = decodePumpSwapPoolAccount(marketAccount);
+  if (decodedPool.address !== input.poolAddress || decodedPool.baseMint !== input.mint) {
+    throw new Error("Discovered PumpSwap pool does not match the requested mint and address.");
+  }
+  const expectedPoolAddress = deriveCanonicalPumpSwapPoolPda(input.mint, decodedPool.quoteMint);
+  if (expectedPoolAddress !== input.poolAddress) {
+    throw new Error("Discovered PumpSwap pool is not the canonical index-0 pool.");
+  }
+
+  const snapshot = await fetchVerifiedPumpQuoteAccountSnapshot({
+    addresses: {
+      market: input.poolAddress,
+      baseMint: input.mint,
+      quoteMint: decodedPool.quoteMint,
+      globalConfig: GLOBAL_CONFIG_PDA.toBase58(),
+      feeConfig: PUMP_AMM_FEE_CONFIG_PDA.toBase58(),
+      baseVault: decodedPool.baseVault,
+      quoteVault: decodedPool.quoteVault
+    },
+    config: input.config
+  });
+  return input.side === "BUY"
+    ? quotePumpSwapBuyFromSnapshot(snapshot, input.amountBaseUnits)
+    : quotePumpSwapSellFromSnapshot(snapshot, input.amountBaseUnits);
 }
