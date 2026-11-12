@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
+import { ComputeBudgetProgram, Keypair, SystemProgram, TransactionMessage } from "@solana/web3.js";
 import { estimateSolanaTransactionFees } from "../src/ingestion/solana-fee-estimator.js";
 
 const account = "11111111111111111111111111111111";
 const now = Date.parse("2026-11-12T12:00:00.000Z");
+const payer = Keypair.generate();
+const recipient = Keypair.generate().publicKey;
+const blockhash = "11111111111111111111111111111111";
+function compiledMessageBase64(withPriorityPrice = false, versioned = false): string {
+  const instructions = [
+    ...(withPriorityPrice ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10 })] : []),
+    SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: recipient, lamports: 1 })
+  ];
+  const transactionMessage = new TransactionMessage({
+    payerKey: payer.publicKey, recentBlockhash: blockhash, instructions
+  });
+  const bytes = versioned
+    ? transactionMessage.compileToV0Message().serialize()
+    : transactionMessage.compileToLegacyMessage().serialize();
+  return Buffer.from(bytes).toString("base64");
+}
 
 function feeFetcher(options: {
   baseFee?: unknown;
@@ -32,7 +49,7 @@ function feeFetcher(options: {
 
 const baseInput = {
   apiKey: "test-api-key",
-  messageBase64: "AQ==",
+  messageBase64: compiledMessageBase64(),
   writableAccountKeys: [account],
   computeUnitLimit: 200_000,
   nowMs: now
@@ -54,6 +71,32 @@ describe("Solana transaction fee estimator", () => {
     expect(result.estimate.lastSampleSlot).toBe(109);
     expect(result.estimate.observedSlot).toBe(110);
     expect(result.estimate.feeMessageSha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+
+  it("rejects SetComputeUnitPrice in legacy and v0 compiled messages before RPC", async () => {
+    let calls = 0;
+    const fetcher: typeof fetch = async () => {
+      calls += 1;
+      return new Response("{}");
+    };
+    const legacy = await estimateSolanaTransactionFees({
+      ...baseInput, messageBase64: compiledMessageBase64(true, false), fetcher
+    });
+    const v0 = await estimateSolanaTransactionFees({
+      ...baseInput, messageBase64: compiledMessageBase64(true, true), fetcher
+    });
+    expect(legacy.status).toBe("UNAVAILABLE");
+    expect(v0.status).toBe("UNAVAILABLE");
+    expect(calls).toBe(0);
+  });
+
+  it("accepts a valid v0 message without SetComputeUnitPrice", async () => {
+    const result = await estimateSolanaTransactionFees({
+      ...baseInput, messageBase64: compiledMessageBase64(false, true),
+      fetcher: feeFetcher()
+    });
+    expect(result.status).toBe("AVAILABLE");
   });
 
   it("fails closed when recent fee samples are insufficient", async () => {
