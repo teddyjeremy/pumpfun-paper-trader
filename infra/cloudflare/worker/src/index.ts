@@ -32,7 +32,7 @@ import {
   type CandidateMonitoringEvidence
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
-import { buildCandidateTradeFlows, SOL_QUOTE_MINT } from "../../../../src/ingestion/trade-flow.js";
+import { buildCandidateTradeFlows, isSolQuoteMint, SOL_QUOTE_MINT } from "../../../../src/ingestion/trade-flow.js";
 import { fetchHolderConcentration } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
@@ -541,8 +541,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const nowSeconds = Date.now() / 1000;
       const ageSeconds = Number.isSafeInteger(launchTimestamp) && launchTimestamp >= 0 && launchTimestamp <= nowSeconds
         ? nowSeconds - launchTimestamp : null;
-      const profile = report.priceVolumeProfiles.find(item => item.mint === mint && item.quoteMint === SOL_QUOTE_MINT) ?? null;
-      const flow = report.flows.find(item => item.mint === mint && item.quoteMint === SOL_QUOTE_MINT) ?? null;
+      const profile = report.priceVolumeProfiles.find(item => item.mint === mint && isSolQuoteMint(item.quoteMint)) ?? null;
+      const flow = report.flows.find(item => item.mint === mint && isSolQuoteMint(item.quoteMint)) ?? null;
       const creatorRisk = report.creatorSellRisk.find(item => item.mint === mint);
       const walletRisk = report.walletClusterRisk.find(item => item.mint === mint);
       const links = this.walletLinkSnapshots[mint]?.links ?? [];
@@ -552,7 +552,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const previousCompletedHigh = reclaimBucketIndex > 0
         ? profile!.buckets[reclaimBucketIndex - 1]!.highPrice : null;
       const nextObservationPrices = this.verifiedTransactions.flatMap(transaction => transaction.tradeEvents)
-        .filter(event => event.mint === mint && event.quoteMint === SOL_QUOTE_MINT &&
+        .filter(event => event.mint === mint && isSolQuoteMint(event.quoteMint) &&
           Number(event.timestamp) > (profile?.reclaimTime ?? Number.POSITIVE_INFINITY))
         .map(event => {
           const reserves = event.virtualSolReserves;
@@ -1294,7 +1294,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           }, `helius:${work.signature}`);
           for (let tradeIndex = 0; tradeIndex < result.transaction.tradeEvents.length; tradeIndex += 1) {
             const trade = result.transaction.tradeEvents[tradeIndex]!;
-            const quoteAmount = trade.quoteMint === SOL_QUOTE_MINT
+            const quoteAmount = isSolQuoteMint(trade.quoteMint)
               ? (trade.quoteAmount > 0n ? trade.quoteAmount : trade.solAmount)
               : trade.quoteAmount;
             if (quoteAmount <= 0n || trade.tokenAmount <= 0n) {
