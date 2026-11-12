@@ -20,9 +20,10 @@ The current `main` branch contains the discovery and monitoring foundation, veri
 - Paper portfolio sizing, idempotent Durable Object session journal and position/exit primitives.
 - PostgreSQL base schema/migration runner, audit-event ingestion and worker-lease primitives.
 - Read-only dashboard/API and Cloudflare/GCP deployment blueprints.
+- Authenticated dashboard proxy for Worker status and start/stop discovery monitoring; monitor controls do not enable paper entries or exits.
 - Dynamic exit evidence-family evaluator: correlated metrics are grouped, with either two independent families across two windows or one family persisting across three complete windows.
 
-Relevant mainline work: [PR #34](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/34), [PR #36](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/36), [PR #39](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/39).
+Relevant mainline work: [PR #34](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/34), [PR #36](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/36), [PR #39](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/39), [PR #46](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/46), [PR #47](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/47), and [PR #49](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/49).
 
 ### Integrated paper-trading stack (merged PR #40)
 
