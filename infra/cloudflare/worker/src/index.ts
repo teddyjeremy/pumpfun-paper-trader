@@ -131,7 +131,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   private async hydrate(): Promise<void> {
     if (this.hydrated) return;
-    const [savedStatus, savedDiscovery, enabled] = await Promise.all([
+    const [savedStatus, savedDiscovery, enabled, savedWalletLinks, savedWalletHoldings] = await Promise.all([
       this.ctx.storage.get<CoordinatorStatus>("status"),
       this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
       this.ctx.storage.get<boolean>("enabled"),
