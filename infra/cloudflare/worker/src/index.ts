@@ -1096,6 +1096,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         mint, wallet: account.owner, amount: account.amount
       }));
       this.reconcileHelius();
+    } else {
+      // Never let an older holder snapshot masquerade as current evidence.
+      delete this.walletHoldingsByMint[mint];
     }
     await this.persist();
     await this.appendAudit("RISK_EVIDENCE", mint, {
