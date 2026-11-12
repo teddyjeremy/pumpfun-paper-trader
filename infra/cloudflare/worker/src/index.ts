@@ -748,6 +748,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         if (result.status === "VERIFIED") {
           this.verifiedTransactions = [...this.verifiedTransactions, result.transaction].slice(-2_000);
           this.status.verifiedTransactions += 1;
+          // Re-rank the six evidence-follow-up slots as verified events arrive.
+          // Fresh launches remain protected by the four-slot first-minute reserve.
+          this.reconcileHelius();
         } else if (result.status === "FAILED_TRANSACTION") {
           this.status.failedHeliusTransactions += 1;
         } else if (result.status === "DATA_INCOMPLETE") {
