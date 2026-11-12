@@ -149,7 +149,8 @@ function capacityForEquity(equity: number): { stake: number; slots: number } {
     ? 0
     : 1 + Math.floor(Math.log2(equity / PAPER_PORTFOLIO_POLICY.firstGrowthThresholdUsd));
   return {
-    stake: Math.min(PAPER_PORTFOLIO_POLICY.maxStakeUsd, round(PAPER_PORTFOLIO_POLICY.initialStakeUsd * Math.pow(1.5, levels))),
+    // Each doubling adds 50% of the original stake: $1 -> $1.50 at $5 -> $2.00 at $10.
+    stake: Math.min(PAPER_PORTFOLIO_POLICY.maxStakeUsd, round(PAPER_PORTFOLIO_POLICY.initialStakeUsd * (1 + 0.5 * levels))),
     slots: Math.min(100, 1 + levels)
   };
 }
