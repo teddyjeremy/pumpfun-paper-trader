@@ -32,6 +32,9 @@ export interface PumpSwapQuoteState {
   quoteVaultReserves: string;
   /** May be negative on current PumpSwap pools. */
   virtualQuoteReserves: string;
+  /** Protocol and creator fees already booked in the quote vault. */
+  protocolFeeBucketsBaseUnits: string;
+  creatorFeeBucketsBaseUnits: string;
   fees: PumpTradeFeeBps;
 }
 
@@ -216,12 +219,19 @@ export function quotePumpSwapSell(input: {
   const base = units(input.state.baseVaultReserves, "base vault reserves");
   const quoteVault = units(input.state.quoteVaultReserves, "quote vault reserves");
   const virtualQuote = units(input.state.virtualQuoteReserves, "virtual quote reserves", true);
+  const protocolFeeBuckets = units(input.state.protocolFeeBucketsBaseUnits, "protocol fee buckets");
+  const creatorFeeBuckets = units(input.state.creatorFeeBucketsBaseUnits, "creator fee buckets");
+  const feeBucketsTotal = protocolFeeBuckets + creatorFeeBuckets;
   const effectiveQuote = quoteVault + virtualQuote;
-  if (tokenIn <= 0n || base <= 0n || effectiveQuote <= 0n) {
+  const spendableQuoteVault = quoteVault - feeBucketsTotal;
+  if (tokenIn <= 0n || base <= 0n || effectiveQuote <= 0n || spendableQuoteVault <= 0n) {
     throw new Error("PumpSwap quote state or input is empty.");
   }
   const grossQuoteOut = effectiveQuote * tokenIn / (base + tokenIn);
   if (grossQuoteOut <= 0n) throw new Error("PumpSwap sell output rounds to zero.");
+  if (grossQuoteOut > spendableQuoteVault) {
+    throw new Error("PumpSwap sell exceeds quote-vault liquidity after reserved fee buckets.");
+  }
   const fees = feeAmounts(grossQuoteOut, input.state.fees);
   const netQuoteOut = grossQuoteOut - fees.total;
   if (netQuoteOut <= 0n) throw new Error("PumpSwap sell proceeds are consumed by fees.");
