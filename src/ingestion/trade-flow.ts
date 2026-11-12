@@ -23,8 +23,8 @@ export interface TradeFlowWindow {
 
 export interface CandidateTradeFlow {
   mint: string;
-  quoteMint: string;
-  quoteUnit: "SOL" | "NON_SOL_RAW";
+  quoteMint: string | null;
+  quoteUnit: "SOL" | "NON_SOL_RAW" | "UNKNOWN";
   windowSeconds: number;
   horizonSeconds: number;
   windows: TradeFlowWindow[];
@@ -67,12 +67,12 @@ export function buildCandidateTradeFlows(
   const incomplete = new Set(options.incompleteMints ?? []);
   const groups = new Map<string, {
     mint: string;
-    quoteMint: string;
+    quoteMint: string | null;
     windows: Map<number, PumpTradeEvent[]>;
   }>();
 
-  const ensureGroup = (mint: string, quoteMint: string) => {
-    const key = `${mint}:${quoteMint}`;
+  const ensureGroup = (mint: string, quoteMint: string | null) => {
+    const key = `${mint}:${quoteMint ?? "UNKNOWN"}`;
     let group = groups.get(key);
     if (!group) {
       group = { mint, quoteMint, windows: new Map() };
@@ -99,7 +99,7 @@ export function buildCandidateTradeFlows(
 
   for (const mint of options.candidateMints ?? []) {
     if (![...groups.values()].some(group => group.mint === mint)) {
-      ensureGroup(mint, SOL_QUOTE_MINT);
+      ensureGroup(mint, null);
     }
   }
 
@@ -149,7 +149,7 @@ export function buildCandidateTradeFlows(
     output.push({
       mint: group.mint,
       quoteMint: group.quoteMint,
-      quoteUnit: group.quoteMint === SOL_QUOTE_MINT ? "SOL" : "NON_SOL_RAW",
+      quoteUnit: group.quoteMint === null ? "UNKNOWN" : group.quoteMint === SOL_QUOTE_MINT ? "SOL" : "NON_SOL_RAW",
       windowSeconds: TRADE_FLOW_WINDOW_SECONDS,
       horizonSeconds,
       windows: windows.map(({ buyers: _buyers, buyerVolumes: _buyerVolumes, buyVolume: _buyVolume, sellVolume: _sellVolume, ...window }) => window),
