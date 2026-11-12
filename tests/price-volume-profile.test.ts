@@ -112,9 +112,15 @@ describe("observed price and stage-volume profile", () => {
   });
 
   it("marks known provider gaps as gapped coverage", () => {
-    const [profile] = buildCandidatePriceVolumeProfiles([
-      transaction([trade(100n, 1_000n)])
-    ], { nowSeconds: 105, horizonSeconds: 60, incompleteMints: [mint] });
+    const tx = transaction([trade(100n, 1_000n)]);
+    tx.createEvents = [createEvent()];
+    const [profile] = buildCandidatePriceVolumeProfiles(
+      [tx],
+      {
+        nowSeconds: 105, horizonSeconds: 60,
+        incompleteMints: [mint], coverageStartByMint: { [mint]: 100 }
+      }
+    );
     expect(profile?.coverageStatus).toBe("GAPPED");
     expect(profile?.dataComplete).toBe(false);
   });
