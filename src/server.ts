@@ -225,6 +225,7 @@ app.get("/api/strategy/replay", async (request, reply) => {
 app.get("/api/results/summary", async () => {
   const state = snapshot();
   const counters = state.counters;
+  const ledger = await getTradingDashboardSnapshot();
   return {
     mode: "paper",
     portfolio: {
@@ -232,9 +233,13 @@ app.get("/api/results/summary", async () => {
       positionSizeUsd: config.PAPER_POSITION_SIZE_USD,
       maxOpenPositions: config.PAPER_MAX_OPEN_POSITIONS,
       maxAllocatedUsd: config.PAPER_POSITION_SIZE_USD * config.PAPER_MAX_OPEN_POSITIONS,
-      realizedNetPnlUsd: null,
-      openPositions: null,
-      note: "Portfolio ledger is not connected yet; PnL is intentionally null, not guessed."
+      available: ledger.available,
+      realizedNetPnlUsd: ledger.available ? ledger.portfolio.realizedPnlUsd : null,
+      realizedNetPnlSol: ledger.available ? ledger.portfolio.realizedPnlSol : null,
+      openPositions: ledger.available ? ledger.portfolio.openPositions : null,
+      closedPositions: ledger.available ? ledger.portfolio.closedPositions : null,
+      unrealizedPnlSol: ledger.available ? ledger.portfolio.unrealizedPnlSol : null,
+      note: ledger.available ? ledger.portfolio.usdValuationNote : ledger.reason
     },
     activity: {
       discovered: counters["candidate.discovered"] ?? 0,
