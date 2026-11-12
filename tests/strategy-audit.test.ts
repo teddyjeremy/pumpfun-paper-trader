@@ -44,6 +44,17 @@ describe("strict strategy audit timing", () => {
     expect(audit.rules.find(rule => rule.rule === "THREE_FLOW_WINDOWS")?.status).toBe("UNKNOWN");
   });
 
+  it("explains every UNKNOWN rule as a WATCH blocker without authorizing a buy", () => {
+    const audit = evaluateStrictStrategyAudit(base);
+    expect(audit.decision).toBe("WATCH");
+    expect(audit.buyAllowed).toBe(false);
+    expect(audit.blockingUnknownRules.length).toBeGreaterThan(0);
+    expect(audit.watchReasons).toHaveLength(audit.blockingUnknownRules.length);
+    for (const rule of audit.blockingUnknownRules) {
+      expect(audit.watchReasons.some(reason => reason.startsWith(`${rule}: `))).toBe(true);
+    }
+  });
+
   it("keeps pullback and reclaim volume thresholds unscored until calibrated", () => {
     const audit = evaluateStrictStrategyAudit({
       ...base,
