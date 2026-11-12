@@ -82,4 +82,9 @@ describe("paper portfolio accounting",()=>{
     .toThrow(/per-side impact or tax limit/);
  });
 
+ it("fails closed when the quote validation clock is invalid",()=>{
+  const p=createPaperPortfolio();
+  expect(()=>openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Number.NaN})).toThrow(/clock is invalid/);
+ });
+
 });
