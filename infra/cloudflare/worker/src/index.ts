@@ -332,17 +332,21 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       `helius_backfill_queue_cursor:${sessionId}:${mint}`
     ) ?? 0;
     const verifiedKey = `helius_verified_historical_signatures:${sessionId}:${mint}`;
-    const verified = new Set(await this.ctx.storage.get<string[]>(verifiedKey) ?? []);
+    const expectedSignatures = new Set(state.signatures.map(item => item.signature));
+    const verified = new Set((await this.ctx.storage.get<string[]>(verifiedKey) ?? [])
+      .filter(signature => expectedSignatures.has(signature)));
     for (const transaction of this.verifiedTransactions) {
-      if (transaction.mint === mint && state.signatures.some(item => item.signature === transaction.signature)) {
+      if (transaction.mint === mint && expectedSignatures.has(transaction.signature)) {
         verified.add(transaction.signature);
       }
     }
     if (verified.size > 0) await this.ctx.storage.put(verifiedKey, [...verified].slice(-500));
     const failedKey = `helius_failed_historical_signatures:${sessionId}:${mint}`;
-    const failed = new Set(await this.ctx.storage.get<string[]>(failedKey) ?? []);
+    const failed = new Set((await this.ctx.storage.get<string[]>(failedKey) ?? [])
+      .filter(signature => expectedSignatures.has(signature)));
     const archivedKey = `helius_archived_transaction_signatures:${sessionId}:${mint}`;
-    const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
+    const archived = new Set((await this.ctx.storage.get<string[]>(archivedKey) ?? [])
+      .filter(signature => expectedSignatures.has(signature)));
     const legacyArchived = new Set(await this.ctx.storage.get<string[]>(
       `helius_archived_transaction_signatures:${sessionId}`
     ) ?? []);
