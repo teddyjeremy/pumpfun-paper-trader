@@ -4,7 +4,12 @@ import type { VerifiedPumpTransaction } from "./helius.js";
 export const TRADE_FLOW_WINDOW_SECONDS = 2;
 export const TRADE_FLOW_HORIZON_SECONDS = 10 * 60;
 export const MAX_FLOW_WINDOWS_PER_MINT = TRADE_FLOW_HORIZON_SECONDS / TRADE_FLOW_WINDOW_SECONDS;
-export const SOL_QUOTE_MINT = "11111111111111111111111111111111";
+// Pump.fun SOL-quoted markets use wrapped SOL as their quote mint.
+export const SOL_QUOTE_MINT = "So11111111111111111111111111111111111111112";
+export const LEGACY_SOL_QUOTE_MINT = "11111111111111111111111111111111";
+export function isSolQuoteMint(quoteMint: string | null | undefined): boolean {
+  return quoteMint === SOL_QUOTE_MINT || quoteMint === LEGACY_SOL_QUOTE_MINT;
+}
 
 export interface TradeFlowWindow {
   startTime: number;
@@ -36,6 +41,9 @@ export interface CandidateTradeFlow {
   dataComplete: boolean;
   coverage: "OBSERVED_EVENTS_ONLY";
   entryEligible: false;
+  microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE";
+  ignoredMicroTradeCount: number;
+  ignoredMicroTradeQuoteVolume: string;
 }
 
 /**
@@ -54,6 +62,8 @@ export function buildCandidateTradeFlows(
     incompleteMints?: readonly string[];
     coverageStartByMint?: Readonly<Record<string, number>>;
     candidateMints?: readonly string[];
+    solUsdPriceUsd?: number;
+    minimumTradeUsd?: number;
   } = {}
 ): CandidateTradeFlow[] {
   const nowSeconds = options.nowSeconds ?? Math.floor(Date.now() / 1_000);
@@ -63,19 +73,23 @@ export function buildCandidateTradeFlows(
     throw new Error("Invalid trade-flow time range.");
   }
 
+  const minimumTradeUsd = options.minimumTradeUsd ?? 0.01;
+  if (!Number.isFinite(minimumTradeUsd) || minimumTradeUsd < 0) throw new Error("Invalid minimum trade notional.");
   const lowerBound = nowSeconds - horizonSeconds;
   const incomplete = new Set(options.incompleteMints ?? []);
   const groups = new Map<string, {
     mint: string;
     quoteMint: string | null;
     windows: Map<number, PumpTradeEvent[]>;
+    ignoredMicroTradeCount: number;
+    ignoredMicroTradeQuoteVolume: bigint;
   }>();
 
   const ensureGroup = (mint: string, quoteMint: string | null) => {
     const key = `${mint}:${quoteMint ?? "UNKNOWN"}`;
     let group = groups.get(key);
     if (!group) {
-      group = { mint, quoteMint, windows: new Map() };
+      group = { mint, quoteMint, windows: new Map(), ignoredMicroTradeCount: 0, ignoredMicroTradeQuoteVolume: 0n };
       groups.set(key, group);
     }
     return group;
@@ -89,6 +103,19 @@ export function buildCandidateTradeFlows(
       const timestamp = Number(trade.timestamp);
       if (!Number.isSafeInteger(timestamp) || timestamp < lowerBound || timestamp > nowSeconds) continue;
       const group = ensureGroup(trade.mint, trade.quoteMint);
+      if (isSolQuoteMint(trade.quoteMint) && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0) {
+        const rawAmount = trade.quoteAmount > 0n ? trade.quoteAmount : trade.solAmount;
+        const notionalUsd = Number(rawAmount) / 1_000_000_000 * options.solUsdPriceUsd!;
+        if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) {
+          group.ignoredMicroTradeCount += 1;
+          group.ignoredMicroTradeQuoteVolume += rawAmount;
+          const ignoredWindowStart = Math.floor(timestamp / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
+          if (ignoredWindowStart + TRADE_FLOW_WINDOW_SECONDS <= nowSeconds && !group.windows.has(ignoredWindowStart)) {
+            group.windows.set(ignoredWindowStart, []);
+          }
+          continue;
+        }
+      }
       const windowStart = Math.floor(timestamp / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
       if (windowStart + TRADE_FLOW_WINDOW_SECONDS > nowSeconds) continue;
       const events = group.windows.get(windowStart) ?? [];
@@ -140,7 +167,12 @@ export function buildCandidateTradeFlows(
     const dataComplete = !incomplete.has(group.mint) &&
       latestThreeAreFresh &&
       (firstFullyCoveredWindow === null || latestThree![0]!.startTime >= firstFullyCoveredWindow);
-    const flowConfirmationPass = dataComplete &&
+    const microTradeFilterStatus = !isSolQuoteMint(group.quoteMint)
+      ? "UNSUPPORTED_QUOTE" as const
+      : Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
+        ? "APPLIED" as const : "UNAVAILABLE" as const;
+    const flowConfirmationPass = microTradeFilterStatus === "APPLIED" &&
+      dataComplete &&
       latestThreeWindowFlowPass &&
       distinctBuyers >= 5 &&
       totalBuyVolume > 0n &&
@@ -149,7 +181,7 @@ export function buildCandidateTradeFlows(
     output.push({
       mint: group.mint,
       quoteMint: group.quoteMint,
-      quoteUnit: group.quoteMint === null ? "UNKNOWN" : group.quoteMint === SOL_QUOTE_MINT ? "SOL" : "NON_SOL_RAW",
+      quoteUnit: group.quoteMint === null ? "UNKNOWN" : isSolQuoteMint(group.quoteMint) ? "SOL" : "NON_SOL_RAW",
       windowSeconds: TRADE_FLOW_WINDOW_SECONDS,
       horizonSeconds,
       windows: windows.map(({ buyers: _buyers, buyerVolumes: _buyerVolumes, buyVolume: _buyVolume, sellVolume: _sellVolume, ...window }) => window),
@@ -160,7 +192,10 @@ export function buildCandidateTradeFlows(
       flowConfirmationPass,
       dataComplete,
       coverage: "OBSERVED_EVENTS_ONLY",
-      entryEligible: false
+      entryEligible: false,
+      microTradeFilterStatus,
+      ignoredMicroTradeCount: group.ignoredMicroTradeCount,
+      ignoredMicroTradeQuoteVolume: group.ignoredMicroTradeQuoteVolume.toString()
     });
   }
   return output.sort((a, b) => a.mint.localeCompare(b.mint) ||
@@ -175,7 +210,7 @@ function summarizeWindow(startTime: number, events: readonly PumpTradeEvent[]) {
   const sellers = new Set<string>();
 
   for (const event of events) {
-    const amount = event.quoteMint === SOL_QUOTE_MINT
+    const amount = isSolQuoteMint(event.quoteMint)
       ? (event.quoteAmount > 0n ? event.quoteAmount : event.solAmount)
       : event.quoteAmount;
     if (amount <= 0n) continue;
