@@ -7,11 +7,17 @@
 - `GET /api/diagnostics`: counters, categorized recent failures, readiness blockers, uptime and memory.
 - `GET /api/results/summary`: portfolio configuration, activity counts and diagnosis.
 - `GET /api/tracking`: candidate funnel, rejection reasons, quote outcomes, latency, provider health, graduation and position telemetry.
+- `GET /api/worker`: authenticated server-side proxy to the combined Cloudflare Worker status/portfolio snapshot.
+- `POST /api/worker/start-monitor` and `/api/worker/stop-monitor`: authenticated controls for live discovery monitoring only.
 - `GET /api/helius/backfills?sessionId=...`: per-mint address-history and transaction-decoding coverage.
 - `GET /api/strategy/replay?sessionId=...`: chronological replay of archived, verified historical SOL-quoted trade events, with optional outcome labeling; explicit favorable/adverse thresholds and a round-trip cost are required to assign profitability labels.
 - `GET /`: operator dashboard.
 
-## Live monitor versus paper execution\n\nThe dashboard polls the authenticated Worker snapshot every five seconds. Configure `PAPER_WORKER_URL` and `PAPER_WORKER_CONTROL_TOKEN` on the dashboard server; the control token must match the Worker `CONTROL_TOKEN` secret and must never be exposed to browser JavaScript. The dashboard start button starts PumpPortal/Helius discovery and creates a paper session journal. It does **not** enable simulated entries or exits. The Worker still reports `tradingReady: false`; the reusable entry/exit lifecycle is not yet connected to the Worker scheduler. Do not describe a monitor-only session as live paper trading.\n\n## How to interpret the results
+## Live monitor versus paper execution
+
+The dashboard polls the authenticated Worker snapshot every five seconds. Configure `PAPER_WORKER_URL` and `PAPER_WORKER_CONTROL_TOKEN` on the dashboard server; the control token must match the Worker `CONTROL_TOKEN` secret and must never be exposed to browser JavaScript. The dashboard start button starts PumpPortal/Helius discovery and creates a paper session journal. It does **not** enable simulated entries or exits. The Worker still reports `tradingReady: false`; the reusable entry/exit lifecycle is not yet connected to the Worker scheduler. Do not describe a monitor-only session as live paper trading.
+
+## How to interpret the results
 
 | Observation | What it usually means | Next investigation |
 |---|---|---|
