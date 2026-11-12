@@ -103,3 +103,9 @@ The six-hour paper session remains blocked until the missing quote source, execu
 - The market verifier derives these addresses itself from the verified curve mint/quote mint; callers can no longer supply arbitrary expected PDA values.
 
 - The current Pump bonding-curve account layout is 166 bytes; the decoder also accepts only complete known historical field boundaries. The current PumpSwap Pool layout is 287 bytes, including the protocol-fee and creator-fee accumulators appended after the 271-byte prefix. Known older lengths are explicitly enumerated; unknown/partial lengths fail closed.
+
+## Helius-backed market refresh pipeline
+- Added `refreshPumpMarketStateFromHelius`: reads the mint-derived curve PDA using Helius `getMultipleAccounts`; a fresh incomplete curve is LIVE_CURVE and does not trigger pool discovery.
+- When the curve is complete, it derives the canonical Pump pool-creator and index-0 pool PDAs, discovers candidates by `Pool.base_mint`, then re-fetches the pool and both vaults together in a single Helius RPC context slot.
+- A missing pool/vault leaves the market MIGRATION_PENDING; a mismatched owner, mint, authority, PDA, stale snapshot or empty liquidity sets EXIT_BLOCKED. Only a complete verified snapshot reaches MIGRATED_POOL_VERIFIED.
+- This pipeline is implemented and unit-tested, but it is not yet called by the Cloudflare Worker or connected to open paper positions, quote requests or the exit manager.
