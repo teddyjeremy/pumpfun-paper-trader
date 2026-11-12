@@ -44,6 +44,7 @@ export interface ExecutableRoundTripQuote {
     providerFeeUsdPerTransaction: number;
     priceImpactLimitPct: number;
     priorityFeePercentile: number;
+    priorityFeeScope: "ACCOUNT_SPECIFIC" | "CLUSTER_WIDE";
   };
 }
 
@@ -115,7 +116,8 @@ export async function fetchExecutableRoundTripQuote(input: {
     signatureCount: input.signatureCount,
     priorityFeePercentile: percentile,
     baseFeeLamportsPerSignature: input.baseFeeLamportsPerSignature,
-    maxPriorityFeeLamports: input.maxPriorityFeeLamports
+    maxPriorityFeeLamports: input.maxPriorityFeeLamports,
+    writableAccountCount: input.writableAccounts?.length ?? 0
   });
   const buyFetchedAt = now();
   const buyLatencyMs = Math.max(0, Math.ceil(buyFetchedAt - startedAt));
@@ -204,7 +206,8 @@ export async function fetchExecutableRoundTripQuote(input: {
     networkFeeEstimate,
     assumptions: {
       quoteTtlMs, executionDelayMs, providerFeeUsdPerTransaction: providerFeeUsd,
-      priceImpactLimitPct: maxPriceImpactPct, priorityFeePercentile: percentile
+      priceImpactLimitPct: maxPriceImpactPct, priorityFeePercentile: percentile,
+      priorityFeeScope: networkFeeEstimate.priorityFeeScope
     }
   };
 }
