@@ -460,10 +460,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       if (portfolio) {
         const openValue = portfolio.positions.filter(position => position.status === "OPEN")
           .reduce((sum, position) => sum + Number(BigInt(position.tokenAmountBaseUnits)) * position.latestPriceUsdPerToken, 0);
+        if (openValue > topped.state.currentEquityUsd + 0.00000001) {
+          throw new Error("Marked portfolio equity is below the recorded value of its open positions.");
+        }
         await txn.put(portfolioKey, {
           ...portfolio, bankroll: topped.state,
-          availableCashUsd: Math.max(0, Math.round((topped.state.currentEquityUsd - openValue) * 1e8) / 1e8),
-          highWaterEquityUsd: Math.max(portfolio.highWaterEquityUsd, Math.max(0, topped.state.currentEquityUsd - topped.state.totalTopUpsUsd)),
+          availableCashUsd: Math.round((topped.state.currentEquityUsd - openValue) * 1e8) / 1e8,
+          highWaterEquityUsd: Math.max(portfolio.highWaterEquityUsd,
+            Math.max(0, topped.state.currentEquityUsd - topped.state.totalTopUpsUsd)),
           lastMarkedAt: occurredAt
         });
       }
