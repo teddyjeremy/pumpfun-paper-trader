@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "../../../../src/paper/session-ledger.js";
 import { updateCandidatePriceTracker, type CandidatePriceTracker } from "../../../../src/paper/candidate-price-ledger.js";
 import { evaluateStrictStrategyAudit } from "../../../../src/paper/strategy-audit.js";
+import { createPaperPortfolio, type PaperPortfolioState } from "../../../../src/paper/portfolio.js";
 
 type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "SESSION_HEARTBEAT" | "WORKER_RESTARTED" | "DISCOVERY" |
   "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "CANDIDATE_EXPIRED" | "OBSERVATION" |
@@ -212,6 +213,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put("active_audit_session_id", sessionId);
         await txn.put("audit_session_ids", [...sessions, sessionId]);
         await txn.put(`paper_bankroll:${sessionId}`, createBankrollState(2.70));
+        await txn.put(`paper_portfolio:${sessionId}`, createPaperPortfolio(2.70));
         await txn.put(`audit_events:${sessionId}:00000000`, [firstEvent]);
         await txn.put(`audit_event_id:${sessionId}:session-started:${sessionId}`, 1);
       });
@@ -442,11 +444,30 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put(`audit_event_id:${sessionId}:${entry.eventId}`, sequence);
       }
       await txn.put(key, topped.state);
+      const portfolioKey = `paper_portfolio:${sessionId}`;
+      const portfolio = await txn.get<PaperPortfolioState>(portfolioKey);
+      if (portfolio) {
+        const openValue = portfolio.positions.filter(position => position.status === "OPEN")
+          .reduce((sum, position) => sum + Number(BigInt(position.tokenAmountBaseUnits)) * position.latestPriceUsdPerToken, 0);
+        await txn.put(portfolioKey, {
+          ...portfolio, bankroll: topped.state,
+          availableCashUsd: Math.max(0, Math.round((topped.state.currentEquityUsd - openValue) * 1e8) / 1e8),
+          highWaterEquityUsd: Math.max(portfolio.highWaterEquityUsd, topped.state.currentEquityUsd),
+          lastMarkedAt: occurredAt
+        });
+      }
       await txn.put(metaKey, { ...meta, eventCount: count, topUpCount: topped.state.topUpCount,
         totalTopUpsUsd: topped.state.totalTopUpsUsd });
     });
     const state = output ?? createBankrollState(2.70);
     return { ...state, netPnlUsd: state.currentEquityUsd - state.totalCapitalContributedUsd };
+  }
+
+  async getPaperPortfolio(): Promise<unknown> {
+    await this.hydrate();
+    const sessionId = this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
+    if (!sessionId) return null;
+    return await this.ctx.storage.get<PaperPortfolioState>(`paper_portfolio:${sessionId}`) ?? null;
   }
 
   async getPaperBankroll(): Promise<unknown> {
@@ -1321,6 +1342,9 @@ export default {
     }
     if (url.pathname === "/paper-bankroll" && request.method === "GET") {
       return Response.json(await coordinator.getPaperBankroll());
+    }
+    if (url.pathname === "/paper-portfolio" && request.method === "GET") {
+      return Response.json(await coordinator.getPaperPortfolio());
     }
     if (url.pathname === "/paper-equity" && request.method === "POST") {
       let body: unknown;
