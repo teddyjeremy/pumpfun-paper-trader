@@ -624,6 +624,7 @@ export interface HeliusBackfillArchiveInput {
     reason: string | null;
   };
   transaction?: {
+    mint: string;
     signature: string;
     slot: number;
     provider: "helius";
@@ -648,6 +649,8 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
       !Number.isSafeInteger(state.pagesScanned) || state.pagesScanned < 0 ||
       !Number.isSafeInteger(state.scannedCount) || state.scannedCount < 0 ||
       !Array.isArray(state.signatures) || state.signatures.length > state.maxSignatures ||
+      (state.before !== null && !signaturePattern.test(state.before)) ||
+      (state.status === "COMPLETE" && !state.signatures.some(item => item.signature === state.createSignature)) ||
       !["PENDING","PAGING","READY_TO_FETCH","COMPLETE","INCOMPLETE"].includes(state.status)) {
     throw new Error("Historical backfill archive contains invalid identity or progress fields.");
   }
@@ -657,8 +660,9 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
       throw new Error("Historical backfill archive contains an invalid signature record.");
     }
   }
-  if (transaction && (!signaturePattern.test(transaction.signature) ||
+  if (transaction && (transaction.mint !== mint || !signaturePattern.test(transaction.signature) ||
       !Number.isSafeInteger(transaction.slot) || transaction.slot < 0 ||
+      transaction.provider !== "helius" || !["confirmed","finalized"].includes(transaction.commitment) ||
       !Number.isFinite(Date.parse(transaction.receivedAt)) ||
       !Array.isArray(transaction.createEvents) || !Array.isArray(transaction.tradeEvents))) {
     throw new Error("Historical transaction observation contains invalid fields.");
