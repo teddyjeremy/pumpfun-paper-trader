@@ -1336,11 +1336,10 @@ export default {
       const sessionId = url.searchParams.get("sessionId") ?? undefined;
       const page = await coordinator.listAuditEvents(after, limit, sessionId);
       if (url.pathname === "/audit/export") {
-        const fileSession = sessionId ?? "latest";
-        return new Response(JSON.stringify(page, null, 2), {
+        return new Response(JSON.stringify(page, null, 2) ?? "{}", {
           headers: {
             "content-type": "application/json; charset=utf-8",
-            "content-disposition": `attachment; filename="paper-audit-${fileSession}-after-${after}.json"`
+            "content-disposition": `attachment; filename="paper-audit-export-after-${after}.json"`
           }
         });
       }
