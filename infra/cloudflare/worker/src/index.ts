@@ -282,6 +282,58 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
+  private async flushHeliusBackfillArchivesToPostgres(sessionId: string | null = this.activeSessionId): Promise<void> {
+    if (!this.postgresIngestConfigured || !sessionId) return;
+    const listKey = `helius_backfill_mints:${sessionId}`;
+    const mints = await this.ctx.storage.get<string[]>(listKey) ?? [];
+    for (const mint of mints) {
+      const state = await this.ctx.storage.get<HistoricalBackfillState>(`helius_backfill:${sessionId}:${mint}`);
+      if (!state) continue;
+      try {
+        const response = await this.postPostgresIngest("/internal/helius-backfill", {
+          sessionId: sessionId, mint, state
+        });
+        if (!response.ok) throw new Error("Archive checkpoint was not acknowledged.");
+      } catch {
+        this.status.lastError = "Helius backfill archive is waiting for PostgreSQL persistence.";
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+    }
+    const archivedKey = `helius_archived_transaction_signatures:${sessionId}`;
+    const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
+    for (const transaction of this.verifiedTransactions) {
+      if (archived.has(transaction.signature)) continue;
+      try {
+        const state = await this.ctx.storage.get<HistoricalBackfillState>(
+          `helius_backfill:${sessionId}:${transaction.mint}`
+        );
+        if (!state) continue;
+        const response = await this.postPostgresIngest("/internal/helius-backfill", {
+          sessionId: sessionId,
+          mint: transaction.mint,
+          state,
+          transaction: jsonSafe(transaction)
+        });
+        if (!response.ok) throw new Error("Transaction archive was not acknowledged.");
+        archived.add(transaction.signature);
+        await this.ctx.storage.put(archivedKey, [...archived].slice(-5_000));
+      } catch {
+        this.status.lastError = "Verified Helius transactions are waiting for PostgreSQL persistence.";
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+    }
+  }
+
+  private async flushAllHeliusBackfillArchivesToPostgres(): Promise<void> {
+    if (!this.postgresIngestConfigured) return;
+    const sessions = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
+    for (const sessionId of sessions) {
+      await this.flushHeliusBackfillArchivesToPostgres(sessionId);
+    }
+  }
+
   private async flushAllAuditSessionsToPostgres(): Promise<void> {
     if (!this.postgresIngestConfigured) return;
     const sessions = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
@@ -314,6 +366,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await this.drainHeliusQueue();
     }
     await this.flushAllAuditSessionsToPostgres();
+    await this.flushAllHeliusBackfillArchivesToPostgres();
     if (this.status.enabled && this.postgresLeaseHeld) {
       const now = Date.now();
       const pendingRetryAt = this.heliusState.queue
@@ -467,8 +520,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put("latest_audit_session_id", completedSessionId);
         await txn.delete("active_audit_session_id");
       });
-      this.activeSessionId = null;
       await this.flushAuditEventsToPostgres(completedSessionId);
+      await this.flushHeliusBackfillArchivesToPostgres(completedSessionId);
+      this.activeSessionId = null;
     }
     await this.persist();
     await this.releasePostgresWorkerLease();
