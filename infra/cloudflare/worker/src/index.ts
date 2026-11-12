@@ -198,16 +198,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         eventCount: 0, initialBankrollUsd: 2.70, topUpAmountUsd: 2.70,
         topUpThresholdUsd: 1.00, topUpCount: 0, totalTopUpsUsd: 0
       };
-      await this.ctx.storage.put(`audit_session:${sessionId}`, meta);
-      await this.ctx.storage.put("active_audit_session_id", sessionId);
-      const sessions = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
-      await this.ctx.storage.put("audit_session_ids", [...sessions, sessionId]);
-      await this.ctx.storage.put(`paper_bankroll:${sessionId}`, createBankrollState(2.70));
+      await this.ctx.storage.transaction(async txn => {
+        const sessions = await txn.get<string[]>("audit_session_ids") ?? [];
+        const firstEvent: StoredAuditEvent = {
+          sessionId, sequence: 1, eventId: `session-started:${sessionId}`,
+          kind: "SESSION_STARTED", occurredAt: meta.startedAt, mint: null,
+          strategyVersion: meta.strategyVersion,
+          data: { initialBankrollUsd: 2.70, topUpAmountUsd: 2.70,
+            topUpThresholdUsd: 1.00, strategyVersion: "strict-v1" }
+        };
+        await txn.put(`audit_session:${sessionId}`, { ...meta, eventCount: 1 });
+        await txn.put("active_audit_session_id", sessionId);
+        await txn.put("audit_session_ids", [...sessions, sessionId]);
+        await txn.put(`paper_bankroll:${sessionId}`, createBankrollState(2.70));
+        await txn.put(`audit_events:${sessionId}:00000000`, [firstEvent]);
+        await txn.put(`audit_event_id:${sessionId}:session-started:${sessionId}`, 1);
+      });
       this.activeSessionId = sessionId;
-      await this.appendAudit("SESSION_STARTED", null, {
-        initialBankrollUsd: 2.70, topUpAmountUsd: 2.70, topUpThresholdUsd: 1.00,
-        strategyVersion: "strict-v1"
-      }, `session-started:${sessionId}`);
     } else {
       await this.appendAudit("PROVIDER_STATUS", null, { action: "START_REQUESTED" });
     }
@@ -226,12 +233,29 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.markHeliusCoverageGap();
     if (this.activeSessionId) {
       const completedSessionId = this.activeSessionId;
-      await this.appendAudit("SESSION_STOPPED", null, { reason: "MANUAL_STOP" }, `session-stopped:${completedSessionId}`);
-      const metaKey = `audit_session:${completedSessionId}`;
-      const meta = await this.ctx.storage.get<AuditSessionMeta>(metaKey);
-      if (meta) await this.ctx.storage.put(metaKey, { ...meta, stoppedAt: new Date().toISOString() });
-      await this.ctx.storage.put("latest_audit_session_id", completedSessionId);
-      await this.ctx.storage.delete("active_audit_session_id");
+      const stoppedAt = new Date().toISOString();
+      await this.ctx.storage.transaction(async txn => {
+        const metaKey = `audit_session:${completedSessionId}`;
+        const meta = await txn.get<AuditSessionMeta>(metaKey);
+        if (!meta) throw new Error("Audit session metadata missing.");
+        const sequence = meta.eventCount + 1;
+        const pageNumber = Math.floor((sequence - 1) / AUDIT_PAGE_SIZE);
+        const pageKey = `audit_events:${completedSessionId}:${String(pageNumber).padStart(8, "0")}`;
+        const page = await txn.get<StoredAuditEvent[]>(pageKey) ?? [];
+        const eventId = `session-stopped:${completedSessionId}`;
+        if (await txn.get<number>(`audit_event_id:${completedSessionId}:${eventId}`) === undefined) {
+          page.push({ sessionId: completedSessionId, sequence, eventId, kind: "SESSION_STOPPED",
+            occurredAt: stoppedAt, mint: null, strategyVersion: meta.strategyVersion,
+            data: { reason: "MANUAL_STOP" } });
+          await txn.put(pageKey, page);
+          await txn.put(`audit_event_id:${completedSessionId}:${eventId}`, sequence);
+          await txn.put(metaKey, { ...meta, eventCount: sequence, stoppedAt });
+        } else {
+          await txn.put(metaKey, { ...meta, stoppedAt });
+        }
+        await txn.put("latest_audit_session_id", completedSessionId);
+        await txn.delete("active_audit_session_id");
+      });
       this.activeSessionId = null;
     }
     await this.ctx.storage.put("enabled", false);
