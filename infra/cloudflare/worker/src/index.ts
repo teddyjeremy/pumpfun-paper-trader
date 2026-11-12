@@ -1148,8 +1148,22 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           err: notification.err
         });
         this.heliusState = result.state;
-        if (result.outcome === "OVERFLOW" || result.outcome === "INVALID") this.status.incompleteHeliusTransactions += 1;
+        if (result.outcome === "OVERFLOW" || result.outcome === "INVALID" ||
+            result.outcome === "UNKNOWN_SUBSCRIPTION") this.status.incompleteHeliusTransactions += 1;
         if (result.outcome === "FAILED") this.status.failedHeliusTransactions += 1;
+        if (result.outcome !== "QUEUED") {
+          const gap = result.outcome === "OVERFLOW" || result.outcome === "INVALID" ||
+            result.outcome === "UNKNOWN_SUBSCRIPTION";
+          this.auditInBackground(gap ? "DATA_GAP" : "OBSERVATION", this.heliusState.subscriptions
+            .find(item => item.subscriptionId === subscriptionId)?.mint ?? null, {
+              provider: "helius", notificationOutcome: result.outcome,
+              signature: notification.signature, slot: notification.slot,
+              subscriptionId, queueLength: this.heliusState.queue.length,
+              droppedSignatures: this.heliusState.droppedSignatures,
+              duplicateSignatures: this.heliusState.duplicateSignatures,
+              reason: gap ? "NOTIFICATION_NOT_QUEUED" : result.outcome
+            }, `helius-notification:${notification.signature}:${result.outcome}`);
+        }
         void this.persist().then(() => this.drainHeliusQueue()).catch(() => this.markHeliusIncomplete());
       });
       socket.addEventListener("close", () => {
