@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PumpCreateEvent, PumpTradeEvent } from "../src/ingestion/pump-events.js";
 import type { VerifiedPumpTransaction } from "../src/ingestion/helius.js";
-import { calibrateVolumeThresholds, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
+import { calibrateVolumeThresholds, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
 
 const mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const quoteMint = "So11111111111111111111111111111111111111112";
@@ -114,4 +114,22 @@ describe("historical strategy replay", () => {
     expect(calibration.status).toBe("INSUFFICIENT_SAMPLE");
     expect(calibration.recommended).toBeNull();
   });
+  it("hydrates JSON-safe archived base units back into bigint Pump event values", () => {
+    const raw = JSON.parse(JSON.stringify({
+      ...verifiedTransaction(), source: "HISTORICAL_BACKFILL"
+    }, (_key, value) => typeof value === "bigint" ? value.toString() : value));
+    const hydrated = hydrateArchivedVerifiedTransaction(raw);
+    expect(hydrated.tradeEvents[0]!.timestamp).toBe(0n);
+    expect(hydrated.tradeEvents[0]!.virtualSolReserves).toBe(1_000_000_000_000n);
+    expect(hydrated.createEvents[0]!.virtualTokenReserves).toBe(1_000_000_000_000n);
+  });
+
+  it("rejects a transaction whose archived Pump event mint differs from its transaction mint", () => {
+    const raw = JSON.parse(JSON.stringify({
+      ...verifiedTransaction(), source: "HISTORICAL_BACKFILL"
+    }, (_key, value) => typeof value === "bigint" ? value.toString() : value));
+    raw.tradeEvents[0].mint = key;
+    expect(() => hydrateArchivedVerifiedTransaction(raw)).toThrow(/mint does not match/);
+  });
+
 });
