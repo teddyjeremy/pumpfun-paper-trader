@@ -23,7 +23,7 @@ Status: paper-trading specification. The standard strategy is the only enabled s
 
 ### Flow confirmation
 
-Use three consecutive two-second windows. Every window must have:
+Use three consecutive two-second windows sampled one second apart (overlapping rolling windows). Every window must have:
 
 - Buy/sell quote-volume ratio strictly greater than 3:1.
 - At least three unique buyers.
