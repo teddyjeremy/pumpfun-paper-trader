@@ -386,8 +386,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       coverageStartByMint
     });
     const creatorRiskByMint = new Map(creatorSellRisk.map(item => [item.mint, item]));
-    // No wallet-linkage source is wired yet. Emit WATCH for every candidate
-    // rather than treating missing attribution as a clean bill of health.
+    // Missing linkage collection remains WATCH; only the on-demand bounded
+    // Helius funding snapshot can contribute explicit >=70% relationship edges.
     const launchByMint = new Map(this.verifiedTransactions.flatMap(tx => tx.createEvents)
       .map(event => [event.mint, event] as const));
     const walletClusterRisk = candidateMints.map(mint => {
