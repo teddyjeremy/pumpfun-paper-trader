@@ -43,7 +43,7 @@ export interface PumpMarketState {
 export const MARKET_EVIDENCE_MAX_AGE_MS = 2_000;
 
 function validBaseUnits(value: string, allowZero = false): boolean {
-  return /^\\d+$/.test(value) && (allowZero ? BigInt(value) >= 0n : BigInt(value) > 0n);
+  return /^\d+$/.test(value) && (allowZero ? BigInt(value) >= 0n : BigInt(value) > 0n);
 }
 
 function validObservation(observedAt: string, nowMs: number): boolean {
