@@ -1739,7 +1739,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             await this.ctx.storage.put("helius_monitor_state", this.heliusState);
             continue;
           }
-          await this.ctx.storage.setAlarm(retryAt);
+          const nextRetryAt = this.heliusState.queue
+            .map(item => item.retryAfterAt ? Date.parse(item.retryAfterAt) : Number.NaN)
+            .filter(at => Number.isFinite(at) && at > Date.now())
+            .reduce((earliest, at) => Math.min(earliest, at), retryAt);
+          await this.ctx.storage.setAlarm(nextRetryAt);
           break;
         }
         activeWork = work;
@@ -1786,6 +1790,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           this.status.incompleteHeliusTransactions += 1;
           this.heliusState = takeHeliusWork(this.heliusState).state;
           workDequeued = true;
+          this.heliusState = {
+            ...this.heliusState,
+            incompleteMints: [...new Set([...this.heliusState.incompleteMints, work.mint])].slice(-10)
+          };
           const retry = retryHeliusSignatureWork(this.heliusState, work, Date.now());
           this.heliusState = retry.state;
           await this.appendAudit("DATA_GAP", work.mint, {
@@ -1817,14 +1825,22 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         if (this.heliusState.queue[0]?.signature === activeWork.signature) {
           this.heliusState = takeHeliusWork(this.heliusState).state;
         }
-        const retry = retryHeliusSignatureWork(this.heliusState, activeWork, Date.now());
-        this.heliusState = retry.state;
-        if (retry.retryAfterAt) await this.ctx.storage.setAlarm(Date.parse(retry.retryAfterAt));
-        if (retry.outcome !== "RETRY_SCHEDULED") {
-          this.heliusState = {
-            ...this.heliusState,
-            incompleteMints: [...new Set([...this.heliusState.incompleteMints, activeWork.mint])].slice(-10)
-          };
+        if (!this.heliusState.queue.some(item => item.signature === activeWork.signature)) {
+          const retry = retryHeliusSignatureWork(this.heliusState, activeWork, Date.now());
+          this.heliusState = retry.state;
+          if (retry.retryAfterAt) await this.ctx.storage.setAlarm(Date.parse(retry.retryAfterAt));
+          if (retry.outcome !== "RETRY_SCHEDULED") {
+            this.heliusState = {
+              ...this.heliusState,
+              incompleteMints: [...new Set([...this.heliusState.incompleteMints, activeWork.mint])].slice(-10)
+            };
+          }
+        } else {
+          const nextRetryAt = this.heliusState.queue
+            .map(item => item.retryAfterAt ? Date.parse(item.retryAfterAt) : Number.NaN)
+            .filter(at => Number.isFinite(at) && at > Date.now())
+            .reduce((earliest, at) => earliest === null ? at : Math.min(earliest, at), null as number | null);
+          if (nextRetryAt !== null) await this.ctx.storage.setAlarm(nextRetryAt);
         }
       }
       this.status.incompleteHeliusTransactions += 1;
