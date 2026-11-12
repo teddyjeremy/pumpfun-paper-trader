@@ -1,18 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   executePaperEntry,
-  type PaperEntryExecutionInput
+  type PaperEntryExecutionInput,
+  type PaperEntryStrategyDecision
 } from "./execution-lifecycle.js";
 import type { PaperPortfolioState } from "./portfolio.js";
 
-const completeRules = [
+const completeRules: PaperEntryStrategyDecision["rules"] = [
   "CANDIDATE_AGE", "IMPULSE", "PULLBACK", "RECLAIM", "THREE_FLOW_WINDOWS",
   "DISTINCT_BUYERS", "BUYER_CONCENTRATION", "CREATOR_SELL_RISK", "WALLET_CLUSTER_RISK",
   "ATTRIBUTION_CONFIDENCE", "PULLBACK_VOLUME_CONTRACTION", "RECLAIM_VOLUME_EXPANSION",
   "SIGNAL_FRESHNESS", "EXECUTABLE_QUOTE", "ROUND_TRIP_COST"
-].map(rule => ({ rule, status: "PASS" as const }));
+].map(rule => ({ rule, status: "PASS" }));
 
-function inputWithRules(rules: typeof completeRules): PaperEntryExecutionInput {
+function inputWithRules(rules: PaperEntryStrategyDecision["rules"]): PaperEntryExecutionInput {
   return {
     mint: "mint-under-test",
     positionId: "position-under-test",
@@ -46,9 +47,12 @@ describe("executePaperEntry mandatory rule contract", () => {
     const duplicateResult = await executePaperEntry(inputWithRules(duplicate));
     expect(duplicateResult.status).toBe("BLOCKED");
 
-    const unknown = [...completeRules.slice(0, -1), { rule: "UNRECOGNIZED", status: "PASS" as const }];
-    const unknownResult = await executePaperEntry(inputWithRules(unknown));
-    expect(unknownResult.status).toBe("BLOCKED");
+    const unrecognized = [
+      ...completeRules.slice(0, -1),
+      { rule: "UNRECOGNIZED", status: "PASS" as const }
+    ];
+    const unrecognizedResult = await executePaperEntry(inputWithRules(unrecognized));
+    expect(unrecognizedResult.status).toBe("BLOCKED");
   });
 
   it("blocks UNKNOWN and FAIL rules", async () => {
