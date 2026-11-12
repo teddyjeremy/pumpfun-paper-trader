@@ -106,6 +106,6 @@ The six-hour paper session remains blocked until the missing quote source, execu
 
 ## Helius-backed market refresh pipeline
 - Added `refreshPumpMarketStateFromHelius`: reads the mint-derived curve PDA using Helius `getMultipleAccounts`; a fresh incomplete curve is LIVE_CURVE and does not trigger pool discovery.
-- When the curve is complete, it derives the canonical Pump pool-creator and index-0 pool PDAs, discovers candidates by `Pool.base_mint`, then re-fetches the pool and both vaults together in a single Helius RPC context slot.
+- When the curve is complete, it derives the canonical Pump pool-creator and index-0 pool PDAs, discovers candidates by `Pool.base_mint`, then re-fetches the curve, pool and both vaults together in a single Helius RPC context slot before accepting the migrated state.
 - A missing pool/vault leaves the market MIGRATION_PENDING; a mismatched owner, mint, authority, PDA, stale snapshot or empty liquidity sets EXIT_BLOCKED. Only a complete verified snapshot reaches MIGRATED_POOL_VERIFIED.
 - This pipeline is implemented and unit-tested, but it is not yet called by the Cloudflare Worker or connected to open paper positions, quote requests or the exit manager.
