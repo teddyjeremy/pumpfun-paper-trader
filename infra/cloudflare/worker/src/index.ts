@@ -1725,7 +1725,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         }
         const work = this.heliusState.queue[0];
         if (!work) break;
+        const retryAt = work.retryAfterAt ? Date.parse(work.retryAfterAt) : null;
+        if (retryAt !== null && Number.isFinite(retryAt) && retryAt > Date.now()) {
+          const readyBehind = this.heliusState.queue.slice(1).some(item => {
+            const at = item.retryAfterAt ? Date.parse(item.retryAfterAt) : null;
+            return at === null || !Number.isFinite(at) || at <= Date.now();
+          });
+          if (readyBehind) {
+            this.heliusState = {
+              ...this.heliusState,
+              queue: [...this.heliusState.queue.slice(1), work]
+            };
+            await this.ctx.storage.put("helius_monitor_state", this.heliusState);
+            continue;
+          }
+          await this.ctx.storage.setAlarm(retryAt);
+          break;
+        }
         activeWork = work;
+        let workDequeued = false;
         const result = await fetchAndVerifyPumpTransaction(work.signature, work.mint, {
           apiKey: this.env.HELIUS_API_KEY,
           commitment: "confirmed"
@@ -1766,13 +1784,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           await this.appendAudit("OBSERVATION", work.mint, { signature: work.signature, slot: work.slot, status: result.status }, `helius-failed:${work.signature}`);
         } else if (result.status === "DATA_INCOMPLETE") {
           this.status.incompleteHeliusTransactions += 1;
-          await this.appendAudit("DATA_GAP", work.mint, { signature: work.signature, slot: work.slot, status: result.status, reason: result.reason }, `helius-incomplete:${work.signature}`);
-          this.heliusState = {
-            ...this.heliusState,
-            incompleteMints: [...new Set([...this.heliusState.incompleteMints, work.mint])].slice(-10)
-          };
+          this.heliusState = takeHeliusWork(this.heliusState).state;
+          workDequeued = true;
+          const retry = retryHeliusSignatureWork(this.heliusState, work, Date.now());
+          this.heliusState = retry.state;
+          await this.appendAudit("DATA_GAP", work.mint, {
+            signature: work.signature, slot: work.slot, status: result.status,
+            reason: result.reason, retryAttempt: (work.retryAttempt ?? 0) + 1,
+            retryOutcome: retry.outcome, retryAfterAt: retry.retryAfterAt
+          }, `helius-incomplete:${work.signature}:attempt:${(work.retryAttempt ?? 0) + 1}`);
+          if (retry.outcome === "EXHAUSTED" || retry.outcome === "OVERFLOW") {
+            this.heliusState = {
+              ...this.heliusState,
+              incompleteMints: [...new Set([...this.heliusState.incompleteMints, work.mint])].slice(-10)
+            };
+          }
         }
-        this.heliusState = takeHeliusWork(this.heliusState).state;
+        if (!workDequeued) this.heliusState = takeHeliusWork(this.heliusState).state;
         await this.ctx.storage.put({
           helius_monitor_state: this.heliusState,
           verified_transactions: this.verifiedTransactions,
@@ -1789,10 +1817,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         if (this.heliusState.queue[0]?.signature === activeWork.signature) {
           this.heliusState = takeHeliusWork(this.heliusState).state;
         }
-        this.heliusState = {
-          ...this.heliusState,
-          incompleteMints: [...new Set([...this.heliusState.incompleteMints, activeWork.mint])].slice(-10)
-        };
+        const retry = retryHeliusSignatureWork(this.heliusState, activeWork, Date.now());
+        this.heliusState = retry.state;
+        if (retry.retryAfterAt) await this.ctx.storage.setAlarm(Date.parse(retry.retryAfterAt));
+        if (retry.outcome !== "RETRY_SCHEDULED") {
+          this.heliusState = {
+            ...this.heliusState,
+            incompleteMints: [...new Set([...this.heliusState.incompleteMints, activeWork.mint])].slice(-10)
+          };
+        }
       }
       this.status.incompleteHeliusTransactions += 1;
       await this.ctx.storage.put({
