@@ -605,3 +605,103 @@ export async function getPaperSessionLedgerSnapshot(sessionId?: string) {
     return unavailable("Paper ledger projection tables are unavailable; inspect migration 0005 and database logs");
   }
 }
+
+
+export interface HeliusBackfillArchiveInput {
+  sessionId: string;
+  mint: string;
+  state: {
+    bondingCurve: string;
+    createSignature: string;
+    launchBlockTime: number | null;
+    horizonSeconds: number;
+    maxSignatures: number;
+    signatures: Array<{ signature: string; slot: number; blockTime: number | null; err: unknown }>;
+    pagesScanned: number;
+    scannedCount: number;
+    before: string | null;
+    status: "PENDING" | "PAGING" | "READY_TO_FETCH" | "COMPLETE" | "INCOMPLETE";
+    reason: string | null;
+  };
+  transaction?: {
+    signature: string;
+    slot: number;
+    provider: "helius";
+    commitment: "confirmed" | "finalized";
+    receivedAt: string;
+    createEvents: unknown[];
+    tradeEvents: unknown[];
+  };
+}
+
+/** Persist an idempotent backfill checkpoint and, when supplied, a verified decoded transaction. */
+export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveInput): Promise<void> {
+  if (!pool) throw new Error("PostgreSQL persistence is not configured.");
+  const { sessionId, mint, state, transaction } = input;
+  const address = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  const signaturePattern = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
+  if (!sessionId.trim() || sessionId.length > 128 || !address.test(mint) ||
+      !address.test(state.bondingCurve) || !signaturePattern.test(state.createSignature) ||
+      !Number.isSafeInteger(state.launchBlockTime) || (state.launchBlockTime ?? -1) < 0 ||
+      !Number.isSafeInteger(state.horizonSeconds) || state.horizonSeconds < 60 || state.horizonSeconds > 1800 ||
+      !Number.isSafeInteger(state.maxSignatures) || state.maxSignatures < 1 || state.maxSignatures > 500 ||
+      !Number.isSafeInteger(state.pagesScanned) || state.pagesScanned < 0 ||
+      !Number.isSafeInteger(state.scannedCount) || state.scannedCount < 0 ||
+      !Array.isArray(state.signatures) || state.signatures.length > state.maxSignatures ||
+      !["PENDING","PAGING","READY_TO_FETCH","COMPLETE","INCOMPLETE"].includes(state.status)) {
+    throw new Error("Historical backfill archive contains invalid identity or progress fields.");
+  }
+  for (const item of state.signatures) {
+    if (!signaturePattern.test(item.signature) || !Number.isSafeInteger(item.slot) || item.slot < 0 ||
+        !(item.blockTime === null || (Number.isSafeInteger(item.blockTime) && item.blockTime >= 0))) {
+      throw new Error("Historical backfill archive contains an invalid signature record.");
+    }
+  }
+  if (transaction && (!signaturePattern.test(transaction.signature) ||
+      !Number.isSafeInteger(transaction.slot) || transaction.slot < 0 ||
+      !Number.isFinite(Date.parse(transaction.receivedAt)) ||
+      !Array.isArray(transaction.createEvents) || !Array.isArray(transaction.tradeEvents))) {
+    throw new Error("Historical transaction observation contains invalid fields.");
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const session = await client.query("SELECT id FROM paper_sessions WHERE id=$1 FOR SHARE", [sessionId]);
+    if (session.rowCount !== 1) throw new Error("Paper session must be ingested before its Helius archive.");
+    await client.query(
+      `INSERT INTO helius_backfill_jobs
+        (session_id,mint,bonding_curve,create_signature,launch_block_time,horizon_seconds,max_signatures,
+         pages_scanned,scanned_count,before_signature,status,reason,signature_count,signature_state,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,now())
+       ON CONFLICT (session_id,mint) DO UPDATE SET
+         pages_scanned=EXCLUDED.pages_scanned,scanned_count=EXCLUDED.scanned_count,
+         before_signature=EXCLUDED.before_signature,status=EXCLUDED.status,reason=EXCLUDED.reason,
+         signature_count=EXCLUDED.signature_count,signature_state=EXCLUDED.signature_state,updated_at=now()
+       WHERE EXCLUDED.pages_scanned >= helius_backfill_jobs.pages_scanned`,
+      [sessionId,mint,state.bondingCurve,state.createSignature,state.launchBlockTime,state.horizonSeconds,
+        state.maxSignatures,state.pagesScanned,state.scannedCount,state.before,state.status,state.reason,
+        state.signatures.length,JSON.stringify(state.signatures)]
+    );
+    if (transaction) {
+      const raw = JSON.stringify(transaction);
+      const result = await client.query(
+        `INSERT INTO helius_transaction_observations
+          (session_id,mint,signature,slot,provider,commitment,received_at,create_events,trade_events,raw_observation)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb)
+         ON CONFLICT (session_id,mint,signature) DO UPDATE SET
+           raw_observation=EXCLUDED.raw_observation
+         WHERE helius_transaction_observations.raw_observation=EXCLUDED.raw_observation
+         RETURNING signature`,
+        [sessionId,mint,transaction.signature,transaction.slot,transaction.provider,transaction.commitment,
+          transaction.receivedAt,JSON.stringify(transaction.createEvents),JSON.stringify(transaction.tradeEvents),raw]
+      );
+      if (result.rowCount !== 1) throw new Error("Historical transaction signature conflicts with previously archived evidence.");
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
