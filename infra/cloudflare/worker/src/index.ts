@@ -2,7 +2,9 @@ import { DurableObject } from "cloudflare:workers";
 import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "../../../../src/paper/session-ledger.js";
 
 type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "WORKER_RESTARTED" | "DISCOVERY" |
-  "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "OBSERVATION" | "DATA_GAP" |
+  "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "CANDIDATE_EXPIRED" | "OBSERVATION" |
+  "FEATURE_SNAPSHOT" | "STRATEGY_DECISION" | "REJECTION_REASON" | "QUOTE_REQUESTED" |
+  "QUOTE_RESULT" | "PAPER_ENTRY" | "PAPER_EXIT" | "POSITION_MARK" | "DATA_GAP" |
   "PROVIDER_STATUS" | "ERROR" | "RISK_EVIDENCE" | "BANKROLL_TOP_UP" | "CANDIDATE_OUTCOME";
 interface StoredAuditEvent {
   sessionId: string; sequence: number; eventId: string; kind: AuditKind;
@@ -174,12 +176,39 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.status.heliusConnected = false;
     this.syncCounts();
     this.hydrated = true;
+    if (this.activeSessionId && this.status.enabled) {
+      await this.appendAudit("WORKER_RESTARTED", null, {
+        discoveryCandidates: this.discovery.candidates.length,
+        verifiedTransactionsRetained: this.verifiedTransactions.length,
+        heliusCoverage: "GAP_UNTIL_RESUBSCRIBED"
+      }, `restart:${crypto.randomUUID()}`);
+    }
   }
 
   async start(): Promise<CoordinatorStatus> {
     await this.hydrate();
     if (!this.status.enabled || this.heliusSocket?.readyState !== WebSocket.OPEN) {
       this.markHeliusCoverageGap();
+    }
+    if (!this.activeSessionId) {
+      const sessionId = crypto.randomUUID();
+      const meta: AuditSessionMeta = {
+        sessionId, startedAt: new Date().toISOString(), stoppedAt: null, strategyVersion: "strict-v1",
+        eventCount: 0, initialBankrollUsd: 2.70, topUpAmountUsd: 2.70,
+        topUpThresholdUsd: 1.00, topUpCount: 0, totalTopUpsUsd: 0
+      };
+      await this.ctx.storage.put(`audit_session:${sessionId}`, meta);
+      await this.ctx.storage.put("active_audit_session_id", sessionId);
+      const sessions = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
+      await this.ctx.storage.put("audit_session_ids", [...sessions, sessionId]);
+      await this.ctx.storage.put(`paper_bankroll:${sessionId}`, createBankrollState(2.70));
+      this.activeSessionId = sessionId;
+      await this.appendAudit("SESSION_STARTED", null, {
+        initialBankrollUsd: 2.70, topUpAmountUsd: 2.70, topUpThresholdUsd: 1.00,
+        strategyVersion: "strict-v1"
+      }, `session-started:${sessionId}`);
+    } else {
+      await this.appendAudit("PROVIDER_STATUS", null, { action: "START_REQUESTED" });
     }
     await this.ctx.storage.put("enabled", true);
     this.status.enabled = true;
@@ -194,6 +223,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   async stop(): Promise<CoordinatorStatus> {
     await this.hydrate();
     this.markHeliusCoverageGap();
+    if (this.activeSessionId) {
+      const completedSessionId = this.activeSessionId;
+      await this.appendAudit("SESSION_STOPPED", null, { reason: "MANUAL_STOP" }, `session-stopped:${completedSessionId}`);
+      const metaKey = `audit_session:${completedSessionId}`;
+      const meta = await this.ctx.storage.get<AuditSessionMeta>(metaKey);
+      if (meta) await this.ctx.storage.put(metaKey, { ...meta, stoppedAt: new Date().toISOString() });
+      await this.ctx.storage.put("latest_audit_session_id", completedSessionId);
+      await this.ctx.storage.delete("active_audit_session_id");
+      this.activeSessionId = null;
+    }
     await this.ctx.storage.put("enabled", false);
     this.status.enabled = false;
     if (this.socket) {
@@ -298,65 +337,91 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return { ...this.status };
   }
 
-  private async appendAudit(kind: AuditKind, mint: string | null, data: unknown): Promise<void> {
+  private async appendAudit(kind: AuditKind, mint: string | null, data: unknown, idempotencyKey?: string): Promise<void> {
     if (!this.activeSessionId) return;
     const sessionId = this.activeSessionId;
+    const eventId = idempotencyKey ?? crypto.randomUUID();
     await this.ctx.storage.transaction(async txn => {
       const metaKey = `audit_session:${sessionId}`;
+      const dedupeKey = `audit_event_id:${sessionId}:${eventId}`;
+      if (await txn.get<number>(dedupeKey) !== undefined) return;
       const meta = await txn.get<AuditSessionMeta>(metaKey);
       if (!meta) throw new Error("Audit session metadata missing.");
       const sequence = meta.eventCount + 1;
       const pageNumber = Math.floor((sequence - 1) / AUDIT_PAGE_SIZE);
       const pageKey = `audit_events:${sessionId}:${String(pageNumber).padStart(8, "0")}`;
       const page = await txn.get<StoredAuditEvent[]>(pageKey) ?? [];
-      const event: StoredAuditEvent = {
-        sessionId, sequence, eventId: `${sessionId}:${sequence}`, kind,
-        occurredAt: new Date().toISOString(), mint,
-        strategyVersion: meta.strategyVersion, data: jsonSafe(data)
-      };
-      page.push(event);
+      page.push({ sessionId, sequence, eventId, kind, occurredAt: new Date().toISOString(),
+        mint, strategyVersion: meta.strategyVersion, data: jsonSafe(data) });
       await txn.put(pageKey, page);
-      await txn.put(metaKey, { ...meta, eventCount: sequence,
-        topUpCount: meta.topUpCount, totalTopUpsUsd: meta.totalTopUpsUsd });
+      await txn.put(dedupeKey, sequence);
+      await txn.put(metaKey, { ...meta, eventCount: sequence });
     });
   }
 
   async recordPaperEquity(equityUsd: number): Promise<unknown> {
     await this.hydrate();
     if (!this.activeSessionId) throw new Error("No active paper session.");
-    const saved = await this.ctx.storage.get<BankrollState>("paper_bankroll_state") ?? createBankrollState(2.70);
-    const marked = markPaperEquity(saved, equityUsd);
-    const replenished = replenishPaperBankroll(marked, new Date().toISOString(), 2.70, 1.00);
-    await this.ctx.storage.put("paper_bankroll_state", replenished.state);
-    if (replenished.event) {
-      await this.appendAudit("BANKROLL_TOP_UP", null, replenished.event.data);
-      const metaKey = `audit_session:${this.activeSessionId}`;
-      const meta = await this.ctx.storage.get<AuditSessionMeta>(metaKey);
-      if (meta) await this.ctx.storage.put(metaKey, {
-        ...meta, topUpCount: replenished.state.topUpCount,
-        totalTopUpsUsd: replenished.state.totalTopUpsUsd
+    if (!Number.isFinite(equityUsd) || equityUsd < 0) throw new Error("Paper equity must be finite and non-negative.");
+    const sessionId = this.activeSessionId;
+    const occurredAt = new Date().toISOString();
+    let output: BankrollState | null = null;
+    await this.ctx.storage.transaction(async txn => {
+      const key = `paper_bankroll:${sessionId}`;
+      const saved = await txn.get<BankrollState>(key) ?? createBankrollState(2.70);
+      const marked = markPaperEquity(saved, equityUsd);
+      const topped = replenishPaperBankroll(marked, occurredAt, 2.70, 1.00);
+      output = topped.state;
+      const metaKey = `audit_session:${sessionId}`;
+      const meta = await txn.get<AuditSessionMeta>(metaKey);
+      if (!meta) throw new Error("Audit session metadata missing.");
+      const entries: Array<{kind: AuditKind; eventId: string; data: unknown}> = [{
+        kind: "POSITION_MARK", eventId: `equity-mark:${crypto.randomUUID()}`,
+        data: { equityUsd: marked.currentEquityUsd, contributedCapitalUsd: marked.totalCapitalContributedUsd }
+      }];
+      if (topped.event) entries.push({
+        kind: "BANKROLL_TOP_UP", eventId: `bankroll-top-up:${topped.state.topUpCount}`, data: topped.event.data
       });
-    }
-    return {
-      initialBankrollUsd: replenished.state.initialBankrollUsd,
-      topUpCount: replenished.state.topUpCount,
-      totalTopUpsUsd: replenished.state.totalTopUpsUsd,
-      totalCapitalContributedUsd: replenished.state.totalCapitalContributedUsd,
-      currentEquityUsd: replenished.state.currentEquityUsd,
-      netPnlUsd: replenished.state.currentEquityUsd - replenished.state.totalCapitalContributedUsd,
-      lastTopUpAt: replenished.state.lastTopUpAt
-    };
+      let count = meta.eventCount;
+      let pageNumber = Math.floor(count / AUDIT_PAGE_SIZE);
+      let pageKey = `audit_events:${sessionId}:${String(pageNumber).padStart(8, "0")}`;
+      let page = await txn.get<StoredAuditEvent[]>(pageKey) ?? [];
+      for (const entry of entries) {
+        const sequence = ++count;
+        pageNumber = Math.floor((sequence - 1) / AUDIT_PAGE_SIZE);
+        pageKey = `audit_events:${sessionId}:${String(pageNumber).padStart(8, "0")}`;
+        if ((sequence - 1) % AUDIT_PAGE_SIZE === 0) page = await txn.get<StoredAuditEvent[]>(pageKey) ?? [];
+        page.push({ sessionId, sequence, eventId: entry.eventId, kind: entry.kind,
+          occurredAt, mint: null, strategyVersion: meta.strategyVersion, data: jsonSafe(entry.data) });
+        await txn.put(pageKey, page);
+        await txn.put(`audit_event_id:${sessionId}:${entry.eventId}`, sequence);
+      }
+      await txn.put(key, topped.state);
+      await txn.put(metaKey, { ...meta, eventCount: count, topUpCount: topped.state.topUpCount,
+        totalTopUpsUsd: topped.state.totalTopUpsUsd });
+    });
+    const state = output ?? createBankrollState(2.70);
+    return { ...state, netPnlUsd: state.currentEquityUsd - state.totalCapitalContributedUsd };
   }
 
   async getPaperBankroll(): Promise<unknown> {
     await this.hydrate();
-    const state = await this.ctx.storage.get<BankrollState>("paper_bankroll_state") ?? createBankrollState(2.70);
+    const sessionId = this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
+    if (!sessionId) return { ...createBankrollState(2.70), netPnlUsd: 0 };
+    const state = await this.ctx.storage.get<BankrollState>(`paper_bankroll:${sessionId}`) ?? createBankrollState(2.70);
     return { ...state, netPnlUsd: state.currentEquityUsd - state.totalCapitalContributedUsd };
   }
 
-  async listAuditEvents(after = 0, limit = 100): Promise<unknown> {
+  async listAuditSessions(): Promise<unknown> {
     await this.hydrate();
-    const sessionId = this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
+    const ids = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
+    const sessions = await Promise.all(ids.map(id => this.ctx.storage.get<AuditSessionMeta>(`audit_session:${id}`)));
+    return sessions.filter((item): item is AuditSessionMeta => item !== undefined);
+  }
+
+  async listAuditEvents(after = 0, limit = 100, requestedSessionId?: string): Promise<unknown> {
+    await this.hydrate();
+    const sessionId = requestedSessionId ?? this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
     if (!sessionId) return { sessionId: null, events: [], nextAfter: null };
     const meta = await this.ctx.storage.get<AuditSessionMeta>(`audit_session:${sessionId}`);
     if (!meta) return { sessionId, events: [], nextAfter: null };
@@ -594,7 +659,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         }
       });
 
-      socket.addEventListener("message", (message: MessageEvent) => {
+      socket.addEventListener("message", async (message: MessageEvent) => {
         if (this.socket !== socket || !this.status.enabled) return;
         this.status.notificationsSinceStart += 1;
         this.status.lastMessageAt = new Date().toISOString();
@@ -605,7 +670,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         if (parsed.status === "IGNORED") return;
         if (parsed.status === "DATA_INCOMPLETE") {
           this.discovery.incomplete += 1;
-          void this.appendAudit("DISCOVERY_INCOMPLETE", null, { status: parsed.status, rawMessage: typeof message.data === "string" ? message.data.slice(0, 2000) : "NON_TEXT_MESSAGE" }).catch(() => { this.status.lastError = "Audit journal append failed."; });
+          await this.appendAudit("DISCOVERY_INCOMPLETE", null, {
+            status: parsed.status, rawMessage: typeof message.data === "string" ? message.data.slice(0, 2000) : "NON_TEXT_MESSAGE"
+          });
           this.pendingWrites += 1;
           this.syncCounts();
           if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist().catch(() => undefined);
@@ -624,6 +691,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           receivedAt: parsed.event.receivedAt
         }, { cap: MAX_CANDIDATES, now: this.status.lastMessageAt });
         this.discovery = result.state;
+        await this.appendAudit(
+          result.outcome === "OVERFLOW" ? "DISCOVERY_OVERFLOW" : "DISCOVERY",
+          parsed.event.mint,
+          { ...parsed.event, outcome: result.outcome,
+            candidateStatus: this.discovery.candidates.find(item => item.mint === parsed.event.mint)?.status ?? null },
+          parsed.event.signature ? `pumpportal:${parsed.event.signature}:${parsed.event.kind}` : undefined
+        );
+        if (result.outcome === "OVERFLOW") await this.appendAudit("DATA_GAP", parsed.event.mint, {
+          reason: "DISCOVERY_CANDIDATE_CAP_REACHED", cap: MAX_CANDIDATES
+        });
         this.reconcileHelius();
         this.pendingWrites += 1;
         this.syncCounts();
@@ -862,15 +939,20 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         });
         if (result.status === "VERIFIED") {
           this.verifiedTransactions = [...this.verifiedTransactions, result.transaction].slice(-2_000);
-          void this.appendAudit("OBSERVATION", work.mint, { signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction), retentionPolicy: "LATEST_2000_TRANSACTION_SNAPSHOT_PLUS_APPEND_ONLY_AUDIT" }).catch(() => { this.status.lastError = "Audit journal append failed."; });
+          await this.appendAudit("OBSERVATION", work.mint, {
+            signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction),
+            retentionPolicy: "LATEST_2000_TRANSACTION_SNAPSHOT_PLUS_APPEND_ONLY_AUDIT"
+          }, `helius:${work.signature}`);
           this.status.verifiedTransactions += 1;
           // Re-rank the six evidence-follow-up slots as verified events arrive.
           // Fresh launches remain protected by the four-slot first-minute reserve.
           this.reconcileHelius();
         } else if (result.status === "FAILED_TRANSACTION") {
           this.status.failedHeliusTransactions += 1;
+          await this.appendAudit("OBSERVATION", work.mint, { signature: work.signature, slot: work.slot, status: result.status }, `helius-failed:${work.signature}`);
         } else if (result.status === "DATA_INCOMPLETE") {
           this.status.incompleteHeliusTransactions += 1;
+          await this.appendAudit("DATA_GAP", work.mint, { signature: work.signature, slot: work.slot, status: result.status, reason: result.reason }, `helius-incomplete:${work.signature}`);
           this.heliusState = {
             ...this.heliusState,
             incompleteMints: [...new Set([...this.heliusState.incompleteMints, work.mint])].slice(-10)
@@ -1038,10 +1120,14 @@ export default {
       if (typeof equityUsd !== "number" || !Number.isFinite(equityUsd) || equityUsd < 0) return Response.json({ error: "equityUsd must be a finite non-negative number" }, { status: 400 });
       try { return Response.json(await coordinator.recordPaperEquity(equityUsd)); } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to record paper equity" }, { status: 409 }); }
     }
+    if (url.pathname === "/audit/sessions" && request.method === "GET") {
+      return Response.json(await coordinator.listAuditSessions());
+    }
     if (url.pathname === "/audit" && request.method === "GET") {
       const after = Number(url.searchParams.get("after") ?? "0");
       const limit = Number(url.searchParams.get("limit") ?? "100");
-      return Response.json(await coordinator.listAuditEvents(after, limit));
+      const sessionId = url.searchParams.get("sessionId") ?? undefined;
+      return Response.json(await coordinator.listAuditEvents(after, limit, sessionId));
     }
     if (url.pathname === "/observations" && request.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? "100");
