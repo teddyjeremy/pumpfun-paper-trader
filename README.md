@@ -15,6 +15,8 @@ The current `main` branch contains the discovery and monitoring foundation, veri
 - Creator, holder and wallet-cluster risk evidence modules and price/volume/trade-flow profiling.
 - Official Pump SDK offline curve and PumpSwap quote adapters using verified account snapshots.
 - Normalized executable-paper-quote validation, fresh SOL/USD normalization, explicit fee fields, quote TTL and latency-expiry checks.
+- Exact-size round-trip quote service: obtains a buy quote, then a full-output sell quote on the same venue/market, checks sellability, slot ordering and price impact, and reports net round-trip economics without authorizing an entry.
+- Helius priority-fee estimate from recent micro-lamports/CU samples, with an explicit compute-unit-limit and base-signature-fee assumption; account-specific samples are preferred when writable accounts are supplied.
 - Paper portfolio sizing, idempotent Durable Object session journal and position/exit primitives.
 - PostgreSQL base schema/migration runner, audit-event ingestion and worker-lease primitives.
 - Read-only dashboard/API and Cloudflare/GCP deployment blueprints.
