@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { ComputeBudgetProgram, Keypair, Message, SystemProgram, TransactionMessage } from "@solana/web3.js";
 import { compileUnsignedFeeMessage, estimateSolanaTransactionFees } from "../src/ingestion/solana-fee-estimator.js";
@@ -215,7 +216,7 @@ describe("unsigned transaction fee-message compiler", () => {
     });
     expect(result.computeUnitLimit).toBe(240_000);
     expect(result.messageBase64.length).toBeGreaterThan(0);
-    expect(result.messageSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.messageSha256).toBe(createHash("sha256").update(Buffer.from(result.messageBase64, "base64")).digest("hex"));
     expect(result.writableAccountKeys).toContain(payer.publicKey.toBase58());
     expect(result.writableAccountKeys).toContain(recipient.toBase58());
     const decoded = Message.from(Buffer.from(result.messageBase64, "base64"));
