@@ -5,7 +5,6 @@
   "compatibility_date": "2026-11-11",
   "vars": {
     "PUMPFUN_PROGRAM_ID": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
-    "CONTROL_TOKEN_SHA256": "31a291a281fb76b8fab87233862eecdbc08fcc6899150eafdfb2ae1490873699"
   },
   "triggers": { "crons": ["* * * * *"] },
   "durable_objects": {
