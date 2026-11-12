@@ -101,7 +101,10 @@ export async function fetchExecutableRoundTripQuote(input: {
   const startedAt = now();
   const [rawBuy, feeSamples, priceResult] = await Promise.all([
     input.fetchQuote({ side: "BUY", amountBaseUnits: input.buyAmountBaseUnits }),
-    fetchHeliusPriorityFeeSamples({ config: input.helius, writableAccounts: input.writableAccounts }),
+    fetchHeliusPriorityFeeSamples({
+      config: input.helius,
+      ...(input.writableAccounts ? { writableAccounts: input.writableAccounts } : {})
+    }),
     input.solUsd
       ? Promise.resolve({ status: "AVAILABLE" as const, observation: {
           source: "binance-spot" as const, symbol: "SOLUSDT" as const,
@@ -116,11 +119,15 @@ export async function fetchExecutableRoundTripQuote(input: {
   const networkFeeEstimate = buildPaperNetworkFeeEstimate({
     samples: feeSamples,
     computeUnitLimit: input.computeUnitLimit,
-    signatureCount: input.signatureCount,
     priorityFeePercentile: percentile,
-    baseFeeLamportsPerSignature: input.baseFeeLamportsPerSignature,
-    maxPriorityFeeLamports: input.maxPriorityFeeLamports,
-    writableAccountCount: input.writableAccounts?.length ?? 0
+    writableAccountCount: input.writableAccounts?.length ?? 0,
+    ...(input.signatureCount === undefined ? {} : { signatureCount: input.signatureCount }),
+    ...(input.baseFeeLamportsPerSignature === undefined ? {} : {
+      baseFeeLamportsPerSignature: input.baseFeeLamportsPerSignature
+    }),
+    ...(input.maxPriorityFeeLamports === undefined ? {} : {
+      maxPriorityFeeLamports: input.maxPriorityFeeLamports
+    })
   });
   const buyFetchedAt = now();
   const buyLatencyMs = Math.max(0, Math.ceil(buyFetchedAt - startedAt));
