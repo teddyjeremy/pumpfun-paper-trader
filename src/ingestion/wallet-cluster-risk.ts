@@ -27,6 +27,7 @@ export interface WalletClusterRisk {
   attributionStatus: "CONFIRMED_LINKS" | "NO_HIGH_CONFIDENCE_LINKS" | "INVALID_EVIDENCE";
   linkedWalletCount: number;
   largestClusterConfidenceBps: number | null;
+  largestIndividualHolderShareBps: number | null;
   linkedWalletSellShareBps: number | null;
   largestClusterBuyVolumeShareBps: number | null;
   largestClusterHoldingShareBps: number | null;
@@ -58,6 +59,16 @@ export function evaluateWalletClusterRisk(
     return emptyRisk(options.mint, "INVALID_EVIDENCE", reasons, limitations);
   }
   const supply = BigInt(options.totalSupply);
+  const individualHoldings = new Map<string, bigint>();
+  for (const holding of options.holdings ?? []) {
+    if (holding.mint !== options.mint || !/^[0-9]+$/.test(holding.amount)) continue;
+    individualHoldings.set(holding.wallet, (individualHoldings.get(holding.wallet) ?? 0n) + BigInt(holding.amount));
+  }
+  const largestIndividualHolding = [...individualHoldings.values()].reduce((max, value) => value > max ? value : max, 0n);
+  const individualHolderBps = individualHoldings.size ? ceilBps(largestIndividualHolding, supply) : null;
+  const individualHolderBreach = individualHolderBps !== null && individualHolderBps > LINKED_CLUSTER_HOLDER_REJECT_BPS;
+  if (individualHolderBreach) reasons.push("An observed individual wallet holds more than 20% of supply.");
+
   const allLinks = (options.links ?? []).filter(link => link.mint === options.mint);
   const validLinks = allLinks.filter(link =>
     link.walletA !== link.walletB &&
@@ -71,7 +82,12 @@ export function evaluateWalletClusterRisk(
     reasons.push("One or more supplied linkage records failed validation or fell below 70% confidence and were excluded.");
   }
   if (validLinks.length === 0) {
-    return emptyRisk(options.mint, allLinks.length ? "INVALID_EVIDENCE" : "NO_HIGH_CONFIDENCE_LINKS", reasons, limitations);
+    const empty = emptyRisk(options.mint, allLinks.length ? "INVALID_EVIDENCE" : "NO_HIGH_CONFIDENCE_LINKS", reasons, limitations);
+    return {
+      ...empty,
+      status: individualHolderBreach ? "REJECT_OBSERVED" : "WATCH",
+      largestIndividualHolderShareBps: individualHolderBps
+    };
   }
 
   const parent = new Map<string, string>();
@@ -155,10 +171,11 @@ export function evaluateWalletClusterRisk(
 
   return {
     mint: options.mint,
-    status: linkedCreatorSellBreach || clusterBuyBreach || clusterHoldingBreach ? "REJECT_OBSERVED" : "WATCH",
+    status: linkedCreatorSellBreach || clusterBuyBreach || clusterHoldingBreach || individualHolderBreach ? "REJECT_OBSERVED" : "WATCH",
     attributionStatus: "CONFIRMED_LINKS",
     linkedWalletCount: new Set(clusters.flatMap(group => [...group])).size,
     largestClusterConfidenceBps: confidenceByCluster.length ? Math.max(...confidenceByCluster) : null,
+    largestIndividualHolderShareBps: individualHolderBps,
     linkedWalletSellShareBps: sellBps,
     largestClusterBuyVolumeShareBps: clusterBuyBps,
     largestClusterHoldingShareBps: holdingBps,
@@ -175,7 +192,7 @@ function emptyRisk(
 ): WalletClusterRisk {
   return {
     mint, status: "WATCH", attributionStatus, linkedWalletCount: 0,
-    largestClusterConfidenceBps: null, linkedWalletSellShareBps: null,
+    largestClusterConfidenceBps: null, largestIndividualHolderShareBps: null, linkedWalletSellShareBps: null,
     largestClusterBuyVolumeShareBps: null, largestClusterHoldingShareBps: null,
     reasons, limitations
   };
