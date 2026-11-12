@@ -11,6 +11,7 @@ import {
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
 import { buildCandidateTradeFlows } from "../../../../src/ingestion/trade-flow.js";
+import { fetchHolderConcentration } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import {
@@ -275,6 +276,20 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     await this.hydrate();
     const boundedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 100;
     return this.verifiedTransactions.slice(-boundedLimit).map(value => jsonSafe(value));
+  }
+
+  async getHolderRisk(mint: string): Promise<unknown> {
+    await this.hydrate();
+    const fetcher: typeof fetch = async (input, init) => {
+      while (!this.heliusBucket.tryTake()) {
+        await new Promise(resolve => setTimeout(resolve, this.heliusBucket.retryAfterMs));
+      }
+      return fetch(input, init);
+    };
+    return fetchHolderConcentration(mint, {
+      apiKey: this.env.HELIUS_API_KEY,
+      fetcher
+    });
   }
 
   async listTradeFlows(): Promise<unknown> {
@@ -786,6 +801,11 @@ export default {
     }
     if (url.pathname === "/flow" && request.method === "GET") {
       return Response.json(await coordinator.listTradeFlows());
+    }
+    if (url.pathname === "/holder-risk" && request.method === "GET") {
+      const mint = url.searchParams.get("mint") ?? "";
+      if (!mint) return Response.json({ error: "mint query parameter is required" }, { status: 400 });
+      return Response.json(await coordinator.getHolderRisk(mint));
     }
     return Response.json({ error: "Not found" }, { status: 404 });
   },
