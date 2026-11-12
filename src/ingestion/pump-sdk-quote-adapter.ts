@@ -32,6 +32,7 @@ import {
   fetchHeliusMultipleAccounts,
   type HeliusAccountReadConfig
 } from "./helius-accounts.js";
+import { calculateToken2022TransferFee } from "./token-2022-transfer-fee.js";
 import {
   fetchVerifiedPumpQuoteAccountSnapshot,
   type VerifiedPumpQuoteSnapshot
@@ -66,7 +67,15 @@ export interface PumpSdkSwapQuote {
   priceImpactPct: number;
   baseDecimals: number;
   quoteDecimals: number;
-  transferTaxVerifiedZero: true;
+  grossTokenAmountBaseUnits: string;
+  netTokenAmountBaseUnits: string;
+  transferFeeBaseUnits: string;
+  transferFeeMint: string;
+  transferFeeEpoch: number | null;
+  transferFeeBasisPoints: number;
+  transferFeeMaximumBaseUnits: string;
+  transferFeeVerified: true;
+  transferTaxVerifiedZero: boolean;
   executionReady: false;
   blockers: string[];
 }
@@ -84,6 +93,8 @@ interface DecodedSwapContext {
   feeBucketsTotal: BN;
   baseDecimals: number;
   quoteDecimals: number;
+  transferFeeConfig: ReturnType<typeof getTransferFeeConfig>;
+  epoch: number | null;
 }
 
 function accountInfo(account: RawProgramAccount): AccountInfo<Buffer> {
@@ -200,9 +211,14 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedSwapContext 
     freezeAuthority: unpackedBaseMint.freezeAuthority ?? PublicKey.default,
     freezeAuthorityOption: unpackedBaseMint.freezeAuthority ? 1 : 0
   };
-  if (getTransferFeeConfig(unpackedBaseMint) || getTransferFeeConfig(quoteMintAccount) ||
+  const transferFeeConfig = getTransferFeeConfig(unpackedBaseMint);
+  if (getTransferFeeConfig(quoteMintAccount) ||
       getTransferHook(unpackedBaseMint) || getTransferHook(quoteMintAccount)) {
-    throw new Error("Transfer-fee and transfer-hook mints are not supported by this quote adapter.");
+    throw new Error("PumpSwap quote-mint transfer fees and transfer-hook mints are unsupported.");
+  }
+  const epoch = snapshot.epochInfo?.epoch ?? null;
+  if (transferFeeConfig && epoch === null) {
+    throw new Error("Token-2022 transfer-fee quote requires an epoch verified against the market snapshot slot.");
   }
 
   const pool = PUMP_AMM_SDK.decodePool(accountInfo(marketAccount));
@@ -229,7 +245,8 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedSwapContext 
   return {
     mint, quoteMint, pool, globalConfig, feeConfig, baseMintAccount,
     baseReserve, quoteVaultReserve, effectiveQuoteReserve, feeBucketsTotal,
-    baseDecimals: baseMintAccount.decimals, quoteDecimals: quoteMintAccount.decimals
+    baseDecimals: baseMintAccount.decimals, quoteDecimals: quoteMintAccount.decimals,
+    transferFeeConfig, epoch
   };
 }
 
@@ -291,12 +308,23 @@ export function quotePumpSwapBuyFromSnapshot(
     throw new Error("Official SDK exact-input quote and fee split do not reconcile.");
   }
   const unspent = quote.sub(expectedNet).sub(fees.total);
+  const transfer = calculateToken2022TransferFee({
+    config: context.transferFeeConfig, epoch: context.epoch,
+    grossAmountBaseUnits: BigInt(result.base.toString())
+  });
   const impact = impactPct(result.internalQuoteWithoutFees, result.base,
     context.effectiveQuoteReserve, context.baseReserve, "BUY");
   return {
     provider: "pump-sdk-4.3.1", side: "BUY", mint: context.mint.toBase58(),
     quoteMint: context.quoteMint.toBase58(), slot: snapshot.slot, observedAt: snapshot.observedAt,
-    inputAmountBaseUnits: quote.toString(), outputAmountBaseUnits: result.base.toString(),
+    inputAmountBaseUnits: quote.toString(), outputAmountBaseUnits: transfer.netAmountBaseUnits,
+    grossTokenAmountBaseUnits: transfer.grossAmountBaseUnits,
+    netTokenAmountBaseUnits: transfer.netAmountBaseUnits,
+    transferFeeBaseUnits: transfer.feeAmountBaseUnits,
+    transferFeeMint: context.mint.toBase58(), transferFeeEpoch: transfer.epoch,
+    transferFeeBasisPoints: transfer.feeBasisPoints,
+    transferFeeMaximumBaseUnits: transfer.maximumFeeBaseUnits,
+    transferFeeVerified: true, transferTaxVerifiedZero: transfer.feeAmountBaseUnits === "0",
     grossQuoteAmountBaseUnits: quote.toString(),
     netQuoteAmountBaseUnits: result.internalQuoteWithoutFees.toString(),
     fees: { lpBaseUnits: fees.lp.toString(), protocolBaseUnits: fees.protocol.toString(),
@@ -318,8 +346,13 @@ export function quotePumpSwapSellFromSnapshot(
   }
   const context = decodeContext(snapshot);
   const tokenAmount = new BN(tokenAmountBaseUnits);
+  const transfer = calculateToken2022TransferFee({
+    config: context.transferFeeConfig, epoch: context.epoch,
+    grossAmountBaseUnits: BigInt(tokenAmount.toString())
+  });
+  const poolTokenAmount = new BN(transfer.netAmountBaseUnits);
   const result = sellBaseInput({
-    base: tokenAmount, slippage: 0,
+    base: poolTokenAmount, slippage: 0,
     baseReserve: context.baseReserve,
     quoteReserve: context.quoteVaultReserve,
     virtualQuoteReserves: context.pool.virtualQuoteReserves,
@@ -340,12 +373,19 @@ export function quotePumpSwapSellFromSnapshot(
   if (!result.internalQuoteAmountOut.sub(fees.total).eq(net)) {
     throw new Error("Official PumpSwap sell output does not reconcile with its fee breakdown.");
   }
-  const impact = impactPct(result.internalQuoteAmountOut, tokenAmount,
+  const impact = impactPct(result.internalQuoteAmountOut, poolTokenAmount,
     context.effectiveQuoteReserve, context.baseReserve, "SELL");
   return {
     provider: "pump-sdk-4.3.1", side: "SELL", mint: context.mint.toBase58(),
     quoteMint: context.quoteMint.toBase58(), slot: snapshot.slot, observedAt: snapshot.observedAt,
     inputAmountBaseUnits: tokenAmount.toString(), outputAmountBaseUnits: net.toString(),
+    grossTokenAmountBaseUnits: transfer.grossAmountBaseUnits,
+    netTokenAmountBaseUnits: transfer.netAmountBaseUnits,
+    transferFeeBaseUnits: transfer.feeAmountBaseUnits,
+    transferFeeMint: context.mint.toBase58(), transferFeeEpoch: transfer.epoch,
+    transferFeeBasisPoints: transfer.feeBasisPoints,
+    transferFeeMaximumBaseUnits: transfer.maximumFeeBaseUnits,
+    transferFeeVerified: true, transferTaxVerifiedZero: transfer.feeAmountBaseUnits === "0",
     grossQuoteAmountBaseUnits: result.internalQuoteAmountOut.toString(),
     netQuoteAmountBaseUnits: net.toString(),
     fees: { lpBaseUnits: fees.lp.toString(), protocolBaseUnits: fees.protocol.toString(),
@@ -396,7 +436,8 @@ export async function fetchPumpSwapSdkQuote(input: {
       baseVault: decodedPool.baseVault,
       quoteVault: decodedPool.quoteVault
     },
-    config: input.config
+    config: input.config,
+    includeEpochInfo: true
   });
   return input.side === "BUY"
     ? quotePumpSwapBuyFromSnapshot(snapshot, input.amountBaseUnits)
