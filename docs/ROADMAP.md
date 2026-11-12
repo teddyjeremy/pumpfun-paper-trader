@@ -16,6 +16,7 @@
 - [x] Pure fail-closed market transition rules for live curve, migration pending, verified canonical pool and EXIT_BLOCKED
 - [x] IDL-aligned Pump curve, PumpSwap pool, and SPL token-vault decoders with program-owner, discriminator, mint, vault, canonical index/authority, slot-coherence and freshness checks
 - [x] Helius getMultipleAccounts reader that returns related account data from one shared RPC context slot
+- [x] Pure adapter that passes verified curve and canonical pool/vault snapshots into the migration-aware market state machine
 - [x] Bounded PumpSwap pool discovery by base mint, followed by canonical pool/vault verification
 - [ ] Helius backfill/reconciliation for missed provider events
 - [ ] Complete entry decision engine and explainable decisions (strict per-rule evaluation and 1–2 second reclaim freshness confirmation are implemented; numeric volume-profile thresholds, executable quotes and automated ledger integration remain outstanding)
