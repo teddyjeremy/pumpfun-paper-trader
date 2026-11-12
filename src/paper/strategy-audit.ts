@@ -49,12 +49,10 @@ function result(rule: string, status: RuleStatus, actual: unknown, expected: str
 export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, evaluatedAt = new Date().toISOString()): StrictStrategyAudit {
   const rules: RuleResult[] = [];
   rules.push(input.candidateAgeSeconds === null || !Number.isFinite(input.candidateAgeSeconds) || input.candidateAgeSeconds < 0
-    ? result("CANDIDATE_AGE", "UNKNOWN", input.candidateAgeSeconds, "verified launch age from 0 through 60 seconds", "A valid launch timestamp is unavailable or appears to be in the future.")
-    : result("CANDIDATE_AGE", input.candidateAgeSeconds <= 60 ? "PASS" : "FAIL",
-      input.candidateAgeSeconds, "<= 60 seconds from verified launch",
-      input.candidateAgeSeconds <= 60
-        ? "The entry signal is within the agreed first-minute window."
-        : "Entries are only allowed during the first 60 seconds after verified launch."));
+    ? result("CANDIDATE_AGE", "UNKNOWN", input.candidateAgeSeconds, "verified non-negative launch age; observe candidates for at least 10 minutes", "A valid launch timestamp is unavailable or appears to be in the future.")
+    : result("CANDIDATE_AGE", "PASS", input.candidateAgeSeconds,
+      "monitor eligible candidates for at least 10 minutes; no 60-second entry cutoff",
+      "Candidate age is informational. A valid setup may develop after the first minute."));
   const profile = input.profile;
   rules.push(!profile || !profile.dataComplete || profile.microTradeFilterStatus !== "APPLIED" || profile.impulsePriceChangePct === null
     ? result("IMPULSE", "UNKNOWN", profile?.impulsePriceChangePct ?? null, ">= +20%", "Insufficient verified price history.")
