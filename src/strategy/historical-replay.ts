@@ -25,6 +25,8 @@ export interface HistoricalReplayCoinInput {
   /** Simulated exit timestamp and net quote price, supplied only by a full dynamic-exit replay. */
   simulatedExitAt?: number;
   simulatedExitPriceQuotePerToken?: number;
+  /** Exact simulated net return after SDK entry/exit quotes and all costs; not a reserve-price estimate. */
+  simulatedNetFinalReturnPct?: number;
   walletLinks?: readonly WalletLinkEvidence[];
   walletHoldings?: readonly WalletHoldingEvidence[];
 }
@@ -142,15 +144,17 @@ export function hasCompleteHistoricalExitEvidence(input: {
   exitLifecycleCompleteAt?: number;
   simulatedExitAt?: number;
   simulatedExitPriceQuotePerToken?: number;
+  simulatedNetFinalReturnPct?: number;
 }): boolean {
   return Number.isSafeInteger(input.exitLifecycleCompleteAt) &&
-    input.exitLifecycleCompleteAt! >= input.entryAt &&
-    input.exitLifecycleCompleteAt! <= input.replayEndAt &&
     Number.isSafeInteger(input.simulatedExitAt) &&
+    input.exitLifecycleCompleteAt! >= input.simulatedExitAt! &&
+    input.exitLifecycleCompleteAt! <= input.replayEndAt &&
     input.simulatedExitAt! >= input.entryAt &&
     input.simulatedExitAt! <= input.replayEndAt &&
     Number.isFinite(input.simulatedExitPriceQuotePerToken) &&
-    input.simulatedExitPriceQuotePerToken! > 0;
+    input.simulatedExitPriceQuotePerToken! > 0 &&
+    Number.isFinite(input.simulatedNetFinalReturnPct);
 }
 
 export function hasCompleteHistoricalEntryEvidence(input: {
@@ -191,6 +195,7 @@ function metrics(input: {
   exitEvidenceComplete: boolean;
   simulatedExitAt?: number;
   simulatedExitPriceQuotePerToken?: number;
+  simulatedNetFinalReturnPct?: number;
 }): HistoricalEntryOutcome | null {
   const future = input.trades.filter(event => {
     const at = eventTimestamp(event);
@@ -209,7 +214,9 @@ function metrics(input: {
   const maxAdverseExcursionPct = ((1 - minPrice / input.entryPrice)) * 100;
   const grossFinalReturnPct = ((finalPrice / input.entryPrice) - 1) * 100;
   const roundTripCostPct = input.label?.roundTripCostPct ?? null;
-  const netFinalReturnPct = roundTripCostPct === null ? null : grossFinalReturnPct - roundTripCostPct;
+  const netFinalReturnPct = input.exitEvidenceComplete && input.simulatedNetFinalReturnPct !== undefined
+    ? input.simulatedNetFinalReturnPct
+    : roundTripCostPct === null ? null : grossFinalReturnPct - roundTripCostPct;
   let label: HistoricalEntryOutcome["label"] = "UNKNOWN";
   let labelReason = "A complete forward window, explicit excursion thresholds and an assumed round-trip cost are required.";
   if (!input.riskCleared) {
@@ -397,11 +404,17 @@ export function replayHistoricalCoin(
           }),
           ...(input.simulatedExitPriceQuotePerToken === undefined ? {} : {
             simulatedExitPriceQuotePerToken: input.simulatedExitPriceQuotePerToken
+          }),
+          ...(input.simulatedNetFinalReturnPct === undefined ? {} : {
+            simulatedNetFinalReturnPct: input.simulatedNetFinalReturnPct
           })
         }),
         ...(input.simulatedExitAt === undefined ? {} : { simulatedExitAt: input.simulatedExitAt }),
         ...(input.simulatedExitPriceQuotePerToken === undefined ? {} : {
           simulatedExitPriceQuotePerToken: input.simulatedExitPriceQuotePerToken
+        }),
+        ...(input.simulatedNetFinalReturnPct === undefined ? {} : {
+          simulatedNetFinalReturnPct: input.simulatedNetFinalReturnPct
         })
       })
     : null;
@@ -426,6 +439,9 @@ export function replayHistoricalCoin(
             }),
             ...(input.simulatedExitPriceQuotePerToken === undefined ? {} : {
               simulatedExitPriceQuotePerToken: input.simulatedExitPriceQuotePerToken
+            }),
+            ...(input.simulatedNetFinalReturnPct === undefined ? {} : {
+              simulatedNetFinalReturnPct: input.simulatedNetFinalReturnPct
             })
           }) ? "EXIT_EVIDENCE_INCOMPLETE"
             : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
