@@ -125,6 +125,7 @@ describe("bounded Helius candidate monitor", () => {
     const overflow = enqueueHeliusNotification(state, { subscriptionId: 77, signature: "9".repeat(64), slot: 101, err: null });
     expect(overflow.outcome).toBe("OVERFLOW");
     expect(overflow.state.incompleteMints).toContain(candidate(0).mint);
+    expect(overflow.state.seenSignatures).not.toContain("9".repeat(64));
   });
   it("takes queued work in FIFO order and normalizes persisted bounds", () => {
     let state = reconcileHeliusSubscriptions(emptyHeliusMonitorState(), [candidate(0)]);
