@@ -111,7 +111,8 @@ describe("paper portfolio accounting",()=>{
   let state=createPaperPortfolio();
   state={...state,maxConcurrentPositions:2};
   const first=openPaperPosition(state,{mint:"mint1",positionId:"p1",occurredAt:now,buyQuote:quote("mint1","BUY"),sellQuote:quote("mint1","SELL"),nowMs:Date.parse(now)});
-  const second=openPaperPosition(first.state,{mint:"mint2",positionId:"p2",occurredAt:now,buyQuote:quote("mint2","BUY"),sellQuote:quote("mint2","SELL"),nowMs:Date.parse(now)});
+  const unlocked={...first.state,maxConcurrentPositions:2};
+  const second=openPaperPosition(unlocked,{mint:"mint2",positionId:"p2",occurredAt:now,buyQuote:quote("mint2","BUY"),sellQuote:quote("mint2","SELL"),nowMs:Date.parse(now)});
   const marked=markPaperPosition(second.state,{sellQuotes:[
     quote("mint1","SELL","1000000",1.007),
     quote("mint2","SELL","1000000",2.007)
