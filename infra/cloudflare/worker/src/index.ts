@@ -325,11 +325,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       coverageStartByMint
     });
     const creatorRiskByMint = new Map(creatorSellRisk.map(item => [item.mint, item]));
+    const creatorRiskRank = (status: string): number =>
+      status === "PASS_COMPLETE" ? 0 :
+      status === "PENDING" ? 1 :
+      status === "UNKNOWN" ? 2 : 3;
     const rankedFlows = [...flows].map(flow => ({
       ...flow,
       creatorSellStatus: creatorRiskByMint.get(flow.mint)?.status ?? "UNKNOWN"
     })).sort((a, b) =>
-      Number(a.creatorSellStatus === "REJECT_OBSERVED") - Number(b.creatorSellStatus === "REJECT_OBSERVED") ||
+      creatorRiskRank(a.creatorSellStatus) - creatorRiskRank(b.creatorSellStatus) ||
       Number(b.dataComplete) - Number(a.dataComplete) ||
       Number(b.flowConfirmationPass) - Number(a.flowConfirmationPass) ||
       Number(b.latestThreeWindowFlowPass) - Number(a.latestThreeWindowFlowPass) ||
