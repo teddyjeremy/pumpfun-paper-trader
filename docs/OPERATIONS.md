@@ -8,7 +8,7 @@
 - `GET /api/results/summary`: portfolio configuration, activity counts and diagnosis.
 - `GET /api/tracking`: candidate funnel, rejection reasons, quote outcomes, latency, provider health, graduation and position telemetry.
 - `GET /api/helius/backfills?sessionId=...`: per-mint address-history and transaction-decoding coverage.
-- `GET /api/strategy/replay?sessionId=...`: chronological replay of archived, verified historical SOL-quoted trade events, with optional explicit outcome excursion thresholds and round-trip cost.
+- `GET /api/strategy/replay?sessionId=...`: chronological replay of archived, verified historical SOL-quoted trade events, with optional outcome labeling; explicit favorable/adverse thresholds and a round-trip cost are required to assign profitability labels.
 - `GET /`: operator dashboard.
 
 ## How to interpret the results
