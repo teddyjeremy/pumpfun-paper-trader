@@ -24,14 +24,14 @@ The following previously feature-branch-only components are included in [PR #40]
 - [x] Scheduled holder and wallet-link evidence collection with incomplete/stale handling (PR #31 work).
 - [x] One-second sampled overlapping flow windows and distinct buyer aggregation (PR #33 work).
 - [x] Strict strategy-to-paper execution lifecycle and quote-gated dynamic-exit component.
-- [ ] Rebase historical replay and decode-coverage migration from the closed PR #37 onto current main after this integration lands.
+- [x] Add historical replay module, archived transaction hydration, decode-completeness migration 0007 and authenticated read-only replay/backfill APIs; replay does not yet simulate executable fills or the complete dynamic-exit lifecycle.
 
 ## Remaining implementation
 
 1. [ ] Integrate PostgreSQL ledger projections, Helius backfill archive/checkpoints and resumable retry queue into main. Preserve the current mainline candidate monitoring, official SDK quote adapters and latest exit-evidence fix.
-2. [ ] Port historical replay with verified archived transaction hydration and explicit transaction-decoding completeness.
-3. [ ] Replay the complete strict strategy: impulse, pullback, reclaim, rolling flow, creator/cluster risk, signal freshness, and pullback/reclaim volume profile.
-4. [ ] Calibrate pullback contraction and reclaim expansion with chronological training and holdout data. Require adequate sample sizes and both outcome classes; never auto-promote thresholds.
+2. [x] Implement chronological historical price/volume and rolling-flow replay, verified archived transaction hydration, explicit decode-completeness gating and authenticated replay/backfill APIs.
+3. [ ] Extend replay to the complete strict strategy: impulse, pullback, reclaim, rolling flow, creator/cluster risk, signal freshness, and pullback/reclaim volume profile.
+4. [ ] Run replay against collected sessions and calibrate pullback contraction/reclaim expansion with chronological training and holdout data. Require adequate sample sizes and both outcome classes; never auto-promote thresholds.
 5. [ ] Complete Token-2022 transfer-fee support or fail-closed rejection, network/priority fee estimation and impact/slippage policy.
 6. [ ] Wire quote generation and strict strategy authorization into deterministic paper entry/exit transitions and PostgreSQL persistence.
 7. [ ] Connect dynamic exit evaluation to the position scheduler and exact full-position sell quotes.
