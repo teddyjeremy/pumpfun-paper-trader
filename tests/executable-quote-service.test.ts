@@ -34,7 +34,8 @@ describe("executable quote service",()=>{
       solUsd,now:()=>Date.parse(observedAt),executionDelayMs:100
     });
     expect(calls).toBe(2);
-    expect(result.status).toBe("READY");
+    expect(result.status).toBe("QUOTES_VALIDATED");
+    expect(result.paperEntryAuthorized).toBe(false);
     expect(result.sellability.sellable).toBe(true);
     expect(result.sellability.tokenAmountBaseUnits).toBe("1000000");
     expect(result.sellability.sellSlot).toBeGreaterThan(result.sellability.buySlot);
