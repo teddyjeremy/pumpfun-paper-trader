@@ -284,6 +284,75 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
+  private async markHistoricalDecodeIncomplete(work: HeliusSignatureWork, reason: string): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId) return;
+    const state = await this.ctx.storage.get<HistoricalBackfillState>(
+      `helius_backfill:${sessionId}:${work.mint}`
+    );
+    if (!state?.signatures.some(item => item.signature === work.signature)) return;
+    await this.ctx.storage.put(`helius_backfill_decode_incomplete:${sessionId}:${work.mint}`, {
+      signature: work.signature, reason, updatedAt: new Date().toISOString()
+    });
+  }
+
+  private async recordVerifiedHistoricalSignature(transaction: VerifiedPumpTransaction): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId) return;
+    const state = await this.ctx.storage.get<HistoricalBackfillState>(
+      `helius_backfill:${sessionId}:${transaction.mint}`
+    );
+    if (!state?.signatures.some(item => item.signature === transaction.signature)) return;
+    const key = `helius_verified_historical_signatures:${sessionId}:${transaction.mint}`;
+    const signatures = new Set(await this.ctx.storage.get<string[]>(key) ?? []);
+    signatures.add(transaction.signature);
+    await this.ctx.storage.put(key, [...signatures].slice(-500));
+  }
+
+  private async getHistoricalDecodeCoverage(
+    sessionId: string,
+    mint: string,
+    state: HistoricalBackfillState
+  ): Promise<{ complete: boolean; reason: string | null; verifiedTransactionCount: number }> {
+    const cursor = await this.ctx.storage.get<number>(
+      `helius_backfill_queue_cursor:${sessionId}:${mint}`
+    ) ?? 0;
+    const pending = state.signatures.some(signature =>
+      this.heliusState.queue.some(work => work.signature === signature.signature)
+    );
+    const failure = await this.ctx.storage.get<{ reason?: string }>(
+      `helius_backfill_decode_incomplete:${sessionId}:${mint}`
+    );
+    const verifiedKey = `helius_verified_historical_signatures:${sessionId}:${mint}`;
+    const verified = new Set(await this.ctx.storage.get<string[]>(verifiedKey) ?? []);
+    for (const transaction of this.verifiedTransactions) {
+      if (transaction.mint === mint && state.signatures.some(item => item.signature === transaction.signature)) {
+        verified.add(transaction.signature);
+      }
+    }
+    if (verified.size > 0) await this.ctx.storage.put(verifiedKey, [...verified].slice(-500));
+    const archivedKey = `helius_archived_transaction_signatures:${sessionId}:${mint}`;
+    const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
+    const legacyArchived = new Set(await this.ctx.storage.get<string[]>(
+      `helius_archived_transaction_signatures:${sessionId}`
+    ) ?? []);
+    for (const signature of state.signatures) {
+      if (legacyArchived.has(signature.signature)) archived.add(signature.signature);
+    }
+    if (archived.size > 0) await this.ctx.storage.put(archivedKey, [...archived].slice(-500));
+    const unarchived = [...verified].some(signature => !archived.has(signature));
+    const complete = state.status === "COMPLETE" && cursor >= state.signatures.length &&
+      !pending && !failure && !unarchived;
+    const reason = complete ? null : state.status !== "COMPLETE"
+      ? state.reason ?? "Historical signature coverage is incomplete."
+      : failure?.reason ?? (cursor < state.signatures.length
+        ? "Historical signatures remain to be queued."
+        : pending ? "Historical signatures remain in the transaction queue."
+          : unarchived ? "Verified historical transactions remain unarchived in PostgreSQL."
+            : "Historical transaction decoding has not been confirmed complete.");
+    return { complete, reason, verifiedTransactionCount: verified.size };
+  }
+
   private async flushHeliusBackfillArchivesToPostgres(sessionId: string | null = this.activeSessionId): Promise<void> {
     if (!this.postgresIngestConfigured || !sessionId) return;
     const listKey = `helius_backfill_mints:${sessionId}`;
@@ -292,8 +361,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const state = await this.ctx.storage.get<HistoricalBackfillState>(`helius_backfill:${sessionId}:${mint}`);
       if (!state) continue;
       try {
+        const decodeCoverage = await this.getHistoricalDecodeCoverage(sessionId, mint, state);
         const response = await this.postPostgresIngest("/internal/helius-backfill", {
-          sessionId: sessionId, mint, state
+          sessionId: sessionId, mint, state, decodeCoverage
         });
         if (!response.ok) throw new Error("Archive checkpoint was not acknowledged.");
       } catch {
@@ -302,23 +372,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         return;
       }
     }
-    const archivedKey = `helius_archived_transaction_signatures:${sessionId}`;
-    const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
     for (const transaction of this.verifiedTransactions) {
-      if (archived.has(transaction.signature)) continue;
       try {
         const state = await this.ctx.storage.get<HistoricalBackfillState>(
           `helius_backfill:${sessionId}:${transaction.mint}`
         );
         if (!state) continue;
+        const archivedKey = `helius_archived_transaction_signatures:${sessionId}:${transaction.mint}`;
+        const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
+        if (archived.has(transaction.signature)) continue;
         const historicalSignature = state.signatures.find(item => item.signature === transaction.signature);
         if (historicalSignature && historicalSignature.slot !== transaction.slot) {
           throw new Error("Verified transaction slot conflicts with historical signature evidence.");
         }
+        const decodeCoverage = await this.getHistoricalDecodeCoverage(sessionId, transaction.mint, state);
         const response = await this.postPostgresIngest("/internal/helius-backfill", {
           sessionId: sessionId,
           mint: transaction.mint,
           state,
+          decodeCoverage,
           transaction: {
             ...jsonSafe(transaction) as Record<string, unknown>,
             provider: "helius",
@@ -329,9 +401,26 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         });
         if (!response.ok) throw new Error("Transaction archive was not acknowledged.");
         archived.add(transaction.signature);
-        await this.ctx.storage.put(archivedKey, [...archived].slice(-5_000));
+        await this.ctx.storage.put(archivedKey, [...archived].slice(-500));
       } catch {
         this.status.lastError = "Verified Helius transactions are waiting for PostgreSQL persistence.";
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+    }
+    // A checkpoint may only become decode-complete after every verified
+    // historical transaction has been acknowledged by PostgreSQL.
+    for (const mint of mints) {
+      const state = await this.ctx.storage.get<HistoricalBackfillState>(`helius_backfill:${sessionId}:${mint}`);
+      if (!state) continue;
+      const decodeCoverage = await this.getHistoricalDecodeCoverage(sessionId, mint, state);
+      try {
+        const response = await this.postPostgresIngest("/internal/helius-backfill", {
+          sessionId, mint, state, decodeCoverage
+        });
+        if (!response.ok) throw new Error("Final decode coverage checkpoint was not acknowledged.");
+      } catch {
+        this.status.lastError = "Helius decode coverage is waiting for PostgreSQL acknowledgement.";
         await this.ctx.storage.setAlarm(Date.now() + 30_000);
         return;
       }
@@ -2001,6 +2090,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         });
         if (result.status === "VERIFIED") {
           this.verifiedTransactions = [...this.verifiedTransactions, { ...result.transaction, receivedAt: new Date().toISOString() }].slice(-2_000);
+          await this.recordVerifiedHistoricalSignature(result.transaction);
           await this.beginHistoricalBackfill(result.transaction);
           await this.appendAudit("OBSERVATION", work.mint, {
             signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction),
@@ -2053,6 +2143,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
               ...this.heliusState,
               incompleteMints: [...new Set([...this.heliusState.incompleteMints, work.mint])].slice(-10)
             };
+            await this.markHistoricalDecodeIncomplete(work, "Historical signature exhausted bounded transient retries.");
           }
         }
         if (!workDequeued) this.heliusState = takeHeliusWork(this.heliusState).state;
@@ -2082,6 +2173,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
               ...this.heliusState,
               incompleteMints: [...new Set([...this.heliusState.incompleteMints, activeWork.mint])].slice(-10)
             };
+            await this.markHistoricalDecodeIncomplete(activeWork, "Historical signature processing failed after bounded retries.");
           }
         } else {
           const nextRetryAt = this.heliusState.queue
