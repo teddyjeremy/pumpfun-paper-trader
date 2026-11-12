@@ -62,12 +62,12 @@ describe("paper portfolio accounting",()=>{
 
  it("includes aggregate Pump SDK fees in entry cost and liquidation proceeds",()=>{
   const p=createPaperPortfolio();
-  const buy=quote("mint-aggregate","BUY");buy.pumpFeeUsd=0.01;
-  const sell=quote("mint-aggregate","SELL");sell.pumpFeeUsd=0.01;
+  const buy=quote("mint-aggregate","BUY");buy.pumpFeeUsd=0.005;
+  const sell=quote("mint-aggregate","SELL");sell.pumpFeeUsd=0.005;
   const opened=openPaperPosition(p,{mint:"mint-aggregate",positionId:"p-aggregate",occurredAt:now,buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)});
-  expect(opened.position.buyCostsUsd).toBeCloseTo(0.014,8);
-  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(0.986,8);
-  expect(opened.state.availableCashUsd).toBeCloseTo(1.686,8);
+  expect(opened.position.buyCostsUsd).toBeCloseTo(0.009,8);
+  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(0.991,8);
+  expect(opened.state.availableCashUsd).toBeCloseTo(1.691,8);
  });
 
  it("includes protocol, creator, pool, priority and transfer fees in the round-trip cap",()=>{
