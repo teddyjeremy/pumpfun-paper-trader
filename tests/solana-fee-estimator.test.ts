@@ -75,6 +75,30 @@ describe("Solana transaction fee estimator", () => {
     expect(result.status).toBe("UNAVAILABLE");
   });
 
+  it("fails closed when fee samples contain duplicate slots", async () => {
+    const samples = Array.from({ length: 10 }, () => ({
+      slot: 109,
+      prioritizationFee: 10
+    }));
+    const result = await estimateSolanaTransactionFees({
+      ...baseInput,
+      fetcher: feeFetcher({ samples })
+    });
+    expect(result.status).toBe("UNAVAILABLE");
+  });
+
+  it("fails closed when the RPC response exceeds the bounded recent-slot window", async () => {
+    const samples = Array.from({ length: 151 }, (_, index) => ({
+      slot: 100 + index,
+      prioritizationFee: index
+    }));
+    const result = await estimateSolanaTransactionFees({
+      ...baseInput,
+      fetcher: feeFetcher({ samples, slot: 250 })
+    });
+    expect(result.status).toBe("UNAVAILABLE");
+  });
+
   it("rejects malformed messages, duplicate locks and invalid compute limits before RPC", async () => {
     let calls = 0;
     const fetcher: typeof fetch = async () => {
