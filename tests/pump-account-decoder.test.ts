@@ -47,7 +47,12 @@ function poolData(creator = ZERO_KEY, baseMint = ZERO_KEY, quoteMint = ZERO_KEY,
   const data = new Uint8Array(287);
   data.set([241, 154, 109, 4, 17, 177, 109, 188], 0);
   data[8] = 254;
-  data[9] = 0; data[10] = 0; // canonical pool index 0
+  data[9] = 0; data[10] = 0; // canonical pool index
+  data.set(new PublicKey(creator).toBytes(), 11);
+  data.set(new PublicKey(baseMint).toBytes(), 43);
+  data.set(new PublicKey(quoteMint).toBytes(), 75);
+  data.set(new PublicKey(baseVault).toBytes(), 139);
+  data.set(new PublicKey(quoteVault).toBytes(), 171); 0
   writeU64(data, 203, 1_000n);
   writeU64(data, 271, 100n);
   writeU64(data, 279, 200n);
