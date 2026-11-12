@@ -45,7 +45,7 @@ import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/pri
 import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
 import { officialPumpSdkModulesAvailable } from "../../../../src/ingestion/pump-sdk-runtime.js";
 import { fetchPumpSwapSdkQuote } from "../../../../src/ingestion/pump-sdk-quote-adapter.js";
-import { fetchPumpCurveSdkQuote } from "../../../../src/ingestion/pump-curve-sdk-quote-adapter.js";
+import { fetchPumpCurveSdkQuote } from "../../../../src/ingestion/pump-sdk-curve-quote-adapter.js";
 import {
   createHistoricalBackfillState, fetchHeliusAddressSignaturesPage,
   type HistoricalBackfillState
