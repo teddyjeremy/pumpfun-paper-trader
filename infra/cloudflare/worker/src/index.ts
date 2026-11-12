@@ -33,6 +33,7 @@ import {
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork, resetHeliusSubscriptionIds,
+  enqueueHeliusSignatureWork,
   type HeliusMonitorState,
   type HeliusSignatureWork,
   type CandidateMonitoringEvidence
@@ -1133,6 +1134,20 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           reason: "DISCOVERY_CANDIDATE_CAP_REACHED", cap: MAX_CANDIDATES
         });
         this.reconcileHelius();
+        if (parsed.event.kind === "new_token" && parsed.event.signature && result.outcome !== "OVERFLOW") {
+          const createWork = enqueueHeliusSignatureWork(this.heliusState, {
+            signature: parsed.event.signature, mint: parsed.event.mint, slot: null
+          }, parsed.event.receivedAt);
+          this.heliusState = createWork.state;
+          if (createWork.outcome === "INVALID" || createWork.outcome === "OVERFLOW") {
+            await this.appendAudit("DATA_GAP", parsed.event.mint, {
+              reason: `CREATE_SIGNATURE_QUEUE_${createWork.outcome}`,
+              signature: parsed.event.signature
+            });
+          } else if (createWork.outcome === "QUEUED") {
+            void this.drainHeliusQueue();
+          }
+        }
         this.pendingWrites += 1;
         this.syncCounts();
         if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist().catch(() => undefined);

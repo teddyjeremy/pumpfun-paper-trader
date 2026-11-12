@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
+  emptyHeliusMonitorState, enqueueHeliusNotification, enqueueHeliusSignatureWork, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, selectHeliusCandidates, confirmHeliusSubscription,
   takeHeliusWork, MAX_HELIUS_CANDIDATES, resetHeliusSubscriptionIds,
   FRESH_LAUNCH_SLOT_RESERVE
@@ -87,6 +87,21 @@ describe("bounded Helius candidate monitor", () => {
     state = confirmHeliusSubscription(state, requestId, 78, "2026-11-12T00:01:00.000Z");
     expect(state.incompleteMints).not.toContain(candidate(0).mint);
     expect(state.subscriptions[0]!.subscriptionId).toBe(78);
+  });
+  it("queues provider-discovered create signatures without waiting for a logs subscription", () => {
+    const state = emptyHeliusMonitorState();
+    const queued = enqueueHeliusSignatureWork(state, {
+      signature: sig, mint: candidate(0).mint, slot: null
+    }, "2026-11-12T12:00:00.000Z");
+    expect(queued.outcome).toBe("QUEUED");
+    expect(queued.state.queue[0]).toMatchObject({
+      signature: sig, mint: candidate(0).mint, slot: null
+    });
+    const duplicate = enqueueHeliusSignatureWork(queued.state, {
+      signature: sig, mint: candidate(0).mint
+    });
+    expect(duplicate.outcome).toBe("DUPLICATE");
+    expect(duplicate.state.queue).toHaveLength(1);
   });
   it("queues successful logs, ignores failed transactions and deduplicates signatures", () => {
     let state = reconcileHeliusSubscriptions(emptyHeliusMonitorState(), [candidate(0)]);

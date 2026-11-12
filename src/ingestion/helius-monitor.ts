@@ -25,7 +25,8 @@ export interface HeliusCandidateSubscription {
 export interface HeliusSignatureWork {
   signature: string;
   mint: string;
-  slot: number;
+  /** Null when queued from a provider discovery event without a slot. */
+  slot: number | null;
   queuedAt: string;
 }
 
@@ -162,6 +163,48 @@ export function confirmHeliusSubscription(
     subscriptions: state.subscriptions.map(item => item.requestId === requestId
       ? { ...item, subscriptionId, subscribedAt: now }
       : item)
+  };
+}
+
+/** Queue a provider-supplied create signature even if the logs subscription starts too late to observe it. */
+export function enqueueHeliusSignatureWork(
+  state: HeliusMonitorState,
+  input: { signature: string; mint: string; slot?: number | null },
+  now = new Date().toISOString()
+): { state: HeliusMonitorState; outcome: "QUEUED" | "DUPLICATE" | "INVALID" | "OVERFLOW" } {
+  if (!SIGNATURE.test(input.signature) || !ADDRESS.test(input.mint) ||
+      !(input.slot === undefined || input.slot === null ||
+        (Number.isSafeInteger(input.slot) && input.slot >= 0)) ||
+      !Number.isFinite(Date.parse(now))) {
+    return {
+      state: { ...state, incompleteMints: [...new Set([...state.incompleteMints, input.mint])]
+        .filter(value => ADDRESS.test(value)).slice(-MAX_HELIUS_CANDIDATES) },
+      outcome: "INVALID"
+    };
+  }
+  if (state.seenSignatures.includes(input.signature) ||
+      state.queue.some(item => item.signature === input.signature)) {
+    return { state: { ...state, duplicateSignatures: state.duplicateSignatures + 1 }, outcome: "DUPLICATE" };
+  }
+  const seenSignatures = [...state.seenSignatures, input.signature].slice(-MAX_HELIUS_SEEN_SIGNATURES);
+  if (state.queue.length >= MAX_HELIUS_SIGNATURE_QUEUE) {
+    return {
+      state: {
+        ...state, seenSignatures,
+        droppedSignatures: state.droppedSignatures + 1,
+        incompleteMints: [...new Set([...state.incompleteMints, input.mint])].slice(-MAX_HELIUS_CANDIDATES)
+      },
+      outcome: "OVERFLOW"
+    };
+  }
+  return {
+    state: {
+      ...state, seenSignatures,
+      queue: [...state.queue, {
+        signature: input.signature, mint: input.mint, slot: input.slot ?? null, queuedAt: now
+      }]
+    },
+    outcome: "QUEUED"
   };
 }
 
