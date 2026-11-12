@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, selectHeliusCandidates, confirmHeliusSubscription,
-  takeHeliusWork, MAX_HELIUS_CANDIDATES, resetHeliusSubscriptionIds
+  takeHeliusWork, MAX_HELIUS_CANDIDATES, resetHeliusSubscriptionIds,
+  FRESH_LAUNCH_SLOT_RESERVE
 } from "../src/ingestion/helius-monitor.js";
 import type { DiscoveryCandidate } from "../src/ingestion/discovery-store.js";
 
@@ -40,6 +41,39 @@ describe("bounded Helius candidate monitor", () => {
     expect(selected.map(item => item.mint)).toEqual([
       observed.mint, newest.mint, unknown.mint
     ]);
+  });
+
+  it("reserves four slots for fresh launches and ranks the remaining six by evidence", () => {
+    const now = Date.parse("2026-11-12T12:00:00.000Z");
+    const fresh = Array.from({ length: 6 }, (_, i) => ({
+      ...candidate(i), firstSeenAt: new Date(now - (50_000 - i * 5_000)).toISOString(),
+      lastSeenAt: new Date(now).toISOString()
+    }));
+    const older = Array.from({ length: 8 }, (_, i) => ({
+      ...candidate(i + 20), firstSeenAt: new Date(now - 120_000 - i * 1_000).toISOString(),
+      lastSeenAt: new Date(now).toISOString()
+    }));
+    const evidence = Object.fromEntries(older.map((item, i) => [item.mint, {
+      score: i * 10, dataComplete: true, flowConfirmed: i >= 5,
+      creatorClearanceComplete: i >= 6
+    }]));
+    const selected = selectHeliusCandidates([...fresh, ...older], 10, evidence, now);
+    expect(selected.slice(0, FRESH_LAUNCH_SLOT_RESERVE).map(x => x.mint))
+      .toEqual(fresh.slice(0, 4).map(x => x.mint));
+    expect(selected.slice(4).map(x => x.mint))
+      .toEqual(older.slice().reverse().slice(0, 6).map(x => x.mint));
+  });
+  it("does not admit hard-rejected candidates into monitoring slots", () => {
+    const now = Date.parse("2026-11-12T12:00:00.000Z");
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      ...candidate(i), firstSeenAt: new Date(now - 120_000 - i * 1_000).toISOString()
+    }));
+    const evidence = Object.fromEntries(items.map((item, i) => [item.mint, {
+      score: i, hardRejected: i >= 8
+    }]));
+    const selected = selectHeliusCandidates(items, 10, evidence, now);
+    expect(selected).toHaveLength(8);
+    expect(selected.some(item => evidence[item.mint]?.hardRejected)).toBe(false);
   });
   it("reconciles subscription intent and clears old socket IDs on reconnect", () => {
     let state = reconcileHeliusSubscriptions(emptyHeliusMonitorState(), [candidate(0)]);
