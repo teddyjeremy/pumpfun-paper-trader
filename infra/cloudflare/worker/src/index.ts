@@ -149,6 +149,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async start(): Promise<CoordinatorStatus> {
     await this.hydrate();
+    this.markHeliusCoverageGap();
     await this.ctx.storage.put("enabled", true);
     this.status.enabled = true;
     this.status.nextReconnectAt = null;
@@ -161,6 +162,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async stop(): Promise<CoordinatorStatus> {
     await this.hydrate();
+    this.markHeliusCoverageGap();
     await this.ctx.storage.put("enabled", false);
     this.status.enabled = false;
     if (this.socket) {
@@ -281,15 +283,29 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const unmonitoredMints = this.discovery.candidates
       .filter(candidate => candidate.status === "DISCOVERED" && !confirmedMints.has(candidate.mint))
       .map(candidate => candidate.mint);
+    const retainedTradeTimestamps = this.verifiedTransactions.flatMap(transaction =>
+      transaction.tradeEvents.map(event => Number(event.timestamp))
+    ).filter(value => Number.isSafeInteger(value) && value >= 0);
+    const retainedTradeStart = retainedTradeTimestamps.length > 0
+      ? Math.min(...retainedTradeTimestamps)
+      : null;
+    const retentionCoverageUnknown = retentionMayBeTruncated && retainedTradeStart === null;
     const incompleteMints = [...new Set([
       ...this.heliusState.incompleteMints,
       ...unmonitoredMints,
-      ...(retentionMayBeTruncated ? this.discovery.candidates.map(candidate => candidate.mint) : [])
+      ...(retentionCoverageUnknown ? this.discovery.candidates.map(candidate => candidate.mint) : [])
     ])];
+    const retentionWindowStart = retainedTradeStart === null
+      ? null
+      : Math.ceil(retainedTradeStart / 2) * 2;
     const coverageStartByMint = Object.fromEntries(confirmedSubscriptions.flatMap(item => {
       const parsed = item.subscribedAt ? Date.parse(item.subscribedAt) : Number.NaN;
       if (!Number.isFinite(parsed)) return [];
-      return [[item.mint, Math.ceil((parsed / 1_000) / 2) * 2]];
+      const subscriptionWindowStart = Math.ceil((parsed / 1_000) / 2) * 2;
+      const start = retentionMayBeTruncated && retentionWindowStart !== null
+        ? Math.max(subscriptionWindowStart, retentionWindowStart)
+        : subscriptionWindowStart;
+      return [[item.mint, start]];
     }));
     const flows = buildCandidateTradeFlows(this.verifiedTransactions, {
       incompleteMints,
