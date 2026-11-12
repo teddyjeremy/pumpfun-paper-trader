@@ -288,7 +288,6 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
       BigInt(input.sellQuote.inputAmountBaseUnits) !== BigInt(previous.tokenAmountBaseUnits)) {
     throw new Error("Exit quote must consume the entire remaining token balance.");
   }
-  const sellCosts = quoteFeesUsd(input.sellQuote);
   const netProceeds = netSellValue(input.sellQuote);
   const tokens = humanTokenAmount(previous.tokenAmountBaseUnits, previous.tokenDecimals);
   const pnl = round(netProceeds - previous.stakeUsd - previous.buyCostsUsd);
