@@ -78,3 +78,8 @@ The six-hour paper session remains blocked until the missing quote source, execu
 - Official protocol sources: `pump-fun/pump-public-docs/idl/pump.json`, `pump_amm.json`, `docs/PUMP_PROGRAM_README.md`, `docs/PUMP_SWAP_README.md`, and `docs/FEE_PROGRAM_README.md`. The official docs currently identify `@pump-fun/pump-sdk` 4.1.0 and `@pump-fun/pump-swap-sdk` 2.1.0; compatibility with the current Cloudflare Worker bundle must be tested before adding either package.
 
 - Helius account reads now include bounded `getProgramAccounts` discovery for PumpSwap pools by the IDL-defined `Pool.base_mint` offset, followed by `getMultipleAccounts` snapshots for the selected pool and its two vaults. Discovery candidates remain untrusted until the pool PDA, index-zero canonical creator authority, pool authority, token-account mint/owner, non-zero effective reserves, shared context slot and freshness are verified.
+
+## PostgreSQL migration sequencing and operator control
+- Migration sequence is `0001_initial_ledger.sql`, `0002_migration_aware_positions.sql`, then `0003_dynamic_exit_observations.sql`. The former duplicate `0002` filename was removed so migration order is deterministic.
+- `npm run db:migrate` applies unapplied files in lexical order, serializes concurrent runners with a PostgreSQL advisory transaction lock, and executes each migration in its own transaction. Duplicate numeric prefixes and malformed filenames are rejected before connecting.
+- Migrations are **not** applied during server startup. Review and explicitly approve the target database before running the command. The Cloudflare Worker still uses its Durable Object journal; PostgreSQL trade/event writes, idempotency transitions and leader-lease integration remain incomplete.
