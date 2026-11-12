@@ -18,6 +18,8 @@ export interface HistoricalReplayCoinInput {
   walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
   /** Historical second at which a genuinely complete holder census was independently verified. Top-20 snapshots do not qualify. */
   holderCensusCompleteAt?: number;
+  /** Historical second when every non-risk entry gate (signal freshness, liquidity/MC, executable quote/cost and capacity) was verified. */
+  entryEvidenceCompleteAt?: number;
   walletLinks?: readonly WalletLinkEvidence[];
   walletHoldings?: readonly WalletHoldingEvidence[];
 }
@@ -79,7 +81,7 @@ export interface HistoricalCoinReplay {
   snapshots: HistoricalSetupSnapshot[];
   firstSetup: HistoricalSetupSnapshot | null;
   outcome: HistoricalEntryOutcome | null;
-  status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY" | "RISK_NOT_CLEARED";
+  status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY" | "RISK_NOT_CLEARED" | "ENTRY_EVIDENCE_INCOMPLETE";
 }
 
 export interface VolumeThresholdCandidate {
@@ -129,6 +131,14 @@ function sortedTrades(input: HistoricalReplayCoinInput): PumpTradeEvent[] {
     .sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
 }
 
+export function hasCompleteHistoricalEntryEvidence(input: {
+  entryAt: number;
+  entryEvidenceCompleteAt?: number;
+}): boolean {
+  return Number.isSafeInteger(input.entryEvidenceCompleteAt) &&
+    input.entryEvidenceCompleteAt! <= input.entryAt;
+}
+
 export function classifyHistoricalWalletClusterRisk(input: {
   walletRisk: ReturnType<typeof evaluateWalletClusterRisk> | null;
   walletClusterEvidenceCompleteAt?: number;
@@ -155,6 +165,7 @@ function metrics(input: {
   label?: HistoricalReplayConfig["label"];
   decodeComplete: boolean;
   riskCleared: boolean;
+  entryEvidenceComplete: boolean;
 }): HistoricalEntryOutcome | null {
   const future = input.trades.filter(event => {
     const at = eventTimestamp(event);
@@ -175,6 +186,8 @@ function metrics(input: {
   let labelReason = "A complete forward window, explicit excursion thresholds and an assumed round-trip cost are required.";
   if (!input.riskCleared) {
     labelReason = "Creator and complete holder/cluster evidence were not cleared at the candidate time; reserve-price performance is exploratory and is not labelled as a strategy outcome.";
+  } else if (!input.entryEvidenceComplete) {
+    labelReason = "Signal freshness, liquidity/market-cap, executable quote/cost and portfolio-capacity gates were not all verified by the candidate time; reserve-price performance is not labelled as a strategy outcome.";
   } else if (input.decodeComplete && input.label && netFinalReturnPct !== null) {
     const metExcursions = maxFavorableExcursionPct >= input.label.minFavorableExcursionPct &&
       maxAdverseExcursionPct <= input.label.maxAdverseExcursionPct;
@@ -336,13 +349,25 @@ export function replayHistoricalCoin(
     ? metrics({
         trades, entryAt, entryPrice, horizonEnd,
         label: config.label, decodeComplete: input.decodeComplete,
-        riskCleared: firstSetup.riskClearedSetupEligible
+        riskCleared: firstSetup.riskClearedSetupEligible,
+        entryEvidenceComplete: hasCompleteHistoricalEntryEvidence({
+          entryAt,
+          ...(input.entryEvidenceCompleteAt === undefined ? {} : {
+            entryEvidenceCompleteAt: input.entryEvidenceCompleteAt
+          })
+        })
       })
     : null;
   const status = !input.decodeComplete ? "INCOMPLETE"
     : !firstSetup ? "NO_SETUP"
       : !firstSetup.riskClearedSetupEligible ? "RISK_NOT_CLEARED"
-        : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
+        : !hasCompleteHistoricalEntryEvidence({
+          entryAt: entryAt ?? Number.MAX_SAFE_INTEGER,
+          ...(input.entryEvidenceCompleteAt === undefined ? {} : {
+            entryEvidenceCompleteAt: input.entryEvidenceCompleteAt
+          })
+        }) ? "ENTRY_EVIDENCE_INCOMPLETE"
+          : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
   return {
     mint: input.mint,
     launchBlockTime: input.launchBlockTime,
