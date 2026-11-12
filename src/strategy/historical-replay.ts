@@ -22,6 +22,9 @@ export interface HistoricalReplayCoinInput {
   entryEvidenceCompleteAt?: number;
   /** Historical second when the dynamic exit lifecycle completed with a fresh full-size sell quote and zero-balance confirmation. */
   exitLifecycleCompleteAt?: number;
+  /** Simulated exit timestamp and net quote price, supplied only by a full dynamic-exit replay. */
+  simulatedExitAt?: number;
+  simulatedExitPriceQuotePerToken?: number;
   walletLinks?: readonly WalletLinkEvidence[];
   walletHoldings?: readonly WalletHoldingEvidence[];
 }
@@ -137,10 +140,17 @@ export function hasCompleteHistoricalExitEvidence(input: {
   entryAt: number;
   replayEndAt: number;
   exitLifecycleCompleteAt?: number;
+  simulatedExitAt?: number;
+  simulatedExitPriceQuotePerToken?: number;
 }): boolean {
   return Number.isSafeInteger(input.exitLifecycleCompleteAt) &&
     input.exitLifecycleCompleteAt! >= input.entryAt &&
-    input.exitLifecycleCompleteAt! <= input.replayEndAt;
+    input.exitLifecycleCompleteAt! <= input.replayEndAt &&
+    Number.isSafeInteger(input.simulatedExitAt) &&
+    input.simulatedExitAt! >= input.entryAt &&
+    input.simulatedExitAt! <= input.replayEndAt &&
+    Number.isFinite(input.simulatedExitPriceQuotePerToken) &&
+    input.simulatedExitPriceQuotePerToken! > 0;
 }
 
 export function hasCompleteHistoricalEntryEvidence(input: {
@@ -179,17 +189,22 @@ function metrics(input: {
   riskCleared: boolean;
   entryEvidenceComplete: boolean;
   exitEvidenceComplete: boolean;
+  simulatedExitAt?: number;
+  simulatedExitPriceQuotePerToken?: number;
 }): HistoricalEntryOutcome | null {
   const future = input.trades.filter(event => {
     const at = eventTimestamp(event);
-    return at >= input.entryAt && at <= input.horizonEnd;
+    return at >= input.entryAt && at <= Math.min(input.horizonEnd,
+      input.exitEvidenceComplete && input.simulatedExitAt !== undefined ? input.simulatedExitAt : input.horizonEnd);
   }).map(event => ({ at: eventTimestamp(event), price: eventPrice(event) }))
     .filter((item): item is { at: number; price: number } => item.price !== null);
   if (future.length < 2) return null;
   const prices = future.map(item => item.price);
   const maxPrice = Math.max(...prices);
   const minPrice = Math.min(...prices);
-  const finalPrice = future[future.length - 1]!.price;
+  const finalPrice = input.exitEvidenceComplete && input.simulatedExitPriceQuotePerToken !== undefined
+    ? input.simulatedExitPriceQuotePerToken
+    : future[future.length - 1]!.price;
   const maxFavorableExcursionPct = ((maxPrice / input.entryPrice) - 1) * 100;
   const maxAdverseExcursionPct = ((1 - minPrice / input.entryPrice)) * 100;
   const grossFinalReturnPct = ((finalPrice / input.entryPrice) - 1) * 100;
@@ -376,7 +391,17 @@ export function replayHistoricalCoin(
           replayEndAt: Math.min(observedEnd, entryAt + horizonSeconds),
           ...(input.exitLifecycleCompleteAt === undefined ? {} : {
             exitLifecycleCompleteAt: input.exitLifecycleCompleteAt
+          }),
+          ...(input.simulatedExitAt === undefined ? {} : {
+            simulatedExitAt: input.simulatedExitAt
+          }),
+          ...(input.simulatedExitPriceQuotePerToken === undefined ? {} : {
+            simulatedExitPriceQuotePerToken: input.simulatedExitPriceQuotePerToken
           })
+        }),
+        ...(input.simulatedExitAt === undefined ? {} : { simulatedExitAt: input.simulatedExitAt }),
+        ...(input.simulatedExitPriceQuotePerToken === undefined ? {} : {
+          simulatedExitPriceQuotePerToken: input.simulatedExitPriceQuotePerToken
         })
       })
     : null;
@@ -395,6 +420,12 @@ export function replayHistoricalCoin(
             replayEndAt: Math.min(observedEnd, entryAt + horizonSeconds),
             ...(input.exitLifecycleCompleteAt === undefined ? {} : {
               exitLifecycleCompleteAt: input.exitLifecycleCompleteAt
+            }),
+            ...(input.simulatedExitAt === undefined ? {} : {
+              simulatedExitAt: input.simulatedExitAt
+            }),
+            ...(input.simulatedExitPriceQuotePerToken === undefined ? {} : {
+              simulatedExitPriceQuotePerToken: input.simulatedExitPriceQuotePerToken
             })
           }) ? "EXIT_EVIDENCE_INCOMPLETE"
             : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
