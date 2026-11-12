@@ -37,7 +37,7 @@ describe("verified Pump.fun trade-flow windows", () => {
       trade(104n, trader(3), true, 10n), trade(104n, trader(4), true, 10n),
       trade(104n, trader(5), true, 10n), trade(104n, trader(82), false, 2n)
     ];
-    const [flow] = buildCandidateTradeFlows([tx(events)], { nowSeconds: 106, horizonSeconds: 60 });
+    const [flow] = buildCandidateTradeFlows([tx(events)], { solUsdPriceUsd: 100, minimumTradeUsd: 0, nowSeconds: 106, horizonSeconds: 60 });
     expect(flow).toMatchObject({
       mint, quoteUnit: "SOL", latestThreeWindowFlowPass: true,
       distinctBuyersAcrossLatestThree: 5, flowConfirmationPass: true,
@@ -138,7 +138,7 @@ describe("verified Pump.fun trade-flow windows", () => {
   });
 
   it("reports discovered candidates with no verified trades as unobserved, not zero-flow", () => {
-    const [flow] = buildCandidateTradeFlows([], {
+    const [flow] = buildCandidateTradeFlows([], { solUsdPriceUsd: 100, minimumTradeUsd: 0,
       nowSeconds: 108, horizonSeconds: 60, candidateMints: [mint]
     });
     expect(flow).toMatchObject({
