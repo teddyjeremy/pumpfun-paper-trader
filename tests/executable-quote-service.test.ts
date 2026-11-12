@@ -9,7 +9,7 @@ function quote(side:"BUY"|"SELL",slot:number,amount:string):OfflinePumpQuote {
   const common={
     provider:"pump-sdk-4.3.1" as const,side,mint,quoteMint:"11111111111111111111111111111111",
     slot,observedAt,inputAmountBaseUnits:amount,outputAmountBaseUnits:side==="BUY"?"1000000":"100000000",
-    grossQuoteAmountBaseUnits:side==="BUY"?"100000000":"110000000",
+    grossQuoteAmountBaseUnits:side==="BUY"?"100000000":"101000000",
     netQuoteAmountBaseUnits:side==="BUY"?"100000000":"100000000",
     baseDecimals:6,quoteDecimals:9,transferTaxVerifiedZero:true as const,
     executionReady:false as const,blockers:[],priceImpactPct:0.5
@@ -40,6 +40,9 @@ describe("executable quote service",()=>{
     expect(result.sellability.tokenAmountBaseUnits).toBe("1000000");
     expect(result.sellability.sellSlot).toBeGreaterThan(result.sellability.buySlot);
     expect(result.economics.roundTripNetReturnPct).toBeLessThan(0);
+    expect(result.economics.roundTripCostPct).toBeGreaterThan(2);
+    expect(result.economics.roundTripCostPct).toBeLessThan(2.1);
+    expect(result.economics.meetsRoundTripCostLimit).toBe(true);
     expect(result.economics.meetsMinimumNetReturn).toBe(false);
   });
   it("blocks when the sell quote does not match the exact buy output",async()=>{
@@ -63,6 +66,24 @@ describe("executable quote service",()=>{
       }),{status:200})},
       buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,solUsd,now:()=>Date.parse(observedAt)
     })).rejects.toThrow(/same mint, venue and quote mint/);
+  });
+  it("reports a failed combined fee and impact budget without authorizing an entry",async()=>{
+    const result=await fetchExecutableRoundTripQuote({
+      fetchQuote:async({side,amountBaseUnits})=>({
+        ...quote(side,side==="BUY"?100:101,amountBaseUnits),
+        priceImpactPct:3,
+        ...(side==="SELL"?{venueFeeBaseUnits:"10000000"}:{})
+      }),
+      helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
+        result:[{slot:99,prioritizationFee:1000}]
+      }),{status:200})},
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,solUsd,
+      now:()=>Date.parse(observedAt),maxPriceImpactPct:5,maximumRoundTripCostPct:4
+    });
+    expect(result.status).toBe("QUOTES_VALIDATED");
+    expect(result.economics.roundTripCostPct).toBeGreaterThan(4);
+    expect(result.economics.meetsRoundTripCostLimit).toBe(false);
+    expect(result.paperEntryAuthorized).toBe(false);
   });
   it("blocks when a buy quote has excessive price impact",async()=>{
     await expect(fetchExecutableRoundTripQuote({
