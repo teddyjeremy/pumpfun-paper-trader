@@ -75,6 +75,31 @@ function append(coordinator: PumpFunCoordinator) {
   }).appendAudit.bind(coordinator);
 }
 
+describe("operator dashboard snapshot", () => {
+  it("returns bounded live candidates and keeps paper execution explicitly disabled", async () => {
+    const { coordinator, storage } = harness();
+    seedSession(storage);
+    storage.seed("discovery_state", {
+      ...emptyDiscoveryStore(),
+      candidates: [{
+        kind: "new_token", mint: "test-mint", signature: "sig", creator: "creator",
+        bondingCurve: "curve", name: "Test", symbol: "TST", receivedAt: "2026-11-12T12:00:00.000Z",
+        status: "DISCOVERED", firstSeenAt: "2026-11-12T12:00:00.000Z",
+        lastSeenAt: "2026-11-12T12:00:01.000Z", observations: 2
+      }]
+    });
+    const snapshot = await coordinator.getOperatorDashboardSnapshot() as {
+      status: { tradingReady: false; enabled: boolean };
+      candidates: Array<{ mint: string; observations: number }>;
+      recentActivity: unknown[];
+    };
+    expect(snapshot.status.tradingReady).toBe(false);
+    expect(snapshot.status.enabled).toBe(false);
+    expect(snapshot.candidates).toMatchObject([{ mint: "test-mint", observations: 2 }]);
+    expect(snapshot.recentActivity).toEqual([]);
+  });
+});
+
 describe("Durable Object audit storage contract", () => {
   it("serializes concurrent appends into monotonic sequences and paginates across page boundaries", async () => {
     const { coordinator, storage } = harness();

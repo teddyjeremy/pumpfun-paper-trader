@@ -12,15 +12,14 @@ The Durable Object subscribes to Pump.fun program logs through Helius. A one-min
 
 ## Important: transport scaffold only
 
-The current implementation only establishes the Helius WebSocket subscription and counts log notifications. It does not:
-- decode Pump.fun instructions or transaction token/SOL flows;
-- build the impulse, pullback, reclaim, or 2-second confirmation windows;
-- calculate creator, linked-wallet, or cluster risk;
-- obtain executable buy/sell quotes or calculate all-in costs;
-- evaluate the existing entry and dynamic-exit rules;
-- write positions, trades, or PnL to Neon.
+The current implementation establishes PumpPortal launch discovery, selective Helius monitoring, verified Pump transaction decoding, impulse/pullback/reclaim and trade-flow feature snapshots, creator/linked-wallet risk audits, and strict strategy decision logging. Read-only SDK quote endpoints exist for curve and PumpSwap markets. It does not yet:
+- connect a passing strategy decision to the exact-size buy and initial full-size sell quote lifecycle;
+- execute and persist simulated paper entries from the Worker scheduler;
+- schedule full-position sell quotes and dynamic exit evaluation for open positions;
+- connect migration-aware position monitoring and retry recovery to those scheduled exits;
+- prove all fee categories and Token-2022 transfer-fee treatment for every supported mint.
 
-The Worker deliberately reports ready=false. It cannot place paper entries or exits. Do not mark the bot operational until those missing components are implemented, tested, and connected to the ledger. No wallet signer or transaction-submission key belongs in this Worker.
+The Worker deliberately reports `tradingReady: false`. It cannot place paper entries or exits. Do not mark the bot operational until those missing components are implemented, tested, and connected to the ledger. No wallet signer or transaction-submission key belongs in this Worker.
 
 ## Free-plan limits and capacity check
 
@@ -42,6 +41,16 @@ Cloudflare can restart Durable Objects and does not provide a dedicated-VM uptim
 2. Open Workers & Pages in the dashboard.
 3. Confirm the account is on the Free plan. Do not enable paid Workers, add-ons, or usage-based products.
 4. Copy the Cloudflare Account ID from the account overview.
+
+## Connect the operator dashboard
+
+The Fastify dashboard proxies Worker status and start/stop controls server-side. After the Worker is deployed, set these environment variables on the dashboard host (for example Vercel):
+
+- `PAPER_WORKER_URL`: the deployed Worker base URL, such as `https://pumpfun-paper-worker.YOUR_SUBDOMAIN.workers.dev`.
+- `PAPER_WORKER_CONTROL_TOKEN`: the same long random value configured as the Worker `CONTROL_TOKEN` secret.
+- `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD`: operator-only HTTP Basic credentials.
+
+Never put the Worker control token in browser code or a `NEXT_PUBLIC_` variable. The dashboard start/stop buttons control live discovery monitoring only; they do not authorize simulated fills. The Worker remains `tradingReady: false` until strategy, executable quote, entry/exit scheduler and durable ledger integration are complete.
 
 ## Configure Worker secrets
 

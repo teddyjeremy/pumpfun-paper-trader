@@ -118,7 +118,7 @@ const INITIAL_STATUS: CoordinatorStatus = {
   enabled: false,
   tradingReady: false,
   quoteSdkModules: officialPumpSdkModulesAvailable(),
-  blocker: "On-chain verification, selective Helius monitoring, strategy evaluation, executable quotes and paper ledger are not connected.",
+  blocker: "Live discovery, verified transaction decoding and strategy/risk audits are active; executable quote authorization and scheduled paper entry/exit execution are not connected.",
   connectedAt: null,
   lastMessageAt: null,
   lastSignature: null,
@@ -795,7 +795,36 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.syncCounts();
     this.status.monitoredCandidates = this.heliusState.subscriptions.length;
     this.status.queuedHeliusSignatures = this.heliusState.queue.length;
+    this.status.blocker = "Live discovery, verified transaction decoding and strategy/risk audits are active; executable quote authorization and scheduled paper entry/exit execution are not connected.";
     return { ...this.status };
+  }
+
+  /** Single authenticated snapshot for the operator dashboard; read-only. */
+  async getOperatorDashboardSnapshot(): Promise<unknown> {
+    await this.hydrate();
+    const [status, portfolio, bankroll] = await Promise.all([
+      this.getStatus(), this.getPaperPortfolio(), this.getPaperBankroll()
+    ]);
+    const sessionId = this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
+    const meta = sessionId ? await this.ctx.storage.get<AuditSessionMeta>(`audit_session:${sessionId}`) : undefined;
+    const auditPage = meta && sessionId
+      ? await this.listAuditEvents(Math.max(0, meta.eventCount - 100), 100, sessionId) as { events?: StoredAuditEvent[] }
+      : { events: [] as StoredAuditEvent[] };
+    const recentActivity = (auditPage.events ?? [])
+      .filter(event => ["STRATEGY_DECISION", "PAPER_ENTRY", "PAPER_EXIT", "REJECTION_REASON", "QUOTE_RESULT"].includes(event.kind))
+      .slice(-50).reverse().map(event => ({ ...event, data: jsonSafe(event.data) }));
+    return {
+      generatedAt: new Date().toISOString(),
+      status,
+      sessionId,
+      portfolio,
+      bankroll,
+      candidates: this.discovery.candidates.slice(-30).reverse().map(candidate => ({
+        mint: candidate.mint, status: candidate.status, firstSeenAt: candidate.firstSeenAt,
+        lastSeenAt: candidate.lastSeenAt, observations: candidate.observations
+      })),
+      recentActivity
+    };
   }
 
   private auditInBackground(kind: AuditKind, mint: string | null, data: unknown, idempotencyKey?: string): void {
@@ -2381,6 +2410,11 @@ export default {
     }
     if (url.pathname === "/status" && request.method === "GET") {
       return Response.json(await coordinator.getStatus());
+    }
+    if (url.pathname === "/dashboard" && request.method === "GET") {
+      return Response.json(await coordinator.getOperatorDashboardSnapshot(), {
+        headers: { "cache-control": "no-store" }
+      });
     }
     if (url.pathname === "/candidates" && request.method === "GET") {
       return Response.json(await coordinator.listCandidates());

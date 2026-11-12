@@ -139,6 +139,53 @@ app.get("/api/diagnostics", async () => ({
 
 app.get("/api/tracking", async () => trackingSnapshot());
 app.get("/api/persistence", async () => getPersistenceStatus());
+app.get("/api/worker", async (_request, reply) => {
+  if (!config.PAPER_WORKER_URL || !config.PAPER_WORKER_CONTROL_TOKEN) {
+    return { configured: false, connected: false, enabled: false, tradingReady: false,
+      blocker: "Configure PAPER_WORKER_URL and PAPER_WORKER_CONTROL_TOKEN on the server to connect the live monitor." };
+  }
+  try {
+    const response = await fetch(new URL("/dashboard", config.PAPER_WORKER_URL), {
+      headers: { authorization: `Bearer ${config.PAPER_WORKER_CONTROL_TOKEN}` },
+      signal: AbortSignal.timeout(5_000), cache: "no-store"
+    });
+    if (!response.ok) return reply.code(502).send({ configured: true, connected: false,
+      enabled: false, tradingReady: false, blocker: `Worker status request failed (HTTP ${response.status}).` });
+    return { configured: true, connected: true, ...(await response.json() as Record<string, unknown>) };
+  } catch {
+    return reply.code(502).send({ configured: true, connected: false, enabled: false,
+      tradingReady: false, blocker: "Cloudflare Worker is unreachable; no trading state is assumed." });
+  }
+});
+
+app.post("/api/worker/start-monitor", async (_request, reply) => {
+  if (!config.PAPER_WORKER_URL || !config.PAPER_WORKER_CONTROL_TOKEN)
+    return reply.code(503).send({ error: "Cloudflare Worker URL and control token are not configured." });
+  try {
+    const response = await fetch(new URL("/start", config.PAPER_WORKER_URL), {
+      method: "POST", headers: { authorization: `Bearer ${config.PAPER_WORKER_CONTROL_TOKEN}` },
+      signal: AbortSignal.timeout(10_000)
+    });
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) return reply.code(502).send({ error: `Worker rejected monitor start (HTTP ${response.status}).` });
+    return { ok: true, monitorStarted: true, paperExecutionEnabled: false, worker: body };
+  } catch { return reply.code(502).send({ error: "Could not start the Cloudflare discovery monitor." }); }
+});
+
+app.post("/api/worker/stop-monitor", async (_request, reply) => {
+  if (!config.PAPER_WORKER_URL || !config.PAPER_WORKER_CONTROL_TOKEN)
+    return reply.code(503).send({ error: "Cloudflare Worker URL and control token are not configured." });
+  try {
+    const response = await fetch(new URL("/stop", config.PAPER_WORKER_URL), {
+      method: "POST", headers: { authorization: `Bearer ${config.PAPER_WORKER_CONTROL_TOKEN}` },
+      signal: AbortSignal.timeout(10_000)
+    });
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) return reply.code(502).send({ error: `Worker rejected monitor stop (HTTP ${response.status}).` });
+    return { ok: true, monitorStopped: true, worker: body };
+  } catch { return reply.code(502).send({ error: "Could not stop the Cloudflare discovery monitor." }); }
+});
+
 app.get("/api/portfolio", async () => getTradingDashboardSnapshot());
 app.get("/api/paper-ledger", async request => {
   const sessionId = (request.query as Record<string, unknown>).sessionId;
@@ -284,6 +331,17 @@ main{max-width:1440px;margin:auto;padding:26px clamp(16px,4vw,54px) 60px}.intro{
 <div class="actions"><span class="pill"><span class="dot" id="healthDot"></span><span id="healthText">Connecting</span></span><button id="refresh">Refresh</button></div></header>
 <main>
 <div class="intro"><div><div class="eyebrow">Operations / overview</div><h2>Trading control room</h2><div class="muted small">Observe discovery, screening, execution quality and system health.</div></div><div class="pill">PAPER MODE · NO WALLET SIGNING · NO REAL ORDERS</div></div>
+<div class="section panel"><div class="section-head"><h3>Live market monitor</h3><span class="tag warn" id="workerTag">NOT CONNECTED</span></div>
+<div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+<div><div class="metric-label">PumpPortal</div><div class="metric" id="workerPump">—</div></div>
+<div><div class="metric-label">Helius</div><div class="metric" id="workerHelius">—</div></div>
+<div><div class="metric-label">Monitored candidates</div><div class="metric" id="workerCandidates">—</div></div>
+<div><div class="metric-label">Verified transactions</div><div class="metric" id="workerVerified">—</div></div></div>
+<div class="metric-note" id="workerBlocker">Worker connection has not been configured.</div>
+<div class="actions" style="margin-top:14px;justify-content:flex-start"><button id="startMonitor">Start live market monitor</button><button id="stopMonitor">Stop monitor</button><span class="tag warn" id="paperExecutionState">PAPER EXECUTION DISABLED</span></div>
+<div class="metric-note" style="margin-top:9px">This starts live launch discovery and evidence collection only. It cannot create simulated fills; automated paper entry/exit integration is not complete.</div></div>
+<div class="section panel"><div class="section-head"><h3>Live launch candidates</h3><span class="muted small">From the Worker discovery store</span></div><div class="table-wrap"><table><thead><tr><th>Mint</th><th>Discovery state</th><th>Observations</th><th>First seen</th><th>Last seen</th></tr></thead><tbody id="workerCandidateRows"><tr><td colspan="5" class="empty">Waiting for Worker connection</td></tr></tbody></table></div></div>
+<div class="section panel"><div class="section-head"><h3>Live strategy and execution events</h3><span class="muted small">Latest audited Worker events</span></div><div class="table-wrap"><table><thead><tr><th>Time</th><th>Mint</th><th>Event</th><th>Summary</th></tr></thead><tbody id="workerActivityRows"><tr><td colspan="4" class="empty">No live events yet</td></tr></tbody></table></div></div>
 <div class="grid">
 <section class="panel"><div class="metric-label">Starting paper balance</div><div class="metric" id="startingBalance">—</div><div class="metric-note">Configured initial paper equity</div></section>
 <section class="panel"><div class="metric-label">Position principal</div><div class="metric" id="positionPrincipal">—</div><div class="metric-note" id="positionCapacity">Loading portfolio policy…</div></section>
@@ -337,7 +395,9 @@ function bars(obj){const entries=Object.entries(obj||{});const max=Math.max(1,..
 function list(items,empty){return items.length?items.map(x=>'<div class="list-item"><span>'+esc(x[0])+'</span><b>'+esc(x[1])+'</b></div>').join(''):'<div class="empty">'+empty+'</div>'}
 function latency(x){return x&&x.samples?num(x.p50Ms)+' / '+num(x.p95Ms)+' ms':'—'}
 async function refresh(){try{
- const [d,r,t,db,ledger]=await Promise.all([fetch('/api/diagnostics',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Diagnostics '+x.status);return x.json()}),fetch('/api/results/summary',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Summary '+x.status);return x.json()}),fetch('/api/tracking',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Tracking '+x.status);return x.json()}),fetch('/api/persistence',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Persistence '+x.status);return x.json()}),fetch('/api/portfolio',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Portfolio '+x.status);return x.json()})]);
+ const [d,r,t,db,ledger,worker]=await Promise.all([fetch('/api/diagnostics',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Diagnostics '+x.status);return x.json()}),fetch('/api/results/summary',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Summary '+x.status);return x.json()}),fetch('/api/tracking',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Tracking '+x.status);return x.json()}),fetch('/api/persistence',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Persistence '+x.status);return x.json()}),fetch('/api/portfolio',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Portfolio '+x.status);return x.json()}),fetch('/api/worker',{cache:'no-store'}).then(x=>x.json()).catch(()=>({configured:false,connected:false,enabled:false,tradingReady:false,blocker:'Worker status unavailable'}))]);
+ const workerCandidates=worker.candidates||[];$('#workerCandidateRows').innerHTML=workerCandidates.length?workerCandidates.map(c=>'<tr><td title="'+esc(c.mint)+'">'+esc(short(c.mint))+'</td><td>'+tag(c.status)+'</td><td>'+num(c.observations||0)+'</td><td>'+esc(c.firstSeenAt?new Date(c.firstSeenAt).toLocaleTimeString():'—')+'</td><td>'+esc(c.lastSeenAt?new Date(c.lastSeenAt).toLocaleTimeString():'—')+'</td></tr>').join(''):'<tr><td colspan="5" class="empty">No live candidates reported by Worker</td></tr>';const activity=worker.recentActivity||[];$('#workerActivityRows').innerHTML=activity.length?activity.map(e=>{const data=e.data||{};const summary=data.reason||data.decision||data.status||data.exitReason||data.message||'Audited event';return '<tr><td>'+esc(e.occurredAt?new Date(e.occurredAt).toLocaleTimeString():'—')+'</td><td title="'+esc(e.mint||'')+'">'+esc(short(e.mint))+'</td><td>'+tag(e.kind)+'</td><td>'+esc(typeof summary==='string'?summary:JSON.stringify(summary))+'</td></tr>'}).join(''):'<tr><td colspan="4" class="empty">No live strategy or execution events yet</td></tr>';
+ const ws=worker.status||worker;const workerConnected=worker.connected===true;$('#workerTag').className='tag '+(workerConnected&&ws.enabled?'good':workerConnected?'warn':'bad');$('#workerTag').textContent=!worker.configured?'NOT CONFIGURED':!workerConnected?'OFFLINE':ws.enabled?'MONITORING':'STOPPED';$('#workerPump').textContent=ws.connected?'Connected':'Disconnected';$('#workerHelius').textContent=ws.heliusConnected?'Connected':'Disconnected';$('#workerCandidates').textContent=num(ws.monitoredCandidates??ws.candidates??0);$('#workerVerified').textContent=num(ws.verifiedTransactions??0);$('#workerBlocker').textContent=worker.blocker||ws.blocker||(workerConnected?'Discovery monitor connected.':'Configure Worker connection on the server.');$('#paperExecutionState').textContent=ws.tradingReady===true?'PAPER EXECUTION READY':'PAPER EXECUTION DISABLED';$('#paperExecutionState').className='tag '+(ws.tradingReady===true?'good':'warn');$('#startMonitor').disabled=!worker.configured||!workerConnected||ws.enabled===true;$('#stopMonitor').disabled=!worker.configured||!workerConnected||ws.enabled!==true;
  const portfolio=r.portfolio||{};const usd2=v=>v===null||v===undefined?'—':'$'+Number(v).toFixed(2);$('#startingBalance').textContent=usd2(portfolio.startingBalanceUsd);$('#positionPrincipal').textContent=usd2(portfolio.positionSizeUsd);const slots=Number(portfolio.maxOpenPositions);$('#positionCapacity').textContent=Number.isFinite(slots)?'Maximum '+slots+' simultaneous position'+(slots===1?'':'s'):'Position capacity unavailable';
  const ready=!!d.readiness?.ready;$('#healthDot').className='dot '+(ready?'good':'bad');$('#healthText').textContent=ready?'READY':'DEGRADED';$('#readyTag').className='tag '+(ready?'good':'warn');$('#readyTag').textContent=ready?'READY':'NOT READY';
  $('#diagnosis').textContent=d.diagnosis?.status||'Unknown';$('#diagnosisDetail').textContent=(d.diagnosis?.notes||[]).join(' ')||'No diagnosis details';
@@ -362,6 +422,8 @@ async function refresh(){try{
  const lt=ledger.trades||[];$('#ledgerTrades').innerHTML=lt.length?lt.map(x=>'<tr><td>'+esc(new Date(x.executedAt).toLocaleString())+'</td><td><b>'+esc(x.name||x.symbol||'Unknown token')+'</b><br><span class="muted small">'+esc(x.mint)+'</span></td><td>'+tag(x.side)+'</td><td>'+esc(x.tokenAmount)+'</td><td>'+esc(x.solAmount)+'</td><td>'+esc(x.feesSol)+'</td><td>'+pct(x.priceImpactPct)+'</td><td>'+pct(x.slippagePct)+'</td><td>'+esc(x.simulationProfile)+'</td><td>'+num(x.simulatedLatencyMs)+' ms</td></tr>').join(''):'<tr><td colspan="10" class="empty">No persisted paper trades yet</td></tr>';
  $('#updatedAt').textContent='Last updated '+new Date().toLocaleTimeString();
  }catch(e){$('#healthDot').className='dot bad';$('#healthText').textContent='API ERROR';$('#diagnosis').textContent='Dashboard API unavailable';$('#diagnosisDetail').textContent=String(e)}}
+async function workerAction(path){const button=path.includes('start')?$('#startMonitor'):$('#stopMonitor');button.disabled=true;try{const response=await fetch(path,{method:'POST'});const body=await response.json();if(!response.ok)throw Error(body.error||'Worker control request failed');await refresh()}catch(error){$('#workerBlocker').textContent=String(error)}finally{button.disabled=false}}
+$('#startMonitor').addEventListener('click',()=>workerAction('/api/worker/start-monitor'));$('#stopMonitor').addEventListener('click',()=>workerAction('/api/worker/stop-monitor'));
 $('#refresh').addEventListener('click',refresh);refresh();setInterval(refresh,5000);
 </script></body></html>`;
 

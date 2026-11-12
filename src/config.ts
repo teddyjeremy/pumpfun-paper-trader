@@ -9,6 +9,8 @@ const EnvSchema = z.object({
   DASHBOARD_PASSWORD: z.string().optional().default(""),
   DATABASE_URL: z.string().optional().default(""),
   PAPER_EVENT_INGEST_TOKEN: z.string().optional().default(""),
+  PAPER_WORKER_URL: z.string().optional().default(""),
+  PAPER_WORKER_CONTROL_TOKEN: z.string().optional().default(""),
   HELIUS_API_KEY: z.string().optional().default(""),
   PUMPFUN_MODE: z.literal("paper").default("paper"),
   PAPER_STARTING_BALANCE_USD: z.coerce.number().positive().default(2.7),
@@ -35,6 +37,23 @@ if (Boolean(parsed.data.DASHBOARD_USERNAME) !== Boolean(parsed.data.DASHBOARD_PA
 }
 if (parsed.data.PAPER_EVENT_INGEST_TOKEN && parsed.data.PAPER_EVENT_INGEST_TOKEN.length < 32) {
   throw new Error("PAPER_EVENT_INGEST_TOKEN must be at least 32 characters when configured.");
+}
+if (Boolean(parsed.data.PAPER_WORKER_URL) !== Boolean(parsed.data.PAPER_WORKER_CONTROL_TOKEN)) {
+  throw new Error("PAPER_WORKER_URL and PAPER_WORKER_CONTROL_TOKEN must both be configured.");
+}
+if (parsed.data.PAPER_WORKER_URL) {
+  let workerUrl: URL;
+  try { workerUrl = new URL(parsed.data.PAPER_WORKER_URL); }
+  catch { throw new Error("PAPER_WORKER_URL must be a valid absolute URL."); }
+  if (workerUrl.protocol !== "https:" && workerUrl.protocol !== "http:") {
+    throw new Error("PAPER_WORKER_URL must use HTTP or HTTPS.");
+  }
+  if (parsed.data.NODE_ENV === "production" && workerUrl.protocol !== "https:") {
+    throw new Error("PAPER_WORKER_URL must use HTTPS in production.");
+  }
+}
+if (parsed.data.PAPER_WORKER_CONTROL_TOKEN && parsed.data.PAPER_WORKER_CONTROL_TOKEN.length < 32) {
+  throw new Error("PAPER_WORKER_CONTROL_TOKEN must be at least 32 characters when configured.");
 }
 if (parsed.data.DASHBOARD_USERNAME.includes(":")) {
   throw new Error("DASHBOARD_USERNAME cannot contain a colon when using HTTP Basic authentication.");
