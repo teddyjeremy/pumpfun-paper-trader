@@ -17,6 +17,17 @@ describe("paper portfolio accounting",()=>{
   expect(opened.state.availableCashUsd).toBe(1.698);
   expect(()=>openPaperPosition(opened.state,{mint:"mint",positionId:"p2",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)})).toThrow(/only be bought once/);
  });
+ it("rejects quotes with missing or non-finite notional evidence",()=>{
+  const p=createPaperPortfolio();
+  const buy=quote("mint","BUY"); buy.requestedUsd=Number.NaN;
+  expect(()=>openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:buy,sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)})).toThrow(/invalid amount or cost evidence/);
+ });
+ it("rejects malformed exit timestamps and empty exit reasons",()=>{
+  const p=createPaperPortfolio();
+  const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
+  expect(()=>closePaperPosition(opened.state,{positionId:"p1",sellQuote:quote("mint","SELL"),exitReason:" ",closedAt:now,nowMs:Date.parse(now)})).toThrow(/timestamp and reason/);
+  expect(()=>closePaperPosition(opened.state,{positionId:"p1",sellQuote:quote("mint","SELL"),exitReason:"STOP",closedAt:"invalid",nowMs:Date.parse(now)})).toThrow(/timestamp and reason/);
+ });
  it("rejects quotes with excessive round-trip costs",()=>{
   const p=createPaperPortfolio();const buy=quote("mint","BUY");buy.priceImpactPct=1.8;
   const sell=quote("mint","SELL");sell.priceImpactPct=1.8;
