@@ -235,6 +235,24 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   async stop(): Promise<CoordinatorStatus> {
     await this.hydrate();
     this.markHeliusCoverageGap();
+    // Stop accepting provider messages before draining the audit queue, so no
+    // event can be appended after SESSION_STOPPED.
+    await this.ctx.storage.put("enabled", false);
+    this.status.enabled = false;
+    if (this.socket) {
+      const socket = this.socket;
+      this.socket = null;
+      socket.close(1000, "Paper discovery stopped");
+    }
+    this.status.connected = false;
+    this.status.subscriptionsSent = false;
+    if (this.heliusSocket) {
+      const helius = this.heliusSocket;
+      this.heliusSocket = null;
+      helius.close(1000, "Paper monitoring stopped");
+    }
+    this.status.heliusConnected = false;
+    this.status.nextReconnectAt = null;
     await this.auditChain;
     if (this.activeSessionId) {
       const completedSessionId = this.activeSessionId;
@@ -263,22 +281,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       });
       this.activeSessionId = null;
     }
-    await this.ctx.storage.put("enabled", false);
-    this.status.enabled = false;
-    if (this.socket) {
-      const socket = this.socket;
-      this.socket = null;
-      socket.close(1000, "Paper discovery stopped");
-    }
-    this.status.connected = false;
-    this.status.subscriptionsSent = false;
-    if (this.heliusSocket) {
-      const helius = this.heliusSocket;
-      this.heliusSocket = null;
-      helius.close(1000, "Paper monitoring stopped");
-    }
-    this.status.heliusConnected = false;
-    this.status.nextReconnectAt = null;
     await this.persist();
     return this.getStatus();
   }
