@@ -12,8 +12,22 @@ export interface HistoricalReplayCoinInput {
   horizonSeconds?: number;
   decodeComplete: boolean;
   decodeReason?: string | null;
-  /** Historical second at which independently sourced wallet-link and holder coverage became complete. */
+  /** Historical second at which complete relevant-wallet history/linkage coverage was independently verified. Recent-20 signature samples do not qualify. */
   walletClusterEvidenceCompleteAt?: number;
+  /** Coverage class for wallet-link evidence; RECENT_SIGNATURE_SAMPLE_ONLY is reject-only, never a clearance. */
+  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
+  /** Historical second at which a genuinely complete holder census was independently verified. Top-20 snapshots do not qualify. */
+  holderCensusCompleteAt?: number;
+  /** Historical second when every non-risk entry gate (signal freshness, liquidity/MC, executable quote/cost and capacity) was verified. */
+  entryEvidenceCompleteAt?: number;
+  /** Historical second when the dynamic exit lifecycle completed with a fresh full-size sell quote and zero-balance confirmation. */
+  exitLifecycleCompleteAt?: number;
+  /** Simulated exit timestamp, in Unix seconds, supplied only by a full dynamic-exit replay. */
+  simulatedExitAt?: number;
+  /** Gross SOL/WSOL quote amount per token at the simulated exit; net return is supplied separately after all fees. */
+  simulatedExitPriceQuotePerToken?: number;
+  /** Exact simulated net return after SDK entry/exit quotes and all costs; not a reserve-price estimate. */
+  simulatedNetFinalReturnPct?: number;
   walletLinks?: readonly WalletLinkEvidence[];
   walletHoldings?: readonly WalletHoldingEvidence[];
 }
@@ -22,7 +36,7 @@ export interface HistoricalReplayConfig {
   solUsdPriceUsd: number;
   minimumTradeUsd?: number;
   horizonSeconds?: number;
-  /** Required to assign labels; no success/failure label is fabricated without both values. */
+  /** Thresholds for exploratory labels; labels still require complete risk, entry and exit evidence. */
   label?: {
     minFavorableExcursionPct: number;
     maxAdverseExcursionPct: number;
@@ -75,7 +89,7 @@ export interface HistoricalCoinReplay {
   snapshots: HistoricalSetupSnapshot[];
   firstSetup: HistoricalSetupSnapshot | null;
   outcome: HistoricalEntryOutcome | null;
-  status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY";
+  status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY" | "RISK_NOT_CLEARED" | "ENTRY_EVIDENCE_INCOMPLETE" | "EXIT_EVIDENCE_INCOMPLETE";
 }
 
 export interface VolumeThresholdCandidate {
@@ -125,6 +139,54 @@ function sortedTrades(input: HistoricalReplayCoinInput): PumpTradeEvent[] {
     .sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
 }
 
+export function hasCompleteHistoricalExitEvidence(input: {
+  entryAt: number;
+  replayEndAt: number;
+  exitLifecycleCompleteAt?: number;
+  simulatedExitAt?: number;
+  simulatedExitPriceQuotePerToken?: number;
+  simulatedNetFinalReturnPct?: number;
+}): boolean {
+  return Number.isSafeInteger(input.exitLifecycleCompleteAt) && input.exitLifecycleCompleteAt! >= 0 &&
+    Number.isSafeInteger(input.simulatedExitAt) && input.simulatedExitAt! >= 0 &&
+    input.exitLifecycleCompleteAt! >= input.simulatedExitAt! &&
+    input.exitLifecycleCompleteAt! <= input.replayEndAt &&
+    input.simulatedExitAt! >= input.entryAt &&
+    input.simulatedExitAt! <= input.replayEndAt &&
+    Number.isFinite(input.simulatedExitPriceQuotePerToken) &&
+    input.simulatedExitPriceQuotePerToken! > 0 &&
+    Number.isFinite(input.simulatedNetFinalReturnPct);
+}
+
+export function hasCompleteHistoricalEntryEvidence(input: {
+  entryAt: number;
+  entryEvidenceCompleteAt?: number;
+}): boolean {
+  return Number.isSafeInteger(input.entryEvidenceCompleteAt) &&
+    input.entryEvidenceCompleteAt! >= 0 &&
+    input.entryEvidenceCompleteAt! <= input.entryAt;
+}
+
+export function classifyHistoricalWalletClusterRisk(input: {
+  walletRisk: ReturnType<typeof evaluateWalletClusterRisk> | null;
+  walletClusterEvidenceCompleteAt?: number;
+  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
+  holderCensusCompleteAt?: number;
+  evaluatedAt: number;
+}): "PASS_COMPLETE" | "REJECT_OBSERVED" | "UNKNOWN" {
+  if (input.walletRisk?.status === "REJECT_OBSERVED") return "REJECT_OBSERVED";
+  const walletCoverageComplete = input.walletClusterEvidenceCoverage === "FULL_WALLET_HISTORY" &&
+    Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) &&
+    input.walletClusterEvidenceCompleteAt! >= 0 &&
+    input.walletClusterEvidenceCompleteAt! <= input.evaluatedAt;
+  const holderCoverageComplete = Number.isSafeInteger(input.holderCensusCompleteAt) &&
+    input.holderCensusCompleteAt! >= 0 &&
+    input.holderCensusCompleteAt! <= input.evaluatedAt;
+  if (walletCoverageComplete && holderCoverageComplete && input.walletRisk !== null &&
+      input.walletRisk.attributionStatus !== "INVALID_EVIDENCE") return "PASS_COMPLETE";
+  return "UNKNOWN";
+}
+
 function metrics(input: {
   trades: readonly PumpTradeEvent[];
   entryAt: number;
@@ -132,33 +194,50 @@ function metrics(input: {
   horizonEnd: number;
   label?: HistoricalReplayConfig["label"];
   decodeComplete: boolean;
+  riskCleared: boolean;
+  entryEvidenceComplete: boolean;
+  exitEvidenceComplete: boolean;
+  simulatedExitAt?: number;
+  simulatedExitPriceQuotePerToken?: number;
+  simulatedNetFinalReturnPct?: number;
 }): HistoricalEntryOutcome | null {
   const future = input.trades.filter(event => {
     const at = eventTimestamp(event);
-    return at >= input.entryAt && at <= input.horizonEnd;
+    return at >= input.entryAt && at <= Math.min(input.horizonEnd,
+      input.exitEvidenceComplete && input.simulatedExitAt !== undefined ? input.simulatedExitAt : input.horizonEnd);
   }).map(event => ({ at: eventTimestamp(event), price: eventPrice(event) }))
     .filter((item): item is { at: number; price: number } => item.price !== null);
   if (future.length < 2) return null;
   const prices = future.map(item => item.price);
   const maxPrice = Math.max(...prices);
   const minPrice = Math.min(...prices);
-  const finalPrice = future[future.length - 1]!.price;
+  const finalPrice = input.exitEvidenceComplete && input.simulatedExitPriceQuotePerToken !== undefined
+    ? input.simulatedExitPriceQuotePerToken
+    : future[future.length - 1]!.price;
   const maxFavorableExcursionPct = ((maxPrice / input.entryPrice) - 1) * 100;
   const maxAdverseExcursionPct = ((1 - minPrice / input.entryPrice)) * 100;
   const grossFinalReturnPct = ((finalPrice / input.entryPrice) - 1) * 100;
   const roundTripCostPct = input.label?.roundTripCostPct ?? null;
-  const netFinalReturnPct = roundTripCostPct === null ? null : grossFinalReturnPct - roundTripCostPct;
+  const netFinalReturnPct = input.exitEvidenceComplete && input.simulatedNetFinalReturnPct !== undefined
+    ? input.simulatedNetFinalReturnPct
+    : roundTripCostPct === null ? null : grossFinalReturnPct - roundTripCostPct;
   let label: HistoricalEntryOutcome["label"] = "UNKNOWN";
   let labelReason = "A complete forward window, explicit excursion thresholds and an assumed round-trip cost are required.";
-  if (input.decodeComplete && input.label && netFinalReturnPct !== null) {
+  if (!input.riskCleared) {
+    labelReason = "Creator and complete holder/cluster evidence were not cleared at the candidate time; reserve-price performance is exploratory and is not labelled as a strategy outcome.";
+  } else if (!input.entryEvidenceComplete) {
+    labelReason = "Signal freshness, liquidity/market-cap, executable quote/cost and portfolio-capacity gates were not all verified by the candidate time; reserve-price performance is not labelled as a strategy outcome.";
+  } else if (!input.exitEvidenceComplete) {
+    labelReason = "The dynamic exit lifecycle, fresh full-size sell quote and zero-balance confirmation were not replayed; reserve-price performance is not labelled as a strategy outcome.";
+  } else if (input.decodeComplete && input.label && netFinalReturnPct !== null) {
     const metExcursions = maxFavorableExcursionPct >= input.label.minFavorableExcursionPct &&
       maxAdverseExcursionPct <= input.label.maxAdverseExcursionPct;
     label = metExcursions && netFinalReturnPct > 0 ? "SUCCESS" : "FAILURE";
     labelReason = label === "SUCCESS"
-      ? "Observed forward path met both excursion criteria and remained net-positive after the supplied round-trip cost."
+      ? "Risk-cleared candidate path met both excursion criteria and remained net-positive after the simulated SDK entry/exit costs."
       : !metExcursions
-        ? "Observed forward path failed at least one configured excursion criterion."
-        : "Observed final return was not positive after the supplied round-trip cost.";
+        ? "Risk-cleared candidate path failed at least one configured excursion criterion."
+        : "Risk-cleared candidate final return was not positive after the simulated SDK entry/exit costs.";
   } else if (!input.decodeComplete) {
     labelReason = "Transaction decoding coverage is incomplete; outcome is not labelled.";
   }
@@ -230,7 +309,7 @@ export function replayHistoricalCoin(
         .find(item => item.mint === input.mint && item.quoteUnit === "SOL");
       if (!profile || !flow) continue;
       // Risk evaluators must see only evidence available at this historical instant.
-      const evidenceTransactions = input.transactions.filter(tx => typeof tx.blockTime === "number" && Number.isSafeInteger(tx.blockTime) && tx.blockTime <= evaluatedAt);
+      const evidenceTransactions = input.transactions.filter(tx => tx.blockTime !== null && tx.blockTime !== undefined && Number.isSafeInteger(tx.blockTime) && tx.blockTime <= evaluatedAt);
       const creatorRisk = evaluateCreatorSellRisk(evidenceTransactions, {
         nowSeconds: evaluatedAt,
         candidateMints: [input.mint],
@@ -254,9 +333,19 @@ export function replayHistoricalCoin(
         })
       }) : null;
       const creatorRiskStatus = creatorRisk?.status ?? "UNKNOWN";
-      const walletClusterRiskStatus = walletRisk?.status === "REJECT_OBSERVED"
-        ? "REJECT_OBSERVED"
-        : Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) && input.walletClusterEvidenceCompleteAt! <= evaluatedAt && walletRisk !== null ? "PASS_COMPLETE" : "UNKNOWN";
+      const walletClusterRiskStatus = classifyHistoricalWalletClusterRisk({
+        walletRisk,
+        ...(input.walletClusterEvidenceCompleteAt === undefined ? {} : {
+          walletClusterEvidenceCompleteAt: input.walletClusterEvidenceCompleteAt
+        }),
+        ...(input.walletClusterEvidenceCoverage === undefined ? {} : {
+          walletClusterEvidenceCoverage: input.walletClusterEvidenceCoverage
+        }),
+        ...(input.holderCensusCompleteAt === undefined ? {} : {
+          holderCensusCompleteAt: input.holderCensusCompleteAt
+        }),
+        evaluatedAt
+      });
       const setupEligible = input.decodeComplete && profile.dataComplete &&
         profile.microTradeFilterStatus === "APPLIED" &&
         profile.reclaimDetected && profile.pullbackVolumeVsImpulsePct !== null &&
@@ -297,15 +386,69 @@ export function replayHistoricalCoin(
 
   const entryAt = entryEvent ? eventTimestamp(entryEvent) : null;
   const entryPrice = entryEvent ? eventPrice(entryEvent) : null;
-  const outcome = entryAt !== null && entryPrice !== null
+  const outcome = firstSetup !== null && entryAt !== null && entryPrice !== null
     ? metrics({
         trades, entryAt, entryPrice, horizonEnd,
-        label: config.label, decodeComplete: input.decodeComplete
+        label: config.label, decodeComplete: input.decodeComplete,
+        riskCleared: firstSetup.riskClearedSetupEligible,
+        entryEvidenceComplete: hasCompleteHistoricalEntryEvidence({
+          entryAt,
+          ...(input.entryEvidenceCompleteAt === undefined ? {} : {
+            entryEvidenceCompleteAt: input.entryEvidenceCompleteAt
+          })
+        }),
+        exitEvidenceComplete: hasCompleteHistoricalExitEvidence({
+          entryAt,
+          replayEndAt: Math.min(observedEnd, entryAt + horizonSeconds),
+          ...(input.exitLifecycleCompleteAt === undefined ? {} : {
+            exitLifecycleCompleteAt: input.exitLifecycleCompleteAt
+          }),
+          ...(input.simulatedExitAt === undefined ? {} : {
+            simulatedExitAt: input.simulatedExitAt
+          }),
+          ...(input.simulatedExitPriceQuotePerToken === undefined ? {} : {
+            simulatedExitPriceQuotePerToken: input.simulatedExitPriceQuotePerToken
+          }),
+          ...(input.simulatedNetFinalReturnPct === undefined ? {} : {
+            simulatedNetFinalReturnPct: input.simulatedNetFinalReturnPct
+          })
+        }),
+        ...(input.simulatedExitAt === undefined ? {} : { simulatedExitAt: input.simulatedExitAt }),
+        ...(input.simulatedExitPriceQuotePerToken === undefined ? {} : {
+          simulatedExitPriceQuotePerToken: input.simulatedExitPriceQuotePerToken
+        }),
+        ...(input.simulatedNetFinalReturnPct === undefined ? {} : {
+          simulatedNetFinalReturnPct: input.simulatedNetFinalReturnPct
+        })
       })
     : null;
   const status = !input.decodeComplete ? "INCOMPLETE"
     : !firstSetup ? "NO_SETUP"
-      : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
+      : !firstSetup.riskClearedSetupEligible ? "RISK_NOT_CLEARED"
+        : entryAt === null ? "NO_FORWARD_ENTRY"
+        : !hasCompleteHistoricalEntryEvidence({
+          entryAt,
+          ...(input.entryEvidenceCompleteAt === undefined ? {} : {
+            entryEvidenceCompleteAt: input.entryEvidenceCompleteAt
+          })
+        }) ? "ENTRY_EVIDENCE_INCOMPLETE"
+          : !hasCompleteHistoricalExitEvidence({
+            entryAt,
+            replayEndAt: Math.min(observedEnd, entryAt + horizonSeconds),
+            ...(input.exitLifecycleCompleteAt === undefined ? {} : {
+              exitLifecycleCompleteAt: input.exitLifecycleCompleteAt
+            }),
+            ...(input.simulatedExitAt === undefined ? {} : {
+              simulatedExitAt: input.simulatedExitAt
+            }),
+            ...(input.simulatedExitPriceQuotePerToken === undefined ? {} : {
+              simulatedExitPriceQuotePerToken: input.simulatedExitPriceQuotePerToken
+            }),
+            ...(input.simulatedNetFinalReturnPct === undefined ? {} : {
+              simulatedNetFinalReturnPct: input.simulatedNetFinalReturnPct
+            })
+          }) ? "EXIT_EVIDENCE_INCOMPLETE"
+            : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
   return {
     mint: input.mint,
     launchBlockTime: input.launchBlockTime,

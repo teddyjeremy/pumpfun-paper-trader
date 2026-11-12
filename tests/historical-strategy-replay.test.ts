@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PumpCreateEvent, PumpTradeEvent } from "../src/ingestion/pump-events.js";
 import type { VerifiedPumpTransaction } from "../src/ingestion/helius.js";
-import { calibrateVolumeThresholds, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
+import { calibrateVolumeThresholds, classifyHistoricalWalletClusterRisk, hasCompleteHistoricalEntryEvidence, hasCompleteHistoricalExitEvidence, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
 
 const mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const quoteMint = "So11111111111111111111111111111111111111112";
@@ -65,16 +65,96 @@ function verifiedTransaction(): VerifiedPumpTransaction {
 }
 
 describe("historical strategy replay", () => {
+  const noObservedClusterRisk = {
+    mint, status: "WATCH" as const, attributionStatus: "NO_HIGH_CONFIDENCE_LINKS" as const,
+    linkedWalletCount: 0, largestClusterConfidenceBps: null,
+    largestIndividualHolderShareBps: null, linkedWalletSellShareBps: null,
+    largestLinkedClusterSellShareBps: null, largestClusterBuyVolumeShareBps: null,
+    largestClusterHoldingShareBps: null, reasons: [], limitations: []
+  };
+
+  it("requires full entry evidence to be timestamped no later than the candidate", () => {
+    expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20 })).toBe(false);
+    expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 20 })).toBe(true);
+    expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 19 })).toBe(true);
+    expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 21 })).toBe(false);
+    expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: -1 })).toBe(false);
+  });
+
+  it("requires a completed, timestamped full-size exit with a net return", () => {
+    expect(hasCompleteHistoricalExitEvidence({ entryAt: 20, replayEndAt: 100 })).toBe(false);
+    expect(hasCompleteHistoricalExitEvidence({
+      entryAt: 20, replayEndAt: 100, simulatedExitAt: 45,
+      exitLifecycleCompleteAt: 46, simulatedExitPriceQuotePerToken: 1.4,
+      simulatedNetFinalReturnPct: 12
+    })).toBe(true);
+    expect(hasCompleteHistoricalExitEvidence({
+      entryAt: 20, replayEndAt: 100, simulatedExitAt: 45,
+      exitLifecycleCompleteAt: 44, simulatedExitPriceQuotePerToken: 1.4,
+      simulatedNetFinalReturnPct: 12
+    })).toBe(false);
+    expect(hasCompleteHistoricalExitEvidence({
+      entryAt: 20, replayEndAt: 100, simulatedExitAt: 101,
+      exitLifecycleCompleteAt: 102, simulatedExitPriceQuotePerToken: 1.4,
+      simulatedNetFinalReturnPct: 12
+    })).toBe(false);
+    expect(hasCompleteHistoricalExitEvidence({
+      entryAt: 20, replayEndAt: 100, simulatedExitAt: -1,
+      exitLifecycleCompleteAt: 0, simulatedExitPriceQuotePerToken: 1.4,
+      simulatedNetFinalReturnPct: 12
+    })).toBe(false);
+  });
+
+  it("does not clear a top-20 holder snapshot without a full holder census", () => {
+    expect(classifyHistoricalWalletClusterRisk({
+      walletRisk: noObservedClusterRisk,
+      walletClusterEvidenceCompleteAt: 20,
+      evaluatedAt: 30
+    })).toBe("UNKNOWN");
+  });
+
+  it("clears wallet/holder evidence only after both coverage timestamps are verified", () => {
+    expect(classifyHistoricalWalletClusterRisk({
+      walletRisk: noObservedClusterRisk,
+      walletClusterEvidenceCompleteAt: 20,
+      walletClusterEvidenceCoverage: "FULL_WALLET_HISTORY",
+      holderCensusCompleteAt: 25,
+      evaluatedAt: 30
+    })).toBe("PASS_COMPLETE");
+  });
+
+  it("does not clear sampled latest-20 wallet history even when top-holder coverage is timestamped", () => {
+    expect(classifyHistoricalWalletClusterRisk({
+      walletRisk: noObservedClusterRisk,
+      walletClusterEvidenceCompleteAt: 20,
+      walletClusterEvidenceCoverage: "RECENT_SIGNATURE_SAMPLE_ONLY",
+      holderCensusCompleteAt: 25,
+      evaluatedAt: 30
+    })).toBe("UNKNOWN");
+  });
+
+  it("preserves an observed wallet-cluster reject even when coverage is incomplete", () => {
+    expect(classifyHistoricalWalletClusterRisk({
+      walletRisk: { ...noObservedClusterRisk, status: "REJECT_OBSERVED" },
+      evaluatedAt: 30
+    })).toBe("REJECT_OBSERVED");
+  });
+
   it("replays impulse, pullback and reclaim volume before measuring the forward path", () => {
     const result = replayHistoricalCoin({
       mint, transactions: [verifiedTransaction()], launchBlockTime: 0,
-      horizonSeconds: 600, decodeComplete: true
+      horizonSeconds: 600, decodeComplete: true,
+      walletClusterEvidenceCompleteAt: 20,
+      walletHoldings: [{
+        mint, wallet: "sampled-holder", amount: "1000000",
+        observedAt: "1970-01-01T00:00:20.000Z"
+      }]
     }, {
       solUsdPriceUsd: 100, minimumTradeUsd: 0.01,
       label: { minFavorableExcursionPct: 20, maxAdverseExcursionPct: 15, roundTripCostPct: 4 }
     });
 
-    expect(result.status).toBe("COMPLETE");
+    expect(result.status).toBe("RISK_NOT_CLEARED");
     expect(result.firstSetup).toMatchObject({
       setupEligible: true, riskClearedSetupEligible: false,
       creatorSellRiskStatus: "PENDING", walletClusterRiskStatus: "UNKNOWN",
@@ -84,8 +164,9 @@ describe("historical strategy replay", () => {
     expect(result.firstSetup!.pullbackVolumeVsImpulsePct).toBeGreaterThan(0);
     expect(result.firstSetup!.pullbackVolumeVsImpulsePct).toBeLessThan(100);
     expect(result.firstSetup!.reclaimVolumeVsPullbackPct).toBeGreaterThan(100);
-    expect(result.outcome).toMatchObject({ label: "SUCCESS", roundTripCostPct: 4 });
+    expect(result.outcome).toMatchObject({ label: "UNKNOWN", roundTripCostPct: 4 });
     expect(result.outcome!.netFinalReturnPct).toBeCloseTo(11.3846, 1);
+    expect(result.outcome!.labelReason).toContain("complete holder/cluster evidence were not cleared");
   });
 
   it("does not mix non-SOL quote trades into the SOL-denominated forward price path", () => {
@@ -120,7 +201,7 @@ describe("historical strategy replay", () => {
     expect(result.snapshots.every(snapshot => !snapshot.setupEligible)).toBe(true);
   });
 
-  it("labels a setup as a failure when the supplied round-trip cost makes its final return negative", () => {
+  it("keeps a negative reserve-price result unlabelled when risk evidence is incomplete", () => {
     const result = replayHistoricalCoin({
       mint, transactions: [verifiedTransaction()], launchBlockTime: 0, decodeComplete: true
     }, {
@@ -129,7 +210,8 @@ describe("historical strategy replay", () => {
     });
     expect(result.outcome?.grossFinalReturnPct).toBeGreaterThan(0);
     expect(result.outcome?.netFinalReturnPct).toBeLessThan(0);
-    expect(result.outcome?.label).toBe("FAILURE");
+    expect(result.outcome?.label).toBe("UNKNOWN");
+    expect(result.outcome?.labelReason).toContain("complete holder/cluster evidence were not cleared");
   });
 
   it("does not assign a profitability label without an explicit round-trip cost", () => {
