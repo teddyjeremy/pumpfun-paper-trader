@@ -52,7 +52,7 @@ export type PaperEntryExecutionResult =
 export async function executePaperEntry(input: PaperEntryExecutionInput): Promise<PaperEntryExecutionResult> {
   const now = input.nowMs ?? Date.now();
   if (!input.mint.trim() || !input.positionId.trim() ||
-      !Number.isFinite(Date.parse(input.occurredAt)) || !Number.isFinite(now)) {
+      !Number.isFinite(Date.parse(input.occurredAt)) || !Number.isFinite(executionNow())) {
     return { status: "BLOCKED", reason: "Entry identity or execution clock is invalid." };
   }
   if (input.strategy.decision !== "BUY" || input.strategy.buyAllowed !== true) {
@@ -65,7 +65,7 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
   if (input.portfolio.enteredMints.includes(input.mint)) {
     return { status: "BLOCKED", reason: "This mint has already been entered in the paper session." };
   }
-  const openPositions = input.portfolio.positions.filter(position => position.status !== "CLOSED");
+  if (input.portfolio.positions.some(position => position.positionId === input.positionId)) {\n    return { status: "BLOCKED", reason: "Position ID already exists in the paper session." };\n  }\n  const openPositions = input.portfolio.positions.filter(position => position.status !== "CLOSED");
   if (openPositions.length >= input.portfolio.maxConcurrentPositions) {
     return { status: "BLOCKED", reason: "Maximum concurrent paper positions reached." };
   }
@@ -80,7 +80,7 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
       return { status: "BLOCKED", reason: "Buy adapter returned a quote for the wrong side or mint." };
     }
     const buyQuote = buildExecutablePaperQuote({
-      quote: buy.quote, solUsd: buy.context.solUsd, costs: buy.context.costs, nowMs: now
+      quote: buy.quote, solUsd: buy.context.solUsd, costs: buy.context.costs, nowMs: executionNow()
     });
     if (Math.abs(buyQuote.requestedUsd - stakeUsd) > 0.00000001) {
       return { status: "BLOCKED", reason: "Buy quote does not match the exact planned paper stake." };
@@ -94,7 +94,7 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
       return { status: "BLOCKED", reason: "Initial sell quote is not exact-size for the complete purchased token balance." };
     }
     const sellQuote = buildExecutablePaperQuote({
-      quote: sell.quote, solUsd: sell.context.solUsd, costs: sell.context.costs, nowMs: now
+      quote: sell.quote, solUsd: sell.context.solUsd, costs: sell.context.costs, nowMs: executionNow()
     });
 
     const commitResult = await input.commitEntry({
