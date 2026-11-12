@@ -268,16 +268,54 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async listTradeFlows(): Promise<unknown> {
     await this.hydrate();
+    const retentionMayBeTruncated = this.verifiedTransactions.length >= 2_000;
+    const confirmedSubscriptions = this.heliusState.subscriptions.filter(
+      item => item.subscriptionId !== null && item.subscribedAt !== null
+    );
+    const confirmedMints = new Set(confirmedSubscriptions.map(item => item.mint));
+    const unmonitoredMints = this.discovery.candidates
+      .filter(candidate => candidate.status === "DISCOVERED" && !confirmedMints.has(candidate.mint))
+      .map(candidate => candidate.mint);
+    const incompleteMints = [...new Set([
+      ...this.heliusState.incompleteMints,
+      ...unmonitoredMints,
+      ...(retentionMayBeTruncated ? this.discovery.candidates.map(candidate => candidate.mint) : [])
+    ])];
+    const coverageStartByMint = Object.fromEntries(confirmedSubscriptions.flatMap(item => {
+      const parsed = item.subscribedAt ? Date.parse(item.subscribedAt) : Number.NaN;
+      if (!Number.isFinite(parsed)) return [];
+      return [[item.mint, Math.ceil((parsed / 1_000) / 2) * 2]];
+    }));
+    const flows = buildCandidateTradeFlows(this.verifiedTransactions, {
+      incompleteMints,
+      coverageStartByMint
+    });
+    const rankedFlows = [...flows].sort((a, b) =>
+      Number(b.dataComplete) - Number(a.dataComplete) ||
+      Number(b.flowConfirmationPass) - Number(a.flowConfirmationPass) ||
+      Number(b.latestThreeWindowFlowPass) - Number(a.latestThreeWindowFlowPass) ||
+      b.distinctBuyersAcrossLatestThree - a.distinctBuyersAcrossLatestThree ||
+      (a.largestBuyerShareAcrossLatestThreeBps ?? Number.MAX_SAFE_INTEGER) -
+        (b.largestBuyerShareAcrossLatestThreeBps ?? Number.MAX_SAFE_INTEGER)
+    );
     return {
       provider: "helius",
       mode: "paper",
       generatedAt: new Date().toISOString(),
       retainedVerifiedTransactions: this.verifiedTransactions.length,
-      retentionMayBeTruncated: this.verifiedTransactions.length >= 2_000,
-      knownIncompleteMints: [...this.heliusState.incompleteMints],
-      flows: buildCandidateTradeFlows(this.verifiedTransactions, {
-        incompleteMints: this.heliusState.incompleteMints
-      })
+      retentionMayBeTruncated,
+      knownIncompleteMints: incompleteMints,
+      candidateCoverage: this.discovery.candidates.map(candidate => {
+        const subscription = this.heliusState.subscriptions.find(item => item.mint === candidate.mint);
+        return {
+          mint: candidate.mint,
+          status: candidate.status,
+          monitoring: subscription?.subscriptionId !== null && subscription?.subscriptionId !== undefined
+            ? "SUBSCRIBED"
+            : subscription ? "SUBSCRIPTION_PENDING" : "NOT_MONITORED"
+        };
+      }),
+      flows: rankedFlows.map((flow, index) => ({ rank: index + 1, ...flow }))
     };
   }
 
