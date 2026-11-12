@@ -12,8 +12,10 @@ export interface HistoricalReplayCoinInput {
   horizonSeconds?: number;
   decodeComplete: boolean;
   decodeReason?: string | null;
-  /** Historical second at which the sampled wallet-link evidence was fully ingested. */
+  /** Historical second at which complete relevant-wallet history/linkage coverage was independently verified. Recent-20 signature samples do not qualify. */
   walletClusterEvidenceCompleteAt?: number;
+  /** Coverage class for wallet-link evidence; RECENT_SIGNATURE_SAMPLE_ONLY is reject-only, never a clearance. */
+  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
   /** Historical second at which a genuinely complete holder census was independently verified. Top-20 snapshots do not qualify. */
   holderCensusCompleteAt?: number;
   walletLinks?: readonly WalletLinkEvidence[];
@@ -130,11 +132,13 @@ function sortedTrades(input: HistoricalReplayCoinInput): PumpTradeEvent[] {
 export function classifyHistoricalWalletClusterRisk(input: {
   walletRisk: ReturnType<typeof evaluateWalletClusterRisk> | null;
   walletClusterEvidenceCompleteAt?: number;
+  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
   holderCensusCompleteAt?: number;
   evaluatedAt: number;
 }): "PASS_COMPLETE" | "REJECT_OBSERVED" | "UNKNOWN" {
   if (input.walletRisk?.status === "REJECT_OBSERVED") return "REJECT_OBSERVED";
-  const walletCoverageComplete = Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) &&
+  const walletCoverageComplete = input.walletClusterEvidenceCoverage === "FULL_WALLET_HISTORY" &&
+    Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) &&
     input.walletClusterEvidenceCompleteAt! <= input.evaluatedAt;
   const holderCoverageComplete = Number.isSafeInteger(input.holderCensusCompleteAt) &&
     input.holderCensusCompleteAt! <= input.evaluatedAt;
@@ -279,6 +283,9 @@ export function replayHistoricalCoin(
         walletRisk,
         ...(input.walletClusterEvidenceCompleteAt === undefined ? {} : {
           walletClusterEvidenceCompleteAt: input.walletClusterEvidenceCompleteAt
+        }),
+        ...(input.walletClusterEvidenceCoverage === undefined ? {} : {
+          walletClusterEvidenceCoverage: input.walletClusterEvidenceCoverage
         }),
         ...(input.holderCensusCompleteAt === undefined ? {} : {
           holderCensusCompleteAt: input.holderCensusCompleteAt
