@@ -2,14 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, selectHeliusCandidates, confirmHeliusSubscription,
-  takeHeliusWork, MAX_HELIUS_CANDIDATES
+  takeHeliusWork, MAX_HELIUS_CANDIDATES, resetHeliusSubscriptionIds
 } from "../src/ingestion/helius-monitor.js";
 import type { DiscoveryCandidate } from "../src/ingestion/discovery-store.js";
 
-const key = (char: string) => char + "1".repeat(43);
+const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const key = (index: number) => alphabet[index]! + alphabet[(index + 1) % alphabet.length]!.repeat(42);
+const sigFor = (index: number) => "3".repeat(62) + alphabet[Math.floor(index / alphabet.length)]! + alphabet[index % alphabet.length]!;
 function candidate(index: number, status: "DISCOVERED" | "MIGRATED" = "DISCOVERED"): DiscoveryCandidate {
   return {
-    kind: "new_token", mint: key(String(index + 1)), bondingCurve: key(String(index + 2)),
+    kind: "new_token", mint: key(index), bondingCurve: key(index + 20),
     signature: null, creator: null, name: null, symbol: null,
     receivedAt: "2026-11-12T00:00:00.000Z", firstSeenAt: "2026-11-12T00:00:00.000Z",
     lastSeenAt: "2026-11-12T00:00:00.000Z", observations: 1, status
@@ -31,7 +33,7 @@ describe("bounded Helius candidate monitor", () => {
     const requestId = state.subscriptions[0]!.requestId;
     state = confirmHeliusSubscription(state, requestId, 77);
     expect(state.subscriptions[0]!.subscriptionId).toBe(77);
-    state = reconcileHeliusSubscriptions(state, [candidate(0)]);
+    state = resetHeliusSubscriptionIds(state);
     expect(state.subscriptions[0]!.subscriptionId).toBeNull();
     expect(state.subscriptions[0]!.requestId).toBe(requestId);
   });
@@ -52,7 +54,7 @@ describe("bounded Helius candidate monitor", () => {
     let state = reconcileHeliusSubscriptions(emptyHeliusMonitorState(), [candidate(0)]);
     state = confirmHeliusSubscription(state, state.subscriptions[0]!.requestId, 77);
     for (let i = 0; i < 100; i++) {
-      state = enqueueHeliusNotification(state, { subscriptionId: 77, signature: String(i + 100).padStart(64, "3"), slot: i, err: null }).state;
+      state = enqueueHeliusNotification(state, { subscriptionId: 77, signature: sigFor(i), slot: i, err: null }).state;
     }
     const overflow = enqueueHeliusNotification(state, { subscriptionId: 77, signature: "9".repeat(64), slot: 101, err: null });
     expect(overflow.outcome).toBe("OVERFLOW");
