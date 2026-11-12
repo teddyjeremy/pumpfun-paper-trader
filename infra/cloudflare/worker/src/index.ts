@@ -144,6 +144,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private hydrated = false;
   private pendingWrites = 0;
   private activeSessionId: string | null = null;
+  private solUsdPriceCache: Awaited<ReturnType<typeof fetchSolUsdPrice>> | null = null;
+  private solUsdPriceFetchedAtMs = 0;
+  private solUsdPriceRequest: Promise<Awaited<ReturnType<typeof fetchSolUsdPrice>>> | null = null;
   private persistChain: Promise<void> = Promise.resolve();
   private auditChain: Promise<void> = Promise.resolve();
   private connectingSinceMs = 0;
@@ -785,6 +788,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return { ...result, risk };
   }
 
+  private async getSolUsdPrice(): Promise<Awaited<ReturnType<typeof fetchSolUsdPrice>>> {
+    const now = Date.now();
+    if (this.solUsdPriceCache && now - this.solUsdPriceFetchedAtMs < 1_000) {
+      return this.solUsdPriceCache;
+    }
+    if (this.solUsdPriceRequest) return this.solUsdPriceRequest;
+    const request = fetchSolUsdPrice().then(result => {
+      this.solUsdPriceCache = result;
+      this.solUsdPriceFetchedAtMs = Date.now();
+      return result;
+    }).finally(() => {
+      this.solUsdPriceRequest = null;
+    });
+    this.solUsdPriceRequest = request;
+    return request;
+  }
+
   async listTradeFlows(): Promise<unknown> {
     await this.hydrate();
     const retentionMayBeTruncated = this.verifiedTransactions.length >= 2_000;
@@ -822,7 +842,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const candidateMints = this.discovery.candidates
       .filter(candidate => candidate.status === "DISCOVERED")
       .map(candidate => candidate.mint);
-    const solUsdPrice = await fetchSolUsdPrice();
+    const solUsdPrice = await this.getSolUsdPrice();
     const solUsdPriceUsd = solUsdPrice.status === "AVAILABLE" ? solUsdPrice.observation.priceUsd : undefined;
     const flows = buildCandidateTradeFlows(this.verifiedTransactions, {
       solUsdPriceUsd,
