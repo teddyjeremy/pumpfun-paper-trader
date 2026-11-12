@@ -985,7 +985,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           microTradeFilterStatus: profile.microTradeFilterStatus
         } : null,
         flow: flow ? {
-          dataComplete: flow.dataComplete, latestThreeWindowFlowPass: flow.latestThreeWindowFlowPass, windows: flow.windows.map(window => ({...window, flowWindowPass: window.flowWindowPass})),
+          dataComplete: flow.dataComplete, latestThreeWindowFlowPass: flow.latestThreeWindowFlowPass,
+          sampleIntervalSeconds: flow.sampleIntervalSeconds,
+          windows: flow.windows.map(window => ({...window, flowWindowPass: window.flowWindowPass})),
           distinctBuyersAcrossLatestThree: flow.distinctBuyersAcrossLatestThree,
           largestBuyerShareAcrossLatestThreeBps: flow.largestBuyerShareAcrossLatestThreeBps,
           microTradeFilterStatus: flow.microTradeFilterStatus
