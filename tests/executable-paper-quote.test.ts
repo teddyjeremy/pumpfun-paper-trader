@@ -100,7 +100,7 @@ describe("executable paper quote adapter", () => {
 
   it("rejects fills whose simulated latency exceeds the quote validity window", () => {
     expect(() => buildExecutablePaperQuote({
-      quote: curveQuote(), solUsd,
+      quote: { ...curveQuote(), observedAt: new Date(now - 700).toISOString() }, solUsd,
       costs: { ...costs, simulatedLatencyMs: 1_500 },
       nowMs: now
     })).toThrow(/expire before the simulated fill/);
