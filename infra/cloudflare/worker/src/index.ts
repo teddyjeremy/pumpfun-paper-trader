@@ -382,13 +382,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       `helius_backfill:${sessionId}:${transaction.mint}`
     );
     const historicalSignature = state?.signatures.find(item => item.signature === transaction.signature);
-    if (!state || !historicalSignature) return;
-    if (historicalSignature.slot !== transaction.slot) {
+    if (!state) return;
+    if (historicalSignature && historicalSignature.slot !== transaction.slot) {
       await this.markHistoricalDecodeIncomplete({
         signature: transaction.signature, mint: transaction.mint
       }, "Verified transaction slot conflicts with historical signature evidence.");
       return;
     }
+    const globalKey = `helius_archived_transaction_signatures:${sessionId}`;
+    const global = new Set(await this.ctx.storage.get<string[]>(globalKey) ?? []);
+    const mintKey = `helius_archived_transaction_signatures:${sessionId}:${transaction.mint}`;
+    const mintArchived = new Set(await this.ctx.storage.get<string[]>(mintKey) ?? []);
+    if (global.has(transaction.signature) || (historicalSignature && mintArchived.has(transaction.signature))) return;
     try {
       const decodeCoverage = await this.getHistoricalDecodeCoverage(sessionId, transaction.mint, state);
       const response = await this.postPostgresIngest("/internal/helius-backfill", {
@@ -397,18 +402,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           ...jsonSafe(transaction) as Record<string, unknown>,
           provider: "helius", commitment: "confirmed",
           receivedAt: transaction.receivedAt ?? new Date().toISOString(),
-          source: "HISTORICAL_BACKFILL"
+          source: historicalSignature ? "HISTORICAL_BACKFILL" : "LIVE_MONITOR"
         }
       });
       if (!response.ok) throw new Error("Historical transaction archive was not acknowledged.");
-      const globalKey = `helius_archived_transaction_signatures:${sessionId}`;
-      const global = new Set(await this.ctx.storage.get<string[]>(globalKey) ?? []);
       global.add(transaction.signature);
       await this.ctx.storage.put(globalKey, [...global].slice(-5_000));
-      const mintKey = `helius_archived_transaction_signatures:${sessionId}:${transaction.mint}`;
-      const mintArchived = new Set(await this.ctx.storage.get<string[]>(mintKey) ?? []);
-      mintArchived.add(transaction.signature);
-      await this.ctx.storage.put(mintKey, [...mintArchived].slice(-500));
+      if (historicalSignature) {
+        mintArchived.add(transaction.signature);
+        await this.ctx.storage.put(mintKey, [...mintArchived].slice(-500));
+      }
     } catch {
       this.status.lastError = "Verified historical transaction is waiting for PostgreSQL persistence.";
       await this.ctx.storage.setAlarm(Date.now() + 30_000);
@@ -436,41 +439,27 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     const archivedKey = `helius_archived_transaction_signatures:${sessionId}`;
     const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
+    const transactionsToArchive = new Map<string, VerifiedPumpTransaction & { receivedAt?: string }>();
+    for (const mint of mints) {
+      const stored = await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(
+        `helius_verified_historical_transactions:${sessionId}:${mint}`
+      ) ?? {};
+      for (const transaction of Object.values(stored)) {
+        transactionsToArchive.set(transaction.signature, transaction);
+      }
+    }
     for (const transaction of this.verifiedTransactions) {
+      transactionsToArchive.set(transaction.signature, transaction);
+    }
+    for (const transaction of transactionsToArchive.values()) {
       if (archived.has(transaction.signature)) continue;
-      try {
-        const state = await this.ctx.storage.get<HistoricalBackfillState>(
-          `helius_backfill:${sessionId}:${transaction.mint}`
-        );
-        if (!state) continue;
-        const historicalSignature = state.signatures.find(item => item.signature === transaction.signature);
-        if (historicalSignature && historicalSignature.slot !== transaction.slot) {
-          throw new Error("Verified transaction slot conflicts with historical signature evidence.");
-        }
-        const decodeCoverage = await this.getHistoricalDecodeCoverage(sessionId, transaction.mint, state);
-        const response = await this.postPostgresIngest("/internal/helius-backfill", {
-          sessionId, mint: transaction.mint, state, decodeCoverage,
-          transaction: {
-            ...jsonSafe(transaction) as Record<string, unknown>,
-            provider: "helius", commitment: "confirmed",
-            receivedAt: transaction.receivedAt ?? new Date().toISOString(),
-            source: historicalSignature ? "HISTORICAL_BACKFILL" : "LIVE_MONITOR"
-          }
-        });
-        if (!response.ok) throw new Error("Transaction archive was not acknowledged.");
-        archived.add(transaction.signature);
-        await this.ctx.storage.put(archivedKey, [...archived].slice(-5_000));
-        if (historicalSignature) {
-          const mintArchiveKey = `helius_archived_transaction_signatures:${sessionId}:${transaction.mint}`;
-          const mintArchived = new Set(await this.ctx.storage.get<string[]>(mintArchiveKey) ?? []);
-          mintArchived.add(transaction.signature);
-          await this.ctx.storage.put(mintArchiveKey, [...mintArchived].slice(-500));
-        }
-      } catch {
-        this.status.lastError = "Verified Helius transactions are waiting for PostgreSQL persistence.";
-        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+      await this.archiveVerifiedHistoricalTransaction(transaction);
+      const acknowledged = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
+      if (!acknowledged.has(transaction.signature)) {
+        // Keep the durable per-mint transaction record for the next alarm.
         return;
       }
+      archived.add(transaction.signature);
     }
     for (const mint of mints) {
       const state = await this.ctx.storage.get<HistoricalBackfillState>(`helius_backfill:${sessionId}:${mint}`);
