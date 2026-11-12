@@ -6,7 +6,8 @@ import {
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork, resetHeliusSubscriptionIds,
-  type HeliusMonitorState
+  type HeliusMonitorState,
+  type HeliusSignatureWork
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
 import { buildCandidateTradeFlows } from "../../../../src/ingestion/trade-flow.js";
@@ -506,6 +507,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private async drainHeliusQueue(): Promise<void> {
     if (this.drainingHelius || !this.status.enabled) return;
     this.drainingHelius = true;
+    let activeWork: HeliusSignatureWork | null = null;
     try {
       while (this.status.enabled && this.heliusState.queue.length > 0) {
         if (!this.heliusBucket.tryTake()) {
@@ -514,6 +516,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         }
         const work = this.heliusState.queue[0];
         if (!work) break;
+        activeWork = work;
         const result = await fetchAndVerifyPumpTransaction(work.signature, work.mint, {
           apiKey: this.env.HELIUS_API_KEY,
           commitment: "confirmed"
@@ -536,18 +539,19 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           verified_transactions: this.verifiedTransactions,
           status: this.status
         });
+        activeWork = null;
       }
     } catch {
       this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
-      // Do not leave a failing head item at the front forever. Mark its mint
-      // incomplete and discard this one signature so later candidates can
-      // continue; the status makes the evidence gap explicit.
-      const failedWork = takeHeliusWork(this.heliusState);
-      this.heliusState = failedWork.state;
-      if (failedWork.work) {
+      // Only remove the item that actually failed. A storage failure after a
+      // successful dequeue must never discard the next candidate's work.
+      if (activeWork) {
+        if (this.heliusState.queue[0]?.signature === activeWork.signature) {
+          this.heliusState = takeHeliusWork(this.heliusState).state;
+        }
         this.heliusState = {
           ...this.heliusState,
-          incompleteMints: [...new Set([...this.heliusState.incompleteMints, failedWork.work.mint])].slice(-10)
+          incompleteMints: [...new Set([...this.heliusState.incompleteMints, activeWork.mint])].slice(-10)
         };
       }
       this.status.incompleteHeliusTransactions += 1;
