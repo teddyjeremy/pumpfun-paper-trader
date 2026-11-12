@@ -86,6 +86,22 @@ describe("historical strategy replay", () => {
     expect(result.outcome!.netFinalReturnPct).toBeCloseTo(11.3846, 1);
   });
 
+  it("does not mix non-SOL quote trades into the SOL-denominated forward price path", () => {
+    const original = verifiedTransaction();
+    const mixed = verifiedTransaction();
+    mixed.tradeEvents.push({
+      ...trade(50, 100, "non-sol-quote-trader"),
+      quoteMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    });
+    const config = { solUsdPriceUsd: 100, minimumTradeUsd: 0.01 };
+    const baseline = replayHistoricalCoin({
+      mint, transactions: [original], launchBlockTime: 0, decodeComplete: true
+    }, config);
+    const withOtherQuote = replayHistoricalCoin({
+      mint, transactions: [mixed], launchBlockTime: 0, decodeComplete: true
+    }, config);
+    expect(withOtherQuote.outcome?.grossFinalReturnPct).toBeCloseTo(baseline.outcome!.grossFinalReturnPct, 8);
+  });
   it("never promotes partial transaction decoding into an eligible setup or labelled outcome", () => {
     const result = replayHistoricalCoin({
       mint, transactions: [verifiedTransaction()], launchBlockTime: 0,
