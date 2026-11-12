@@ -21,7 +21,8 @@ export interface StrictStrategyAuditInput {
   flow: {
     dataComplete: boolean;
     latestThreeWindowFlowPass: boolean;
-    windows: Array<{ buySellRatio: number | null; flowWindowPass: boolean; uniqueBuyers: number; uniqueSellers: number }>;
+    sampleIntervalSeconds: number;
+    windows: Array<{ startTime: number; buySellRatio: number | null; flowWindowPass: boolean; uniqueBuyers: number; uniqueSellers: number }>;
     distinctBuyersAcrossLatestThree: number;
     largestBuyerShareAcrossLatestThreeBps: number | null;
     microTradeFilterStatus?: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE";
@@ -66,7 +67,10 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
     : result("RECLAIM", profile.reclaimDetected && profile.reclaimAbovePreviousFiveSecondHighPct >= 1 ? "PASS" : "FAIL",
       profile.reclaimAbovePreviousFiveSecondHighPct, ">= +1%", "Reclaim must exceed the previous completed 5-second high."));
   const windows = input.flow?.windows.slice(-3) ?? [];
-  const threeWindowsAvailable = windows.length === 3;
+  const threeWindowsAvailable = windows.length === 3 &&
+    input.flow?.sampleIntervalSeconds === 1 &&
+    windows[1]!.startTime === windows[0]!.startTime + 1 &&
+    windows[2]!.startTime === windows[1]!.startTime + 1;
   const flowWindowsPass = Boolean(input.flow?.latestThreeWindowFlowPass) && threeWindowsAvailable && windows.every(window =>
     window.flowWindowPass && window.uniqueBuyers >= 3 && window.uniqueSellers <= window.uniqueBuyers / 2
   );
