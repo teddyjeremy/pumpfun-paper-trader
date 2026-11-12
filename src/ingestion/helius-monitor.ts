@@ -64,7 +64,10 @@ export function selectHeliusCandidates(
   }
   const selected: Array<{ mint: string; bondingCurve: string }> = [];
   const seen = new Set<string>();
-  for (const candidate of candidates) {
+  const newestFirst = [...candidates].sort((a, b) =>
+    Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt)
+  );
+  for (const candidate of newestFirst) {
     if (selected.length >= limit) break;
     if (candidate.status !== "DISCOVERED" || !ADDRESS.test(candidate.mint) ||
         !candidate.bondingCurve || !ADDRESS.test(candidate.bondingCurve) ||
