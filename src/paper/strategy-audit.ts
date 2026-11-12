@@ -42,8 +42,8 @@ export interface StrictStrategyAuditInput {
   roundTripCostPct?: number | null;
 }
 export interface StrictStrategyAudit {
-  decision: "REJECT" | "WATCH";
-  buyAllowed: false;
+  decision: "REJECT" | "WATCH" | "BUY";
+  buyAllowed: boolean;
   evaluatedAt: string;
   rules: RuleResult[];
   rejectionReasons: string[];
@@ -95,8 +95,10 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
       ? result("CREATOR_SELL_RISK", "PASS", input.creatorRiskStatus, "PASS_COMPLETE", "Full first-minute creator-sale coverage passed.")
       : result("CREATOR_SELL_RISK", "UNKNOWN", input.creatorRiskStatus, "PASS_COMPLETE", "Creator-sale evidence is not complete."));
   rules.push(input.walletClusterRiskStatus === "REJECT_OBSERVED"
-    ? result("WALLET_CLUSTER_RISK", "FAIL", input.walletClusterRiskStatus, "No observed breach with sufficient attribution", "Observed linked-wallet or holder concentration breach.")
-    : result("WALLET_CLUSTER_RISK", "UNKNOWN", input.walletClusterRiskStatus, "Risk evidence must be sufficiently complete", "Wallet-cluster evaluator does not clear risk on missing evidence."));
+    ? result("WALLET_CLUSTER_RISK", "FAIL", input.walletClusterRiskStatus, "PASS_COMPLETE", "Observed linked-wallet or holder concentration breach.")
+    : input.walletClusterRiskStatus === "PASS_COMPLETE"
+      ? result("WALLET_CLUSTER_RISK", "PASS", input.walletClusterRiskStatus, "PASS_COMPLETE", "Complete wallet and holder risk evidence passed.")
+      : result("WALLET_CLUSTER_RISK", "UNKNOWN", input.walletClusterRiskStatus, "PASS_COMPLETE", "Wallet-cluster evaluator does not clear risk on missing evidence."));
   rules.push(input.attributionConfidenceBps === null || input.attributionConfidenceBps < 7_000
     ? result("ATTRIBUTION_CONFIDENCE", "UNKNOWN", input.attributionConfidenceBps, ">= 7000 bps", "No independently verified wallet link meets the 70% confidence floor.")
     : result("ATTRIBUTION_CONFIDENCE", "PASS", input.attributionConfidenceBps, ">= 7000 bps", "Attribution confidence meets the minimum threshold."));
@@ -144,9 +146,15 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
   const unknownRules = rules.filter(rule => rule.status === "UNKNOWN");
   const watchReasons = unknownRules.map(rule => `${rule.rule}: ${rule.reason}`);
   const blockingUnknownRules = unknownRules.map(rule => rule.rule);
+  // A BUY is possible only when every mandatory rule is present exactly once
+  // and PASS. The worker currently supplies no calibrated volume thresholds,
+  // no complete wallet-cluster clearance and no executable quote, so it remains
+  // WATCH until those real evidence sources are connected.
+  const allRulesPass = rules.length === 15 && rules.every(rule => rule.status === "PASS");
+  const buyAllowed = rejectionReasons.length === 0 && unknownRules.length === 0 && allRulesPass;
   return {
-    decision: rejectionReasons.length > 0 ? "REJECT" : "WATCH",
-    buyAllowed: false, evaluatedAt, rules, rejectionReasons, watchReasons, blockingUnknownRules
+    decision: rejectionReasons.length > 0 ? "REJECT" : buyAllowed ? "BUY" : "WATCH",
+    buyAllowed, evaluatedAt, rules, rejectionReasons, watchReasons, blockingUnknownRules
   };
 }
 
