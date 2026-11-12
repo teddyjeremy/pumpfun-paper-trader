@@ -155,7 +155,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private heliusState: HeliusMonitorState = emptyHeliusMonitorState();
   private heliusBucket = new TokenBucket(2, 2);
   private drainingHelius = false;
-  private verifiedTransactions: VerifiedPumpTransaction[] = [];
+  private verifiedTransactions: Array<VerifiedPumpTransaction & { receivedAt?: string }> = [];
   private walletLinkSnapshots: Record<string, WalletFundingEvidenceResult> = {};
   private walletHoldingsByMint: Record<string, WalletHoldingEvidence[]> = {};
   private status: CoordinatorStatus = { ...INITIAL_STATUS };
@@ -282,6 +282,68 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
+  private async flushHeliusBackfillArchivesToPostgres(sessionId: string | null = this.activeSessionId): Promise<void> {
+    if (!this.postgresIngestConfigured || !sessionId) return;
+    const listKey = `helius_backfill_mints:${sessionId}`;
+    const mints = await this.ctx.storage.get<string[]>(listKey) ?? [];
+    for (const mint of mints) {
+      const state = await this.ctx.storage.get<HistoricalBackfillState>(`helius_backfill:${sessionId}:${mint}`);
+      if (!state) continue;
+      try {
+        const response = await this.postPostgresIngest("/internal/helius-backfill", {
+          sessionId: sessionId, mint, state
+        });
+        if (!response.ok) throw new Error("Archive checkpoint was not acknowledged.");
+      } catch {
+        this.status.lastError = "Helius backfill archive is waiting for PostgreSQL persistence.";
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+    }
+    const archivedKey = `helius_archived_transaction_signatures:${sessionId}`;
+    const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
+    for (const transaction of this.verifiedTransactions) {
+      if (archived.has(transaction.signature)) continue;
+      try {
+        const state = await this.ctx.storage.get<HistoricalBackfillState>(
+          `helius_backfill:${sessionId}:${transaction.mint}`
+        );
+        if (!state) continue;
+        const historicalSignature = state.signatures.find(item => item.signature === transaction.signature);
+        if (historicalSignature && historicalSignature.slot !== transaction.slot) {
+          throw new Error("Verified transaction slot conflicts with historical signature evidence.");
+        }
+        const response = await this.postPostgresIngest("/internal/helius-backfill", {
+          sessionId: sessionId,
+          mint: transaction.mint,
+          state,
+          transaction: {
+            ...jsonSafe(transaction) as Record<string, unknown>,
+            provider: "helius",
+            commitment: "confirmed",
+            receivedAt: transaction.receivedAt ?? new Date().toISOString(),
+            source: historicalSignature ? "HISTORICAL_BACKFILL" : "LIVE_MONITOR"
+          }
+        });
+        if (!response.ok) throw new Error("Transaction archive was not acknowledged.");
+        archived.add(transaction.signature);
+        await this.ctx.storage.put(archivedKey, [...archived].slice(-5_000));
+      } catch {
+        this.status.lastError = "Verified Helius transactions are waiting for PostgreSQL persistence.";
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+    }
+  }
+
+  private async flushAllHeliusBackfillArchivesToPostgres(): Promise<void> {
+    // The bounded verifiedTransactions snapshot belongs only to the active
+    // session. Older sessions are flushed when stopped; never attribute the
+    // current session's transactions to a previous session's backfill job.
+    if (!this.activeSessionId) return;
+    await this.flushHeliusBackfillArchivesToPostgres(this.activeSessionId);
+  }
+
   private async flushAllAuditSessionsToPostgres(): Promise<void> {
     if (!this.postgresIngestConfigured) return;
     const sessions = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
@@ -314,6 +376,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await this.drainHeliusQueue();
     }
     await this.flushAllAuditSessionsToPostgres();
+    await this.flushAllHeliusBackfillArchivesToPostgres();
     if (this.status.enabled && this.postgresLeaseHeld) {
       const now = Date.now();
       const pendingRetryAt = this.heliusState.queue
@@ -339,7 +402,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.walletLinkSnapshots = savedWalletLinks ?? {};
     this.walletHoldingsByMint = savedWalletHoldings ?? {};
     this.heliusState = normalizeHeliusMonitorState(await this.ctx.storage.get<HeliusMonitorState>("helius_monitor_state"));
-    this.verifiedTransactions = (await this.ctx.storage.get<VerifiedPumpTransaction[]>("verified_transactions")) ?? [];
+    this.verifiedTransactions = (await this.ctx.storage.get<Array<VerifiedPumpTransaction & { receivedAt?: string }>>("verified_transactions")) ?? [];
     // A Durable Object restart destroys outbound WebSockets. Without historical
     // backfill, the interrupted interval must be represented as a data gap.
     this.markHeliusCoverageGap();
@@ -467,8 +530,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put("latest_audit_session_id", completedSessionId);
         await txn.delete("active_audit_session_id");
       });
-      this.activeSessionId = null;
       await this.flushAuditEventsToPostgres(completedSessionId);
+      await this.flushHeliusBackfillArchivesToPostgres(completedSessionId);
+      this.activeSessionId = null;
     }
     await this.persist();
     await this.releasePostgresWorkerLease();
@@ -1844,7 +1908,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           commitment: "confirmed"
         });
         if (result.status === "VERIFIED") {
-          this.verifiedTransactions = [...this.verifiedTransactions, result.transaction].slice(-2_000);
+          this.verifiedTransactions = [...this.verifiedTransactions, { ...result.transaction, receivedAt: new Date().toISOString() }].slice(-2_000);
           await this.beginHistoricalBackfill(result.transaction);
           await this.appendAudit("OBSERVATION", work.mint, {
             signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction),
