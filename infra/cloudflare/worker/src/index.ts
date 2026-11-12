@@ -2394,9 +2394,13 @@ export default {
         ready: false,
         provider: "pumpportal",
         connected: status.connected,
+        enabled: status.enabled,
+        heliusConnected: status.heliusConnected,
         candidates: status.candidates,
+        monitoredCandidates: status.monitoredCandidates,
+        verifiedTransactions: status.verifiedTransactions,
         blocker: status.blocker
-      });
+      }, { headers: { "cache-control": "no-store" } });
     }
 
     if (!authorized(request, env)) {
