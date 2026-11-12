@@ -28,6 +28,42 @@ describe("strict strategy audit timing", () => {
     }
   });
 
+
+  it("keeps pullback and reclaim volume thresholds unscored until calibrated", () => {
+    const audit = evaluateStrictStrategyAudit({
+      ...base,
+      candidateAgeSeconds: 30,
+      profile: {
+        impulsePriceChangePct: 25,
+        pullbackPct: 16,
+        reclaimDetected: true,
+        reclaimAbovePreviousFiveSecondHighPct: 1.2,
+        pullbackVolumeVsImpulsePct: 95.56,
+        reclaimVolumeVsPullbackPct: 55.81,
+        dataComplete: true,
+        microTradeFilterStatus: "APPLIED"
+      },
+      flow: {
+        dataComplete: true,
+        latestThreeWindowFlowPass: true,
+        windows: [0, 1, 2].map(start => ({
+          buySellRatio: 4, flowWindowPass: true, uniqueBuyers: 3, uniqueSellers: 1
+        })),
+        distinctBuyersAcrossLatestThree: 5,
+        largestBuyerShareAcrossLatestThreeBps: 5_000,
+        microTradeFilterStatus: "APPLIED"
+      },
+      creatorRiskStatus: "PASS_COMPLETE",
+      walletClusterRiskStatus: "WATCH",
+      attributionConfidenceBps: 8_000,
+      signalAgeSeconds: 1,
+      nextObservationConfirmed: true
+    });
+    expect(audit.rules.find(rule => rule.rule === "PULLBACK_VOLUME_CONTRACTION")?.status).toBe("UNKNOWN");
+    expect(audit.rules.find(rule => rule.rule === "RECLAIM_VOLUME_EXPANSION")?.status).toBe("UNKNOWN");
+    expect(audit.buyAllowed).toBe(false);
+  });
+
   it("keeps a missing or future launch age unknown rather than treating it as fresh", () => {
     for (const age of [null, -1, Number.NaN]) {
       const audit = evaluateStrictStrategyAudit({ ...base, candidateAgeSeconds: age });
