@@ -87,4 +87,10 @@ describe("paper portfolio accounting",()=>{
   expect(()=>openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Number.NaN})).toThrow(/clock is invalid/);
  });
 
+ it("rejects invalid token decimal counts instead of mispricing base units",()=>{
+  const p=createPaperPortfolio();
+  const buy=quote("mint","BUY");buy.tokenDecimals=19;
+  expect(()=>openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:buy,sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)})).toThrow(/invalid amount or cost evidence/);
+ });
+
 });
