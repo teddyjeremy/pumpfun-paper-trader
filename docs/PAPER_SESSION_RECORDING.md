@@ -39,10 +39,11 @@ The journal must be append-only, paginated, restart-safe, exportable and retaine
 - `GET /audit/sessions`, `GET /audit?sessionId=...&after=...&limit=...`, `GET /paper-bankroll`, and `POST /paper-equity` are protected by the Worker control token.
 
 ## Still blocked / not yet implemented
-- Strategy feature snapshots and per-rule decisions: the strategy evaluator is not connected.
-- Executable quote request/results, paper order/fill/position/exit accounting: quote adapter and paper executor are not implemented.
-- Candidate follow-up price sampling and rejection-time outcome tracking: not yet connected. Raw verified transactions are preserved, but this is not continuous price coverage for every rejected candidate.
+- No executable quote adapter is connected. The paper portfolio engine accepts verified quote evidence, but there is no production source currently supplying those quotes.
+- The strategy evaluator does not yet trigger paper entries/exits. The portfolio primitives are not yet wired into an automated order/position lifecycle; `POST /paper-equity` remains a manual equity-mark endpoint.
+- The exit policy module exists, but dynamic exit-window aggregation, quote-gated exit execution, migration-aware position handling and end-to-end realized/unrealized PnL journaling are not integrated with the Worker.
+- Candidate outcome tracking uses the first observed verified trade as its baseline. It is not yet a discovery-time or decision-time USD baseline, nor continuous price coverage for every rejected candidate. Outcome coverage remains PARTIAL/MISSING where appropriate.
 - Full provider outage/reconnect/queue-overflow and persistence-failure audit coverage remains incomplete.
-- Automated Durable Object restart, duplicate-delivery, pagination-boundary, quota-failure and export/replay acceptance tests are still required.
+- Automated Durable Object runtime tests for restart during append, duplicate delivery, pagination boundaries, storage quota failures and export/replay are still required.
 
 The six-hour paper session remains blocked until those remaining integrations and acceptance tests pass. No claim of complete market-wide follow-up coverage is made.
