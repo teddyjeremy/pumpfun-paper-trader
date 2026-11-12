@@ -6,7 +6,7 @@ import { SOL_QUOTE_MINT } from "../src/ingestion/trade-flow.js";
 
 const mint = "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi";
 
-function trade(timestamp: bigint, price: bigint, isBuy = true): PumpTradeEvent {
+function trade(timestamp: bigint, price: bigint, isBuy = true, quoteAmountOverride?: bigint): PumpTradeEvent {
   const tokenAmount = 1_000n;
   return {
     mint, solAmount: price, tokenAmount, isBuy, user: `wallet-${timestamp}`, timestamp,
@@ -17,7 +17,7 @@ function trade(timestamp: bigint, price: bigint, isBuy = true): PumpTradeEvent {
     lastUpdateTimestamp: timestamp, ixName: isBuy ? "buy" : "sell", mayhemMode: false,
     cashbackFeeBasisPoints: 0n, cashback: 0n, buybackFeeBasisPoints: 0n,
     buybackFee: 0n, shareholders: [], quoteMint: SOL_QUOTE_MINT,
-    quoteAmount: price, virtualQuoteReserves: 0n, realQuoteReserves: 0n,
+    quoteAmount: quoteAmountOverride ?? price, virtualQuoteReserves: 0n, realQuoteReserves: 0n,
     holderRewardsBps: 0n, holderRewards: 0n, creatorFeeUnclaimed: 0n
   };
 }
@@ -74,10 +74,10 @@ describe("observed price and stage-volume profile", () => {
       trade(110n, 1_100_000n),
       trade(115n, 1_050_000n),
       trade(120n, 1_200_000n),
-      trade(110n, 1_000_000n, false),
-      trade(115n, 1_000_000n, false),
-      trade(110n, 1n, true),
-      trade(115n, 1n, true)
+      trade(110n, 1_100_000n, false, 1_000_000n),
+      trade(115n, 1_050_000n, false, 1_000_000n),
+      trade(110n, 1_100_000n, true, 1n),
+      trade(115n, 1_050_000n, true, 1n)
     ]);
     tx.createEvents = [createEvent()];
     const [profile] = buildCandidatePriceVolumeProfiles([tx], {
