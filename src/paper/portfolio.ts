@@ -297,9 +297,11 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
   const netProceeds = netSellValue(input.sellQuote);
   const tokens = humanTokenAmount(previous.tokenAmountBaseUnits, previous.tokenDecimals);
   const pnl = round(netProceeds - previous.stakeUsd - previous.buyCostsUsd);
+  const exitPrice = netProceeds / tokens;
+  if (!Number.isFinite(exitPrice)) throw new Error("Sell quote cannot be represented as a finite USD exit price.");
   const position: PaperPosition = {
     ...previous,
-    latestPriceUsdPerToken: netProceeds / tokens,
+    latestPriceUsdPerToken: exitPrice,
     latestLiquidationValueUsd: 0,
     latestSellQuoteId: input.sellQuote.quoteId,
     latestSellQuoteAt: input.sellQuote.observedAt,
