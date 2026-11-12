@@ -463,12 +463,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   ): Promise<void> {
     const sessionId = this.activeSessionId;
     if (!sessionId) return;
-    const processedKey = `processed_trade:${trade.signature}:${tradeIndex}`;
+    const processedKey = `processed_trade:${sessionId}:${trade.signature}:${tradeIndex}`;
     await this.ctx.storage.transaction(async txn => {
       if (await txn.get<boolean>(processedKey)) return;
-      const trackerKey = `candidate_price:${trade.mint}:${trade.quoteMint}`;
+      const trackerKey = `candidate_price:${sessionId}:${trade.mint}:${trade.quoteMint}`;
       const previous = await txn.get<CandidatePriceTracker>(trackerKey) ?? null;
-      const tracker = updateCandidatePriceTracker(previous, trade);
+      const tracker = { ...updateCandidatePriceTracker(previous, trade), sessionId };
       const metaKey = `audit_session:${sessionId}`;
       const meta = await txn.get<AuditSessionMeta>(metaKey);
       if (!meta) throw new Error("Audit session metadata missing.");
@@ -488,11 +488,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     });
   }
 
-  async listCandidateOutcomes(): Promise<unknown> {
+  async listCandidateOutcomes(requestedSessionId?: string): Promise<unknown> {
     await this.hydrate();
+    const sessionId = requestedSessionId ?? this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
+    if (!sessionId) return [];
     const [trackers, candidates] = await Promise.all([
-      this.ctx.storage.list<CandidatePriceTracker>({ prefix: "candidate_price:" }),
-      this.ctx.storage.list<Record<string, unknown>>({ prefix: "candidate_seen:" })
+      this.ctx.storage.list<CandidatePriceTracker & { sessionId: string }>({ prefix: `candidate_price:${sessionId}:` }),
+      this.ctx.storage.list<Record<string, unknown>>({ prefix: `candidate_seen:${sessionId}:` })
     ]);
     const byMint = new Map<string, CandidatePriceTracker[]>();
     for (const tracker of trackers.values()) {
@@ -796,7 +798,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             candidateStatus: this.discovery.candidates.find(item => item.mint === parsed.event.mint)?.status ?? null },
           parsed.event.signature ? `pumpportal:${parsed.event.signature}:${parsed.event.kind}` : undefined
         );
-        const candidateKey = `candidate_seen:${parsed.event.mint}`;
+        const candidateKey = this.activeSessionId ? `candidate_seen:${this.activeSessionId}:${parsed.event.mint}` : `candidate_seen:${parsed.event.mint}`;
         const previousCandidate = await this.ctx.storage.get<Record<string, unknown>>(candidateKey);
         await this.ctx.storage.put(candidateKey, {
           mint: parsed.event.mint,
@@ -1263,7 +1265,8 @@ export default {
       return Response.json(await coordinator.listAuditSessions());
     }
     if (url.pathname === "/candidate-outcomes" && request.method === "GET") {
-      return Response.json(await coordinator.listCandidateOutcomes());
+      const sessionId = url.searchParams.get("sessionId") ?? undefined;
+      return Response.json(await coordinator.listCandidateOutcomes(sessionId));
     }
     if (url.pathname === "/audit" && request.method === "GET") {
       const after = Number(url.searchParams.get("after") ?? "0");

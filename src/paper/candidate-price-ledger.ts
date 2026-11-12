@@ -8,6 +8,7 @@ export interface RawTradePrice {
   isBuy: boolean;
 }
 export interface CandidatePriceTracker {
+  sessionId?: string;
   mint: string;
   quoteMint: string;
   firstObservedAt: string;
