@@ -69,8 +69,10 @@ describe("coherent Pump quote account snapshots", () => {
 
   it("requires global and fee config as part of the same snapshot", () => {
     const { globalConfig: _global, ...missingGlobal } = addresses;
+    const withoutGlobal = { ...missingGlobal };
     expect(() => verifyPumpQuoteAccountSnapshot({
-      addresses: missingGlobal as PumpQuoteAccountAddresses, snapshot: snapshot(), nowMs
-    })).toThrow(/account count/);
+      addresses: withoutGlobal as PumpQuoteAccountAddresses,
+      snapshot: snapshot({ accounts: snapshot().accounts.slice(1) }), nowMs
+    })).toThrow(/unique addresses/);
   });
 });

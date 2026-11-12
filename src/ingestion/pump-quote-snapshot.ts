@@ -36,7 +36,10 @@ export interface VerifiedPumpQuoteSnapshot {
   slot: number;
   commitment: "confirmed" | "finalized";
   observedAt: string;
-  accounts: Record<PumpQuoteAccountRole, RawProgramAccount | null>;
+  accounts: Partial<Record<PumpQuoteAccountRole, RawProgramAccount | null>> & Pick<
+    Record<PumpQuoteAccountRole, RawProgramAccount | null>,
+    "market" | "baseMint" | "quoteMint" | "globalConfig" | "feeConfig"
+  >;
   accountCount: number;
 }
 
@@ -60,7 +63,11 @@ export function verifyPumpQuoteAccountSnapshot(input: {
   }
   const roles = Object.keys(input.addresses) as PumpQuoteAccountRole[];
   const entries = roles.map(role => [role, input.addresses[role]] as const);
-  if (roles.length < 5 || entries.some(([, address]) => typeof address !== "string" || !address.trim()) ||
+  const requiredRoles: PumpQuoteAccountRole[] = [
+    "market", "baseMint", "quoteMint", "globalConfig", "feeConfig"
+  ];
+  if (requiredRoles.some(role => !roles.includes(role)) ||
+      entries.some(([, address]) => typeof address !== "string" || !address.trim()) ||
       new Set(entries.map(([, address]) => address)).size !== entries.length) {
     throw new Error("Pump quote snapshot requires unique addresses for market, mints, global config and fee config.");
   }
@@ -73,7 +80,7 @@ export function verifyPumpQuoteAccountSnapshot(input: {
   if (input.snapshot.accounts.length !== entries.length) {
     throw new Error("Pump quote snapshot account count does not match its requested address set.");
   }
-  const accounts = {} as Record<PumpQuoteAccountRole, RawProgramAccount | null>;
+  const accounts = {} as Partial<Record<PumpQuoteAccountRole, RawProgramAccount | null>>;
   for (let index = 0; index < entries.length; index += 1) {
     const [role, address] = entries[index]!;
     const account = input.snapshot.accounts[index] ?? null;
