@@ -189,7 +189,11 @@ app.get("/api/strategy/replay", async (request, reply) => {
     const rows = await getHeliusBackfillReplayDataset(sessionId);
     const label = minFavorableExcursionPct !== undefined &&
       maxAdverseExcursionPct !== undefined && roundTripCostPct !== undefined
-      ? { minFavorableExcursionPct, maxAdverseExcursionPct, roundTripCostPct }
+      ? {
+          minFavorableExcursionPct,
+          maxAdverseExcursionPct,
+          roundTripCostPct: roundTripCostPct as number
+        }
       : undefined;
     const replays = rows.map(row => {
       if (row.launchBlockTime === null) {
