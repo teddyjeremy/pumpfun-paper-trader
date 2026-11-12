@@ -12,7 +12,10 @@
 - [ ] Add reconnect/backoff and provider-gap reconciliation
 - [x] Helius transaction verification adapter and bounded candidate-specific monitoring (10 slots, durable queue, event verification, and evidence-driven slot rotation)
 - [x] Verify official Pump program and PumpSwap IDL layouts; implement fail-closed bonding-curve and pool/vault account decoders (PDA derivation remains delegated to the official SDK)
-- [ ] Authoritative graduation detector and migrated-pool discovery\n- [x] Pure fail-closed market transition rules for live curve, migration pending, verified canonical pool and EXIT_BLOCKED (account decoder and Worker integration remain outstanding)
+- [ ] Authoritative graduation detector, official-SDK PDA derivation, and Worker pool discovery/integration
+- [x] Pure fail-closed market transition rules for live curve, migration pending, verified canonical pool and EXIT_BLOCKED
+- [x] IDL-aligned Pump curve, PumpSwap pool, and SPL token-vault decoders with program-owner, discriminator, mint, vault, canonical index/authority, slot-coherence and freshness checks
+- [x] Helius getMultipleAccounts reader that returns related account data from one shared RPC context slot
 - [ ] Helius backfill/reconciliation for missed provider events
 - [ ] Complete entry decision engine and explainable decisions (strict per-rule evaluation and 1–2 second reclaim freshness confirmation are implemented; numeric volume-profile thresholds, executable quotes and automated ledger integration remain outstanding)
 - [x] Exclude buy/sell spam at or below $0.01 from flow and price-volume evidence when a fresh SOL/USD price is supplied; pullback/reclaim volume ratios use buy-side quote volume only
