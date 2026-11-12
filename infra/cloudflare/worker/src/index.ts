@@ -675,7 +675,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const events: PaperTransitionEvent[] = [{
           kind: "POSITION_MARK",
           data: { markedAt, quoteIds, liquidationValueUsd,
-            equityUsd: marked.availableCashUsd + liquidationValueUsd }
+            equityUsd: marked.availableCashUsd + liquidationValueUsd,
+            positions: marked.positions.filter(position => position.status !== "CLOSED"),
+            sellQuotes: input.sellQuotes }
         }];
         if (marked.bankroll.topUpCount > portfolio.bankroll.topUpCount) {
           events.push({
