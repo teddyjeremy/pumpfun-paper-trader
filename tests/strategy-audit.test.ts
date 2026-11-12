@@ -80,6 +80,41 @@ describe("strict strategy audit timing", () => {
     expect(audit.buyAllowed).toBe(false);
   });
 
+  it("scores volume ratios only when reviewed thresholds are explicitly supplied", () => {
+    const profile = {
+      impulsePriceChangePct: 25,
+      pullbackPct: 16,
+      reclaimDetected: true,
+      reclaimAbovePreviousFiveSecondHighPct: 1.2,
+      pullbackVolumeVsImpulsePct: 45,
+      reclaimVolumeVsPullbackPct: 160,
+      dataComplete: true,
+      microTradeFilterStatus: "APPLIED" as const
+    };
+    const calibrated = evaluateStrictStrategyAudit({
+      ...base, candidateAgeSeconds: 120, profile,
+      volumeThresholds: {
+        maxPullbackVolumeVsImpulsePct: 50,
+        minReclaimVolumeVsPullbackPct: 150
+      },
+      roundTripCostPct: 3.5
+    });
+    expect(calibrated.rules.find(rule => rule.rule === "PULLBACK_VOLUME_CONTRACTION")?.status).toBe("PASS");
+    expect(calibrated.rules.find(rule => rule.rule === "RECLAIM_VOLUME_EXPANSION")?.status).toBe("PASS");
+    expect(calibrated.rules.find(rule => rule.rule === "ROUND_TRIP_COST")?.status).toBe("PASS");
+    const rejected = evaluateStrictStrategyAudit({
+      ...base, candidateAgeSeconds: 120, profile,
+      volumeThresholds: {
+        maxPullbackVolumeVsImpulsePct: 40,
+        minReclaimVolumeVsPullbackPct: 170
+      },
+      roundTripCostPct: 4.1
+    });
+    expect(rejected.rules.find(rule => rule.rule === "PULLBACK_VOLUME_CONTRACTION")?.status).toBe("FAIL");
+    expect(rejected.rules.find(rule => rule.rule === "RECLAIM_VOLUME_EXPANSION")?.status).toBe("FAIL");
+    expect(rejected.rules.find(rule => rule.rule === "ROUND_TRIP_COST")?.status).toBe("FAIL");
+  });
+
   it("keeps a missing or future launch age unknown rather than treating it as fresh", () => {
     for (const age of [null, -1, Number.NaN]) {
       const audit = evaluateStrictStrategyAudit({ ...base, candidateAgeSeconds: age });
