@@ -126,6 +126,7 @@ export async function fetchExecutableRoundTripQuote(input: {
     simulatedLatencyMs: buyLatencyMs + executionDelayMs,
     quoteTtlMs
   };
+  if (rawBuy.side !== "BUY") throw new Error("Buy quote adapter returned a non-BUY quote.");
   const buyQuote = buildExecutablePaperQuote({
     quote: rawBuy, solUsd: priceResult.observation, costs: buyCosts, nowMs: buyFetchedAt
   });
@@ -143,6 +144,7 @@ export async function fetchExecutableRoundTripQuote(input: {
     ...buyCosts,
     simulatedLatencyMs: sellLatencyMs + executionDelayMs
   };
+  if (rawSell.side !== "SELL") throw new Error("Sell quote adapter returned a non-SELL quote.");
   const initialSellQuote = buildExecutablePaperQuote({
     quote: rawSell, solUsd: priceResult.observation, costs: sellCosts, nowMs: sellFetchedAt
   });
