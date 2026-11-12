@@ -15,6 +15,15 @@ export interface VerifiedCurveEvidence {
   migrated: boolean;
   tokenReserveBaseUnits: string;
   quoteReserveBaseUnits: string;
+  virtualTokenReservesBaseUnits: string;
+  virtualQuoteReservesBaseUnits: string;
+  realQuoteReservesBaseUnits: string;
+  tokenTotalSupplyBaseUnits: string;
+  creatorFeeBps: string;
+  creatorFeeBaseUnits: string;
+  protocolFeesBaseUnits: string;
+  isMayhemMode: boolean;
+  isCashbackCoin: boolean;
   slot: number;
   observedAt: string;
 }
@@ -27,7 +36,17 @@ export interface VerifiedPoolEvidence {
   quoteMint: string;
   poolAddress: string;
   baseReserveBaseUnits: string;
+  /** Raw quote-vault token-account balance, before virtual reserves. */
+  rawQuoteVaultReserveBaseUnits: string;
+  /** Signed PumpSwap virtual quote-reserve adjustment. */
+  virtualQuoteReservesBaseUnits: string;
+  /** Effective pricing reserve: raw quote vault + virtual quote adjustment. */
   quoteReserveBaseUnits: string;
+  creatorFeeBps: string;
+  protocolFeesBaseUnits: string;
+  creatorFeesBaseUnits: string;
+  isMayhemMode: boolean;
+  isCashbackCoin: boolean;
   slot: number;
   observedAt: string;
 }
@@ -45,6 +64,10 @@ export const MARKET_EVIDENCE_MAX_AGE_MS = 2_000;
 
 function validBaseUnits(value: string, allowZero = false): boolean {
   return /^\d+$/.test(value) && (allowZero ? BigInt(value) >= 0n : BigInt(value) > 0n);
+}
+
+function validSignedBaseUnits(value: string): boolean {
+  return /^-?[0-9]+$/.test(value);
 }
 
 function validObservation(observedAt: string, nowMs: number): boolean {
@@ -80,7 +103,17 @@ export function updatePumpMarketState(
     const poolValid = pool.verified === true && pool.canonical === true &&
       pool.mint === previous.mint && Boolean(pool.poolAddress.trim()) &&
       Boolean(pool.quoteMint.trim()) && validBaseUnits(pool.baseReserveBaseUnits) &&
-      validBaseUnits(pool.quoteReserveBaseUnits) && validSlot(pool.slot) &&
+      validBaseUnits(pool.rawQuoteVaultReserveBaseUnits) &&
+      validSignedBaseUnits(pool.virtualQuoteReservesBaseUnits) &&
+      BigInt(pool.rawQuoteVaultReserveBaseUnits) + BigInt(pool.virtualQuoteReservesBaseUnits) > 0n &&
+      pool.quoteReserveBaseUnits === (BigInt(pool.rawQuoteVaultReserveBaseUnits) +
+        BigInt(pool.virtualQuoteReservesBaseUnits)).toString() &&
+      validBaseUnits(pool.quoteReserveBaseUnits) &&
+      validBaseUnits(pool.creatorFeeBps, true) &&
+      validBaseUnits(pool.protocolFeesBaseUnits, true) &&
+      validBaseUnits(pool.creatorFeesBaseUnits, true) &&
+      typeof pool.isMayhemMode === "boolean" && typeof pool.isCashbackCoin === "boolean" &&
+      validSlot(pool.slot) &&
       validObservation(pool.observedAt, nowMs);
     if (!poolValid) {
       return { ...previous, status: "EXIT_BLOCKED", updatedAt: now, pool: null,
@@ -94,8 +127,18 @@ export function updatePumpMarketState(
     const curve = input.curve;
     const terminalCurve = curve.complete || curve.migrated;
     const curveValid = curve.verified === true && curve.mint === previous.mint &&
-      Boolean(curve.curveAddress.trim()) && Boolean(curve.quoteMint.trim()) && validBaseUnits(curve.tokenReserveBaseUnits, terminalCurve) &&
-      validBaseUnits(curve.quoteReserveBaseUnits, terminalCurve) && validSlot(curve.slot) &&
+      Boolean(curve.curveAddress.trim()) && Boolean(curve.quoteMint.trim()) &&
+      validBaseUnits(curve.tokenReserveBaseUnits, terminalCurve) &&
+      validBaseUnits(curve.quoteReserveBaseUnits, terminalCurve) &&
+      validBaseUnits(curve.virtualTokenReservesBaseUnits) &&
+      validBaseUnits(curve.virtualQuoteReservesBaseUnits) &&
+      validBaseUnits(curve.realQuoteReservesBaseUnits, terminalCurve) &&
+      validBaseUnits(curve.tokenTotalSupplyBaseUnits) &&
+      validBaseUnits(curve.creatorFeeBps, true) &&
+      validBaseUnits(curve.creatorFeeBaseUnits, true) &&
+      validBaseUnits(curve.protocolFeesBaseUnits, true) &&
+      typeof curve.isMayhemMode === "boolean" && typeof curve.isCashbackCoin === "boolean" &&
+      validSlot(curve.slot) &&
       validObservation(curve.observedAt, nowMs);
     if (!curveValid) {
       return { ...previous, status: "EXIT_BLOCKED", updatedAt: now, curve: null,

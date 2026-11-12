@@ -75,7 +75,11 @@ describe("IDL-aligned Pump account decoders", () => {
     });
     expect(toVerifiedPumpCurveEvidence(decoded)).toMatchObject({
       source: "verified-pump-curve-account", verified: true, mint: "mint", curveAddress: "curve-pda",
-      complete: false, migrated: false, tokenReserveBaseUnits: "700", quoteReserveBaseUnits: "1500"
+      complete: false, migrated: false, tokenReserveBaseUnits: "700", quoteReserveBaseUnits: "1500",
+      virtualTokenReservesBaseUnits: "1000", virtualQuoteReservesBaseUnits: "2000",
+      realQuoteReservesBaseUnits: "1500", tokenTotalSupplyBaseUnits: "1000000",
+      creatorFeeBps: "75", creatorFeeBaseUnits: "10", protocolFeesBaseUnits: "20",
+      isMayhemMode: true, isCashbackCoin: true
     });
     expect(decoded).toMatchObject({
       mint: "mint", complete: false, migrated: false,
@@ -146,7 +150,10 @@ describe("IDL-aligned Pump account decoders", () => {
     });
     expect(snapshot).toMatchObject({
       verified: true, canonical: true, mint: ZERO_KEY,
-      baseReserveBaseUnits: "10000", quoteReserveBaseUnits: "20000", slot
+      baseReserveBaseUnits: "10000", rawQuoteVaultReserveBaseUnits: "20000",
+      virtualQuoteReservesBaseUnits: "0", quoteReserveBaseUnits: "20000",
+      creatorFeeBps: "0", protocolFeesBaseUnits: "100", creatorFeesBaseUnits: "200",
+      isMayhemMode: false, isCashbackCoin: false, slot
     });
   });
 
@@ -203,6 +210,12 @@ describe("IDL-aligned Pump account decoders", () => {
     });
     expect(migrated.status).toBe("MIGRATED_POOL_VERIFIED");
     expect(migrated.pool?.baseReserveBaseUnits).toBe("10000");
+    expect(migrated.pool).toMatchObject({
+      rawQuoteVaultReserveBaseUnits: "20000",
+      virtualQuoteReservesBaseUnits: "0",
+      protocolFeesBaseUnits: "100",
+      creatorFeesBaseUnits: "200"
+    });
   });
 
 });

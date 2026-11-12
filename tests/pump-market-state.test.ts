@@ -10,12 +10,19 @@ const curve = (overrides: Partial<VerifiedCurveEvidence> = {}): VerifiedCurveEvi
   source: "verified-pump-curve-account", verified: true, mint: "mint",
   curveAddress: "curve", quoteMint: "So11111111111111111111111111111111111111112", complete: false, migrated: false,
   tokenReserveBaseUnits: "1000", quoteReserveBaseUnits: "500",
+  virtualTokenReservesBaseUnits: "2000", virtualQuoteReservesBaseUnits: "3000",
+  realQuoteReservesBaseUnits: "500", tokenTotalSupplyBaseUnits: "1000000",
+  creatorFeeBps: "75", creatorFeeBaseUnits: "10", protocolFeesBaseUnits: "20",
+  isMayhemMode: false, isCashbackCoin: false,
   slot: 100, observedAt: iso, ...overrides
 });
 const pool = (overrides: Partial<VerifiedPoolEvidence> = {}): VerifiedPoolEvidence => ({
   source: "verified-canonical-pumpswap-pool", verified: true, canonical: true,
   mint: "mint", quoteMint: "So11111111111111111111111111111111111111112",
-  poolAddress: "pool", baseReserveBaseUnits: "1000", quoteReserveBaseUnits: "500",
+  poolAddress: "pool", baseReserveBaseUnits: "1000", rawQuoteVaultReserveBaseUnits: "600",
+  virtualQuoteReservesBaseUnits: "-100", quoteReserveBaseUnits: "500",
+  creatorFeeBps: "75", protocolFeesBaseUnits: "10", creatorFeesBaseUnits: "20",
+  isMayhemMode: false, isCashbackCoin: false,
   slot: 101, observedAt: iso, ...overrides
 });
 
@@ -64,7 +71,9 @@ describe("Pump market migration state", () => {
     for (const evidence of [
       pool({ mint: "other" }), pool({ canonical: false }),
       pool({ observedAt: "2026-11-12T11:59:00.000Z" }),
-      pool({ baseReserveBaseUnits: "0" }), pool({ quoteReserveBaseUnits: "0" })
+      pool({ baseReserveBaseUnits: "0" }), pool({ quoteReserveBaseUnits: "0" }),
+      pool({ quoteReserveBaseUnits: "501" }),
+      pool({ rawQuoteVaultReserveBaseUnits: "not-a-number" })
     ]) {
       const state = updatePumpMarketState(initial, { pool: evidence, nowMs: now });
       expect(state.status).toBe("EXIT_BLOCKED");

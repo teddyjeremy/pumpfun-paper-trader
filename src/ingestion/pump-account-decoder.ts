@@ -63,6 +63,15 @@ export function toVerifiedPumpCurveEvidence(curve: DecodedPumpCurveAccount) {
     migrated: false,
     tokenReserveBaseUnits: curve.realTokenReserves,
     quoteReserveBaseUnits: curve.realQuoteReserves,
+    virtualTokenReservesBaseUnits: curve.virtualTokenReserves,
+    virtualQuoteReservesBaseUnits: curve.virtualQuoteReserves,
+    realQuoteReservesBaseUnits: curve.realQuoteReserves,
+    tokenTotalSupplyBaseUnits: curve.tokenTotalSupply,
+    creatorFeeBps: curve.creatorFeeBps,
+    creatorFeeBaseUnits: curve.creatorFeeBaseUnits,
+    protocolFeesBaseUnits: curve.protocolFeesBaseUnits,
+    isMayhemMode: curve.isMayhemMode,
+    isCashbackCoin: curve.isCashbackCoin,
     slot: curve.slot,
     observedAt: curve.observedAt
   };
@@ -108,7 +117,14 @@ export interface VerifiedPumpSwapPoolSnapshot {
   quoteMint: string;
   poolAddress: string;
   baseReserveBaseUnits: string;
+  rawQuoteVaultReserveBaseUnits: string;
+  virtualQuoteReservesBaseUnits: string;
   quoteReserveBaseUnits: string;
+  creatorFeeBps: string;
+  protocolFeesBaseUnits: string;
+  creatorFeesBaseUnits: string;
+  isMayhemMode: boolean;
+  isCashbackCoin: boolean;
   slot: number;
   observedAt: string;
 }
@@ -309,7 +325,14 @@ export function verifyCanonicalPumpSwapPoolSnapshot(input: {
     source: "verified-canonical-pumpswap-pool", verified: true, canonical: true,
     mint: pool.baseMint, quoteMint: pool.quoteMint, poolAddress: pool.address,
     baseReserveBaseUnits: baseVault.amountBaseUnits,
+    rawQuoteVaultReserveBaseUnits: quoteVault.amountBaseUnits,
+    virtualQuoteReservesBaseUnits: pool.virtualQuoteReserves,
     quoteReserveBaseUnits: (BigInt(quoteVault.amountBaseUnits) + BigInt(pool.virtualQuoteReserves)).toString(),
+    creatorFeeBps: pool.creatorFeeBps,
+    protocolFeesBaseUnits: pool.protocolFeesBaseUnits,
+    creatorFeesBaseUnits: pool.creatorFeesBaseUnits,
+    isMayhemMode: pool.isMayhemMode,
+    isCashbackCoin: pool.isCashbackCoin,
     slot: Math.min(input.poolAccount.slot, input.baseVaultAccount.slot, input.quoteVaultAccount.slot),
     observedAt: observations.sort().at(-1)!
   };
