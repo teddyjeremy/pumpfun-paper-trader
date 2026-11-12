@@ -770,3 +770,77 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
     client.release();
   }
 }
+
+
+export interface HeliusBackfillReplayDatasetRow {
+  mint: string;
+  launchBlockTime: number | null;
+  horizonSeconds: number;
+  status: "PENDING" | "PAGING" | "READY_TO_FETCH" | "COMPLETE" | "INCOMPLETE";
+  reason: string | null;
+  decodedComplete: boolean;
+  decodedReason: string | null;
+  signatureCount: number;
+  verifiedTransactionCount: number;
+  transactions: unknown[];
+}
+
+/** Read only verified historical observations; live-monitor observations are excluded from replay. */
+export async function getHeliusBackfillReplayDataset(sessionId: string): Promise<HeliusBackfillReplayDatasetRow[]> {
+  if (!pool) throw new Error("PostgreSQL persistence is not configured.");
+  if (!sessionId.trim() || sessionId.length > 128) throw new Error("A valid paper session ID is required.");
+  const result = await pool.query(
+    `SELECT j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
+       j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count,
+       COALESCE(
+         json_agg(t.raw_observation ORDER BY t.slot ASC,t.signature ASC)
+           FILTER (WHERE t.signature IS NOT NULL AND t.observation_source='HISTORICAL_BACKFILL'),
+         '[]'::json
+       ) AS transactions
+     FROM helius_backfill_jobs j
+     LEFT JOIN helius_transaction_observations t
+       ON t.session_id=j.session_id AND t.mint=j.mint
+     WHERE j.session_id=$1
+     GROUP BY j.session_id,j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
+       j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count
+     ORDER BY j.launch_block_time ASC NULLS LAST,j.mint ASC`,
+    [sessionId]
+  );
+  return result.rows.map(row => ({
+    mint: String(row.mint),
+    launchBlockTime: row.launch_block_time === null ? null : Number(row.launch_block_time),
+    horizonSeconds: Number(row.horizon_seconds),
+    status: row.status,
+    reason: row.reason === null ? null : String(row.reason),
+    decodedComplete: row.decoded_complete === true,
+    decodedReason: row.decoded_reason === null ? null : String(row.decoded_reason),
+    signatureCount: Number(row.signature_count),
+    verifiedTransactionCount: Number(row.verified_transaction_count),
+    transactions: Array.isArray(row.transactions) ? row.transactions : []
+  }));
+}
+
+export async function getHeliusBackfillDashboardSnapshot(sessionId: string): Promise<Array<{
+  mint: string; status: string; reason: string | null; launchBlockTime: number | null;
+  pagesScanned: number; scannedCount: number; signatureCount: number;
+  decodedComplete: boolean; decodedReason: string | null; verifiedTransactionCount: number;
+}>> {
+  if (!pool) throw new Error("PostgreSQL persistence is not configured.");
+  if (!sessionId.trim() || sessionId.length > 128) throw new Error("A valid paper session ID is required.");
+  const result = await pool.query(
+    `SELECT mint,status,reason,launch_block_time,pages_scanned,scanned_count,signature_count,
+       decoded_complete,decoded_reason,verified_transaction_count
+     FROM helius_backfill_jobs WHERE session_id=$1
+     ORDER BY launch_block_time ASC NULLS LAST,mint ASC`,
+    [sessionId]
+  );
+  return result.rows.map(row => ({
+    mint: String(row.mint), status: String(row.status),
+    reason: row.reason === null ? null : String(row.reason),
+    launchBlockTime: row.launch_block_time === null ? null : Number(row.launch_block_time),
+    pagesScanned: Number(row.pages_scanned), scannedCount: Number(row.scanned_count),
+    signatureCount: Number(row.signature_count), decodedComplete: row.decoded_complete === true,
+    decodedReason: row.decoded_reason === null ? null : String(row.decoded_reason),
+    verifiedTransactionCount: Number(row.verified_transaction_count)
+  }));
+}
