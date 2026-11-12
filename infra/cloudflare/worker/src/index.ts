@@ -314,7 +314,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     await this.flushAllAuditSessionsToPostgres();
     if (this.status.enabled && this.postgresLeaseHeld) {
-      await this.ctx.storage.setAlarm(Date.now() + 15_000);
+      const now = Date.now();
+      const pendingRetryAt = this.heliusState.queue
+        .map(item => item.retryAfterAt ? Date.parse(item.retryAfterAt) : Number.NaN)
+        .filter(at => Number.isFinite(at) && at > now)
+        .reduce((earliest, at) => earliest === null ? at : Math.min(earliest, at), null as number | null);
+      await this.ctx.storage.setAlarm(Math.min(now + 15_000, pendingRetryAt ?? Number.POSITIVE_INFINITY));
     }
   }
 
