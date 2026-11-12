@@ -1753,7 +1753,7 @@ export default {
       if (typeof mint !== "string" || !mint.trim() ||
           typeof poolAddress !== "string" || !poolAddress.trim() ||
           (side !== "BUY" && side !== "SELL") ||
-          typeof amountBaseUnits !== "string" || !/^\\d+$/.test(amountBaseUnits) ||
+          typeof amountBaseUnits !== "string" || !/^\d+$/.test(amountBaseUnits) ||
           amountBaseUnits.length > 20 || BigInt(amountBaseUnits || "0") <= 0n ||
           BigInt(amountBaseUnits || "0") > 18_446_744_073_709_551_615n) {
         return Response.json({
