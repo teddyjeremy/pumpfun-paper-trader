@@ -33,7 +33,7 @@ This branch promotes the previously feature-branch-only work into mainline as on
 - One-second sampled overlapping flow windows and distinct buyer aggregation (PR #33 work).
 - Strict strategy-to-paper execution lifecycle and reusable quote-gated dynamic exit component.
 
-The integration was merged in [PR #40](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/40). Historical replay and decode-coverage completeness are being added separately in [PR #45](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/45).
+The integration was merged in [PR #40](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/40). The historical replay foundation, decode-completeness tracking and read-only replay API are included in [PR #45](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/45). The replay still does not simulate the complete strategy or executable fills; calibration remains advisory.
 
 ## What remains
 
