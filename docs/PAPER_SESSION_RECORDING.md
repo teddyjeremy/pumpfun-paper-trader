@@ -59,3 +59,12 @@ The journal must be append-only, paginated, restart-safe, exportable and retaine
 - Durable Object runtime tests for restart during append, duplicate delivery, pagination boundaries, storage quota failures and export/replay are still required, followed by a real six-hour soak test.
 
 The six-hour paper session remains blocked until the missing quote source, executor/exit integration and runtime acceptance tests pass. No claim of complete market-wide follow-up coverage is made.
+
+
+## Migration-aware market state (pure policy module)
+- A fresh verified live curve is classified LIVE_CURVE; a complete or migrated curve is classified MIGRATION_PENDING.
+- A migrated curve may have zeroed reserves. This is accepted as terminal curve evidence, but it does not authorize an exit.
+- Only a fresh, verified canonical PumpSwap pool for the same mint, with non-zero base and quote reserves, advances the market state to MIGRATED_POOL_VERIFIED.
+- Stale, mismatched, non-canonical or empty pool evidence moves the state to EXIT_BLOCKED. Missing fresh evidence also blocks quote requests.
+- LIVE_CURVE and MIGRATED_POOL_VERIFIED only permit requesting a fresh size-specific sell quote. They do not create fills, execute sells or bypass impact, tax, fee, slippage or balance checks.
+- This is currently a pure tested policy module. The authoritative on-chain account decoder, canonical pool discovery and Durable Object integration are still outstanding.
