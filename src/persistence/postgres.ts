@@ -130,7 +130,7 @@ export async function getTradingDashboardSnapshot() {
 
   const persistence = await getPersistenceStatus();
   if (!persistence.connected) return unavailable("PostgreSQL is not connected");
-  if (!["0004_paper_session_event_ingestion", "0005_paper_trade_projections"].includes(persistence.migrationVersion ?? "")) {
+  if (!["0004_paper_session_event_ingestion", "0005_paper_trade_projections", "0006_helius_backfill_archive"].includes(persistence.migrationVersion ?? "")) {
     return unavailable("Required ledger migrations 0001, 0002, 0003 and 0004 are not all applied");
   }
 
@@ -547,7 +547,7 @@ export async function getPaperSessionLedgerSnapshot(sessionId?: string) {
   if (!pool) return unavailable("DATABASE_URL is not configured");
   const persistence = await getPersistenceStatus();
   if (!persistence.connected) return unavailable("PostgreSQL is not connected");
-  if (persistence.migrationVersion !== "0005_paper_trade_projections") {
+  if (!["0005_paper_trade_projections", "0006_helius_backfill_archive"].includes(persistence.migrationVersion ?? "")) {
     return unavailable("Migration 0005_paper_trade_projections must be explicitly applied before reading the paper ledger projection");
   }
   if (sessionId !== undefined && (!sessionId.trim() || sessionId.length > 128)) {
