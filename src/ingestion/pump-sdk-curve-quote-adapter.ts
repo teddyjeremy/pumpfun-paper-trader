@@ -133,6 +133,10 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedCurveContext
   }
   const quoteMint = new PublicKey(decoded.quoteMint);
   const quoteMintRaw = snapshot.accounts.quoteMint ?? null;
+  if (quoteMintRaw && (quoteMintRaw.slot !== snapshot.slot ||
+      quoteMintRaw.observedAt !== snapshot.observedAt)) {
+    throw new Error("Pump curve quote mint is outside the verified Helius context.");
+  }
   if (decoded.quoteMint === "11111111111111111111111111111111") {
     if (quoteMintRaw) throw new Error("Legacy native-SOL curves must not include a quote-mint account.");
   } else {
@@ -183,6 +187,7 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedCurveContext
       !curve.virtualTokenReserves.eq(new BN(decoded.virtualTokenReserves)) ||
       !curve.virtualQuoteReserves.eq(new BN(decoded.virtualQuoteReserves)) ||
       !curve.realTokenReserves.eq(new BN(decoded.realTokenReserves)) ||
+      !curve.realQuoteReserves.eq(new BN(decoded.realQuoteReserves)) ||
       !curve.tokenTotalSupply.eq(new BN(decoded.tokenTotalSupply)) ||
       !curveBaseVault.amountBaseUnits ||
       BigInt(curveBaseVault.amountBaseUnits) !== BigInt(decoded.realTokenReserves)) {
@@ -293,6 +298,7 @@ export function quotePumpCurveSellFromSnapshot(
   });
   const fee = grossQuote.sub(netQuote);
   if (grossQuote.lten(0) || netQuote.lten(0) || fee.isNeg() ||
+      grossQuote.gt(context.curve.realQuoteReserves) ||
       !isU64BaseUnits(grossQuote.toString()) || !isU64BaseUnits(netQuote.toString())) {
     throw new Error("Pump SDK sell quote did not reconcile to positive u64 proceeds.");
   }
