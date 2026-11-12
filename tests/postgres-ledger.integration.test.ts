@@ -2,15 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { fileURLToPath } from "node:url";
 import { applyDatabaseMigrations } from "../src/db/migrate.js";
-import {
-  acquireWorkerLease,
-  heartbeatWorkerLease,
-  persistPaperAuditEvents,
-  releaseWorkerLease
-} from "../src/persistence/postgres.js";
+type LedgerPersistence = typeof import("../src/persistence/postgres.js");
+let ledgerPersistence: LedgerPersistence | null = null;
 
 const { Pool } = pg;
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = process.env.PAPER_TEST_DATABASE_URL;
 const inspector = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 1 }) : null;
 const sessionId = `integration-${process.pid}-${Date.now()}`;
 const mint = "IntegrationMint111111111111111111111111111111";
@@ -70,6 +66,10 @@ const entryEvent = {
 
 describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
   beforeAll(async () => {
+    // Require an explicitly named test database so a developer's ordinary
+    // DATABASE_URL can never trigger migrations or writes from this suite.
+    process.env.DATABASE_URL = databaseUrl!;
+    ledgerPersistence = await import("../src/persistence/postgres.js");
     await applyDatabaseMigrations(
       databaseUrl,
       fileURLToPath(new URL("../db/migrations", import.meta.url))
@@ -83,35 +83,35 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
 
   it("fences expired PostgreSQL worker leases from stale owners", async () => {
     const leaseName = `${sessionId}-worker`;
-    const first = await acquireWorkerLease(leaseName, "worker-a", 15);
+    const first = await ledgerPersistence!.acquireWorkerLease(leaseName, "worker-a", 15);
     expect(first.acquired).toBe(true);
 
-    const competing = await acquireWorkerLease(leaseName, "worker-b", 15);
+    const competing = await ledgerPersistence!.acquireWorkerLease(leaseName, "worker-b", 15);
     expect(competing.acquired).toBe(false);
-    expect((await heartbeatWorkerLease(leaseName, "worker-b", 15)).acquired).toBe(false);
-    expect((await heartbeatWorkerLease(leaseName, "worker-a", 15)).acquired).toBe(true);
-    expect(await releaseWorkerLease(leaseName, "worker-b")).toBe(false);
+    expect((await ledgerPersistence!.heartbeatWorkerLease(leaseName, "worker-b", 15)).acquired).toBe(false);
+    expect((await ledgerPersistence!.heartbeatWorkerLease(leaseName, "worker-a", 15)).acquired).toBe(true);
+    expect(await ledgerPersistence!.releaseWorkerLease(leaseName, "worker-b")).toBe(false);
 
     await inspector!.query(
       "UPDATE worker_leases SET expires_at=now()-interval '1 second' WHERE lease_name=$1",
       [leaseName]
     );
-    const takeover = await acquireWorkerLease(leaseName, "worker-c", 15);
+    const takeover = await ledgerPersistence!.acquireWorkerLease(leaseName, "worker-c", 15);
     expect(takeover.acquired).toBe(true);
     expect(takeover.ownerId).toBe("worker-c");
 
     // The former owner must not renew or release the new owner's lease.
-    expect((await heartbeatWorkerLease(leaseName, "worker-a", 15)).acquired).toBe(false);
-    expect(await releaseWorkerLease(leaseName, "worker-a")).toBe(false);
-    expect((await heartbeatWorkerLease(leaseName, "worker-c", 15)).acquired).toBe(true);
-    expect(await releaseWorkerLease(leaseName, "worker-c")).toBe(true);
+    expect((await ledgerPersistence!.heartbeatWorkerLease(leaseName, "worker-a", 15)).acquired).toBe(false);
+    expect(await ledgerPersistence!.releaseWorkerLease(leaseName, "worker-a")).toBe(false);
+    expect((await ledgerPersistence!.heartbeatWorkerLease(leaseName, "worker-c", 15)).acquired).toBe(true);
+    expect(await ledgerPersistence!.releaseWorkerLease(leaseName, "worker-c")).toBe(true);
   });
 
   it("persists projections atomically and makes exact retries idempotent", async () => {
-    const first = await persistPaperAuditEvents(sessionId, [entryEvent]);
+    const first = await ledgerPersistence!.persistPaperAuditEvents(sessionId, [entryEvent]);
     expect(first).toEqual({ inserted: 1, duplicates: 0, lastSequence: 1 });
 
-    const retry = await persistPaperAuditEvents(sessionId, [entryEvent]);
+    const retry = await ledgerPersistence!.persistPaperAuditEvents(sessionId, [entryEvent]);
     expect(retry).toEqual({ inserted: 0, duplicates: 1, lastSequence: 1 });
 
     const counts = await inspector!.query(
@@ -124,7 +124,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     );
     expect(counts.rows[0]).toEqual({ events: 1, positions: 1, quotes: 2, trades: 1 });
 
-    await expect(persistPaperAuditEvents(sessionId, [{
+    await expect(ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
       data: { ...entryEvent.data, position: { ...position, stakeUsd: 1.25 } }
     }])).rejects.toThrow(/replay conflicts/);
@@ -144,7 +144,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
         initialSellQuoteId: "integration-invalid-sell-q"
       }
     };
-    await expect(persistPaperAuditEvents(sessionId, [malformedExit])).rejects.toThrow(/do not reconcile/);
+    await expect(ledgerPersistence!.persistPaperAuditEvents(sessionId, [malformedExit])).rejects.toThrow(/do not reconcile/);
 
     const afterRollback = await inspector!.query(
       `SELECT s.last_sequence,
@@ -155,7 +155,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     );
     expect(afterRollback.rows[0]).toEqual({ last_sequence: "1", events: 1, positions: 1 });
 
-    const next = await persistPaperAuditEvents(sessionId, [{
+    const next = await ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
       sequence: 2,
       eventId: "integration-session-heartbeat-2",
