@@ -63,6 +63,8 @@ export interface CandidatePriceVolumeProfile {
   coverage: "OBSERVED_EVENTS_ONLY";
   entryEligible: false;
   microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE";
+  ignoredMicroTradeCount: number;
+  ignoredMicroTradeQuoteVolume: string;
 }
 
 interface TimedTrade {
@@ -206,12 +208,14 @@ export function buildCandidatePriceVolumeProfiles(
     trades: TimedTrade[];
     launchTime: number | null;
     launchPrice: number | null;
+    ignoredMicroTradeCount: number;
+    ignoredMicroTradeQuoteVolume: bigint;
   }>();
   const ensure = (mint: string, quoteMint: string | null) => {
     const key = `${mint}:${quoteMint ?? "UNKNOWN"}`;
     let group = groups.get(key);
     if (!group) {
-      group = { mint, quoteMint, trades: [], launchTime: null, launchPrice: null };
+      group = { mint, quoteMint, trades: [], launchTime: null, launchPrice: null, ignoredMicroTradeCount: 0, ignoredMicroTradeQuoteVolume: 0n };
       groups.set(key, group);
     }
     return group;
@@ -240,7 +244,11 @@ export function buildCandidatePriceVolumeProfiles(
       if (price === null || amount <= 0n) continue;
       if (event.quoteMint === SOL_QUOTE_MINT && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0) {
         const notionalUsd = Number(amount) / 1_000_000_000 * options.solUsdPriceUsd!;
-        if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) continue;
+        if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) {
+          group.ignoredMicroTradeCount += 1;
+          group.ignoredMicroTradeQuoteVolume += amount;
+          continue;
+        }
       }
       group.trades.push({
         event, timestamp, price, quoteAmount: amount,
@@ -400,7 +408,9 @@ export function buildCandidatePriceVolumeProfiles(
       microTradeFilterStatus: group.quoteMint !== SOL_QUOTE_MINT
         ? "UNSUPPORTED_QUOTE"
         : Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
-          ? "APPLIED" : "UNAVAILABLE"
+          ? "APPLIED" : "UNAVAILABLE",
+      ignoredMicroTradeCount: group.ignoredMicroTradeCount,
+      ignoredMicroTradeQuoteVolume: group.ignoredMicroTradeQuoteVolume.toString()
     });
   }
   return output.sort((a, b) => a.mint.localeCompare(b.mint) ||
