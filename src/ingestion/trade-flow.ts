@@ -112,7 +112,15 @@ export function buildCandidateTradeFlows(
       ? Number((largestBuyerVolume * 10_000n + totalBuyVolume - 1n) / totalBuyVolume)
       : null;
     const latestThreeWindowFlowPass = Boolean(latestThree?.every(window => window.flowWindowPass));
-    const flowConfirmationPass = latestThreeWindowFlowPass &&
+    const coverageStart = options.coverageStartByMint?.[group.mint];
+    const firstFullyCoveredWindow = coverageStart === undefined
+      ? null
+      : Math.ceil(coverageStart / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
+    const dataComplete = !incomplete.has(group.mint) &&
+      Boolean(latestThree) &&
+      (firstFullyCoveredWindow === null || latestThree![0]!.startTime >= firstFullyCoveredWindow);
+    const flowConfirmationPass = dataComplete &&
+      latestThreeWindowFlowPass &&
       distinctBuyers >= 5 &&
       totalBuyVolume > 0n &&
       largestBuyerVolume * 100n <= totalBuyVolume * 72n;
@@ -128,7 +136,7 @@ export function buildCandidateTradeFlows(
       distinctBuyersAcrossLatestThree: distinctBuyers,
       largestBuyerShareAcrossLatestThreeBps: largestBuyerShareBps,
       flowConfirmationPass,
-      dataComplete: !incomplete.has(group.mint),
+      dataComplete,
       coverage: "OBSERVED_EVENTS_ONLY",
       entryEligible: false
     });
