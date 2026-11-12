@@ -235,7 +235,7 @@ export async function fetchExecutableRoundTripQuote(input: {
     throw new Error("Round-trip net return calculation is not finite.");
   }
   const buyFeePct = totalFees(buyQuote) / buyQuote.requestedUsd * 100;
-  const sellFeePct = totalFees(initialSellQuote) / initialSellQuote.outputUsd * 100;
+  const sellFeePct = totalFees(initialSellQuote) / buyQuote.requestedUsd * 100;
   const combinedPriceImpactPct = buyQuote.priceImpactPct + initialSellQuote.priceImpactPct;
   const combinedTransferTaxPct = buyQuote.taxPct + initialSellQuote.taxPct;
   const roundTripCostPct = buyFeePct + sellFeePct + combinedPriceImpactPct + combinedTransferTaxPct;
