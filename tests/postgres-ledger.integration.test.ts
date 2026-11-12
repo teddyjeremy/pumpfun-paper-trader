@@ -193,23 +193,26 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       createEvents: [{ mint: backfillMint, bondingCurve: state.bondingCurve }],
       tradeEvents: []
     };
-    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction });
+    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, decodeCoverage: { complete: true, reason: null, verifiedTransactionCount: 1 }, transaction });
     await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction });
 
     const archived = await inspector!.query(
       `SELECT j.status,j.pages_scanned,j.signature_count,j.launch_block_time,
         (SELECT COUNT(*)::int FROM helius_transaction_observations t
           WHERE t.session_id=j.session_id AND t.mint=j.mint) AS transactions
+       j.decoded_complete,j.decoded_reason,j.verified_transaction_count
        FROM helius_backfill_jobs j WHERE j.session_id=$1 AND j.mint=$2`,
       [sessionId, backfillMint]
     );
     expect(archived.rows[0]).toEqual({
       status: "COMPLETE", pages_scanned: 1, signature_count: 1,
-      launch_block_time: "1762941600", transactions: 1
+      launch_block_time: "1762941600", transactions: 1, decoded_complete: true,
+      decoded_reason: null, verified_transaction_count: 1
     });
 
     await expect(ledgerPersistence!.persistHeliusBackfillArchive({
       sessionId, mint: backfillMint, state,
+      decodeCoverage: { complete: true, reason: null, verifiedTransactionCount: 1 },
       transaction: { ...transaction, slot: 124 }
     })).rejects.toThrow(/verified signature evidence|conflicts/);
 
@@ -225,15 +228,17 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       reason: "Verified launch block time is unavailable."
     };
     await ledgerPersistence!.persistHeliusBackfillArchive({
-      sessionId, mint: incompleteMint, state: incomplete
+      sessionId, mint: incompleteMint, state: incomplete,
+      decodeCoverage: { complete: false, reason: "Launch time unavailable.", verifiedTransactionCount: 0 }
     });
     const incompleteRow = await inspector!.query(
-      "SELECT status,launch_block_time,reason FROM helius_backfill_jobs WHERE session_id=$1 AND mint=$2",
+      "SELECT status,launch_block_time,reason,decoded_complete,decoded_reason,verified_transaction_count FROM helius_backfill_jobs WHERE session_id=$1 AND mint=$2",
       [sessionId, incompleteMint]
     );
     expect(incompleteRow.rows[0]).toEqual({
       status: "INCOMPLETE", launch_block_time: null,
-      reason: "Verified launch block time is unavailable."
+      reason: "Verified launch block time is unavailable.", decoded_complete: false,
+      decoded_reason: "Launch time unavailable.", verified_transaction_count: 0
     });
   });
 
