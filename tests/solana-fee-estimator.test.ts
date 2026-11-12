@@ -9,6 +9,7 @@ const recipient = Keypair.generate().publicKey;
 const blockhash = "11111111111111111111111111111111";
 function compiledMessageBase64(withPriorityPrice = false, versioned = false): string {
   const instructions = [
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }),
     ...(withPriorityPrice ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10 })] : []),
     SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: recipient, lamports: 1 })
   ];
