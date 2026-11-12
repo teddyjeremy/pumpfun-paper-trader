@@ -25,7 +25,7 @@ describe("official Pump SDK runtime surface", () => {
     const capabilities = officialPumpSdkInstructionCapabilities();
     expect(capabilities).toEqual({
       curveV3: { buyExactTokens: true, buyExactQuoteIn: true, sellExactTokens: true },
-      curveV2: { buyExactTokens: true, buyExactQuoteIn: true, sellExactTokens: true },
+      curveV2: { buyExactTokens: true, buyExactQuoteIn: false, sellExactTokens: true },
       pumpSwapV2: { buyExactTokens: true, buyExactQuoteIn: true, sellExactTokens: true }
     });
   });
