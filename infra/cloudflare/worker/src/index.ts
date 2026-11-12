@@ -304,6 +304,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       `helius_backfill:${sessionId}:${transaction.mint}`
     );
     if (!state?.signatures.some(item => item.signature === transaction.signature)) return;
+    const transactionKey = `helius_verified_historical_transactions:${sessionId}:${transaction.mint}`;
+    const transactions = await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(transactionKey) ?? {};
+    transactions[transaction.signature] = transaction;
+    await this.ctx.storage.put(transactionKey, transactions);
     const key = `helius_verified_historical_signatures:${sessionId}:${transaction.mint}`;
     const signatures = new Set(await this.ctx.storage.get<string[]>(key) ?? []);
     signatures.add(transaction.signature);
@@ -335,6 +339,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const expectedSignatures = new Set(state.signatures.map(item => item.signature));
     const verified = new Set((await this.ctx.storage.get<string[]>(verifiedKey) ?? [])
       .filter(signature => expectedSignatures.has(signature)));
+    const transactionKey = `helius_verified_historical_transactions:${sessionId}:${mint}`;
+    const storedTransactions = await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(transactionKey) ?? {};
+    for (const signature of Object.keys(storedTransactions)) {
+      if (expectedSignatures.has(signature)) verified.add(signature);
+    }
     for (const transaction of this.verifiedTransactions) {
       if (transaction.mint === mint && expectedSignatures.has(transaction.signature)) {
         verified.add(transaction.signature);
