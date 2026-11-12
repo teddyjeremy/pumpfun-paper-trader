@@ -229,21 +229,29 @@ export function replayHistoricalCoin(
       const flow = buildCandidateTradeFlows(input.transactions, sharedOptions)
         .find(item => item.mint === input.mint && item.quoteUnit === "SOL");
       if (!profile || !flow) continue;
-      const creatorRisk = evaluateCreatorSellRisk(input.transactions, {
+      // Risk evaluators must see only evidence available at this historical instant.
+      const evidenceTransactions = input.transactions.filter(tx => Number.isSafeInteger(tx.blockTime) && tx.blockTime <= evaluatedAt);
+      const creatorRisk = evaluateCreatorSellRisk(evidenceTransactions, {
         nowSeconds: evaluatedAt,
         candidateMints: [input.mint],
         incompleteMints: input.decodeComplete ? [] : [input.mint],
         coverageStartByMint: { [input.mint]: input.launchBlockTime }
       }).find(item => item.mint === input.mint);
-      const createEvent = input.transactions.flatMap(tx => tx.createEvents)
+      const createEvent = evidenceTransactions.flatMap(tx => tx.createEvents)
         .filter(event => event.mint === input.mint)
         .sort((a, b) => Number(a.timestamp - b.timestamp))[0];
       const walletRisk = createEvent ? evaluateWalletClusterRisk(input.transactions, {
         mint: input.mint,
         creator: createEvent.creator,
         totalSupply: createEvent.tokenTotalSupply.toString(),
-        links: input.walletLinks,
-        holdings: input.walletHoldings
+        links: (input.walletLinks ?? []).filter(link => {
+          const observedAt = Date.parse(link.observedAt);
+          return Number.isFinite(observedAt) && observedAt <= evaluatedAt * 1_000;
+        }),
+        holdings: (input.walletHoldings ?? []).filter(holding => {
+          const observedAt = Date.parse(holding.observedAt ?? "");
+          return Number.isFinite(observedAt) && observedAt <= evaluatedAt * 1_000;
+        })
       }) : null;
       const creatorRiskStatus = creatorRisk?.status ?? "UNKNOWN";
       const walletClusterRiskStatus = walletRisk?.status === "REJECT_OBSERVED"
