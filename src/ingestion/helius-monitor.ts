@@ -64,10 +64,23 @@ export function selectHeliusCandidates(
   }
   const selected: Array<{ mint: string; bondingCurve: string }> = [];
   const seen = new Set<string>();
-  const newestFirst = [...candidates].sort((a, b) =>
-    Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt)
-  );
-  for (const candidate of newestFirst) {
+  // This is a monitoring-priority order, not a trading-quality score.
+  // The discovery feed does not contain trade flow, wallet concentration,
+  // creator sells, liquidity, or executable quotes, so those must not be
+  // fabricated here. Prefer candidates with more complete identity evidence,
+  // then repeated observations, then freshness. Unknown creator data remains
+  // eligible for WATCH/monitoring rather than being treated as a safety pass.
+  const priorityOrder = [...candidates].sort((a, b) => {
+    const creatorA = a.creator && ADDRESS.test(a.creator) ? 1 : 0;
+    const creatorB = b.creator && ADDRESS.test(b.creator) ? 1 : 0;
+    if (creatorA !== creatorB) return creatorB - creatorA;
+    if (a.observations !== b.observations) return b.observations - a.observations;
+    const lastSeenA = Date.parse(a.lastSeenAt);
+    const lastSeenB = Date.parse(b.lastSeenAt);
+    if (lastSeenA !== lastSeenB) return lastSeenB - lastSeenA;
+    return Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt);
+  });
+  for (const candidate of priorityOrder) {
     if (selected.length >= limit) break;
     if (candidate.status !== "DISCOVERED" || !ADDRESS.test(candidate.mint) ||
         !candidate.bondingCurve || !ADDRESS.test(candidate.bondingCurve) ||
