@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { PublicKey } from "@solana/web3.js";
+import { deriveCanonicalPumpSwapPoolPda, derivePumpBondingCurvePda, derivePumpPoolCreatorAuthorityPda } from "../src/ingestion/pump-pdas.js";
 import { createUnverifiedMarketState } from "../src/paper/pump-market-state.js";
 import { applyVerifiedPumpCurveAccount, applyVerifiedPumpSwapPoolAccounts } from "../src/ingestion/pump-market-verifier.js";
 import {
   decodePumpSwapPoolAccount, decodeSplTokenAccount, decodeVerifiedPumpCurveAccount,
   verifyCanonicalPumpSwapPoolSnapshot, toVerifiedPumpCurveEvidence, PUMP_AMM_PROGRAM_ID, PUMP_PROGRAM_ID,
-  SPL_TOKEN_PROGRAM_ID
+  SPL_TOKEN_PROGRAM_ID, NATIVE_SOL_MINT
 } from "../src/ingestion/pump-account-decoder.js";
 
 const observedAt = "2026-11-12T12:00:00.000Z";
@@ -28,9 +30,10 @@ function curveData(complete = false): Uint8Array {
   data[48] = complete ? 1 : 0;
   data[81] = 0;
   data[82] = 0;
+  data.set(new PublicKey(NATIVE_SOL_MINT).toBytes(), 83);
   return data;
 }
-function poolData(): Uint8Array {
+function poolData(creator = ZERO_KEY, baseMint = ZERO_KEY, quoteMint = ZERO_KEY, baseVault = ZERO_KEY, quoteVault = ZERO_KEY): Uint8Array {
   const data = new Uint8Array(271);
   data.set([241, 154, 109, 4, 17, 177, 109, 188], 0);
   data[8] = 254;
@@ -38,8 +41,10 @@ function poolData(): Uint8Array {
   writeU64(data, 203, 1_000n);
   return data;
 }
-function tokenVault(amount: bigint): Uint8Array {
+function tokenVault(amount: bigint, mint = ZERO_KEY, authority = ZERO_KEY): Uint8Array {
   const data = new Uint8Array(165);
+  data.set(new PublicKey(mint).toBytes(), 0);
+  data.set(new PublicKey(authority).toBytes(), 32);
   writeU64(data, 64, amount);
   data[108] = 1;
   return data;
@@ -147,25 +152,28 @@ describe("IDL-aligned Pump account decoders", () => {
   });
 
   it("connects decoded curve and canonical pool accounts to the fail-closed market state machine", () => {
-    const initial = createUnverifiedMarketState("mint", observedAt);
+    const mint = ZERO_KEY;
+    const curveAddress = derivePumpBondingCurvePda(mint);
+    const initial = createUnverifiedMarketState(mint, observedAt);
     const live = applyVerifiedPumpCurveAccount({
-      state: initial, account: account("curve-pda", PUMP_PROGRAM_ID, curveData()),
-      expectedCurveAddress: "curve-pda", nowMs: Date.parse(observedAt)
+      state: initial, account: account(curveAddress, PUMP_PROGRAM_ID, curveData()),
+      nowMs: Date.parse(observedAt)
     });
     expect(live.status).toBe("LIVE_CURVE");
     const pending = applyVerifiedPumpCurveAccount({
-      state: initial, account: account("curve-pda", PUMP_PROGRAM_ID, curveData(true)),
-      expectedCurveAddress: "curve-pda", nowMs: Date.parse(observedAt)
+      state: initial, account: account(curveAddress, PUMP_PROGRAM_ID, curveData(true)),
+      nowMs: Date.parse(observedAt)
     });
     expect(pending.status).toBe("MIGRATION_PENDING");
+    const creator = derivePumpPoolCreatorAuthorityPda(mint);
+    const poolAddress = deriveCanonicalPumpSwapPoolPda(mint, NATIVE_SOL_MINT);
+    const baseVault = new PublicKey(new Uint8Array(32).fill(1)).toBase58();
+    const quoteVault = new PublicKey(new Uint8Array(32).fill(2)).toBase58();
     const migrated = applyVerifiedPumpSwapPoolAccounts({
       state: pending,
-      poolAccount: account("pool", PUMP_AMM_PROGRAM_ID, poolData()),
-      baseVaultAccount: account(ZERO_KEY, SPL_TOKEN_PROGRAM_ID, tokenVault(10_000n)),
-      quoteVaultAccount: account(ZERO_KEY, SPL_TOKEN_PROGRAM_ID, tokenVault(20_000n)),
-      expectedPoolAddress: "pool",
-      expectedPoolCreatorAuthority: ZERO_KEY,
-      expectedPoolAuthority: ZERO_KEY,
+      poolAccount: account(poolAddress, PUMP_AMM_PROGRAM_ID, poolData(creator, mint, NATIVE_SOL_MINT, baseVault, quoteVault)),
+      baseVaultAccount: account(baseVault, SPL_TOKEN_PROGRAM_ID, tokenVault(10_000n, mint, poolAddress)),
+      quoteVaultAccount: account(quoteVault, SPL_TOKEN_PROGRAM_ID, tokenVault(20_000n, NATIVE_SOL_MINT, poolAddress)),
       nowMs: Date.parse(observedAt)
     });
     expect(migrated.status).toBe("MIGRATED_POOL_VERIFIED");
