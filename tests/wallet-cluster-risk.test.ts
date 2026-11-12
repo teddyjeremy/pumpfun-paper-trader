@@ -51,6 +51,19 @@ describe("wallet cluster risk", () => {
     expect(result.status).toBe("REJECT_OBSERVED");
     expect(result.largestClusterBuyVolumeShareBps).toBe(3_600);
   });
+
+  it("does not let large unrelated quote-mint volume hide a cluster's concentrated SOL buys", () => {
+    const sol = "So11111111111111111111111111111111111111112";
+    const usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+    const solClusterBuy = { ...trade("w1", true, 40n), quoteMint: sol };
+    const solOtherBuy = { ...trade("independent-sol", true, 60n), quoteMint: sol };
+    const usdcBuy = { ...trade("independent-usdc", true, 10_000n), quoteMint: usdc };
+    const result = evaluateWalletClusterRisk([tx([
+      solClusterBuy, solOtherBuy, usdcBuy
+    ])], { mint, creator, totalSupply: "100000", links: [link("w1", "w2")] });
+    expect(result.status).toBe("REJECT_OBSERVED");
+    expect(result.largestClusterBuyVolumeShareBps).toBe(4_000);
+  });
   it("rejects a linked cluster holding strictly more than 20% supply", () => {
     const result = evaluateWalletClusterRisk([], {
       mint, creator, totalSupply: "100000", links: [link("w1", "w2")],
