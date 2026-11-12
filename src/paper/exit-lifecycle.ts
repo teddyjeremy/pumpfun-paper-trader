@@ -119,15 +119,22 @@ export async function executePaperExit(input: PaperExitExecutionInput): Promise<
     const highestReturn = netReturnPct(highestPrice * tokens, position);
     const durations = [2, 5, 10, 30] as const;
     const config = input.strategyConfig ?? DYNAMIC_EXIT_CALIBRATION_V1;
-    const evaluations = durations.map(windowSeconds => evaluateExit({
-      currentNetReturnPct: currentReturn,
-      highestCompletedNetReturnPct: highestReturn,
-      emergencyReason: input.emergencyReason ?? null,
-      freshExecutableSellQuote: true,
-      windowsOldestFirst: input.windows
-        .filter(window => window.windowSeconds === windowSeconds)
-        .sort((a, b) => a.endedAtMs - b.endedAtMs)
-    }, config));
+    const evaluations = durations.map(windowSeconds => {
+      const ordered = input.windows
+        .filter(window => window.windowSeconds === windowSeconds &&
+          Number.isSafeInteger(window.endedAtMs) && window.endedAtMs <= afterQuoteNow)
+        .sort((a, b) => a.endedAtMs - b.endedAtMs);
+      const latest = ordered[ordered.length - 1];
+      const freshWindows = latest && afterQuoteNow - latest.endedAtMs <= windowSeconds * 1_500
+        ? ordered : [];
+      return evaluateExit({
+        currentNetReturnPct: currentReturn,
+        highestCompletedNetReturnPct: highestReturn,
+        emergencyReason: input.emergencyReason ?? null,
+        freshExecutableSellQuote: true,
+        windowsOldestFirst: freshWindows
+      }, config);
+    });
 
     const selected = evaluations.find(evaluation => evaluation.action === "sell");
     if (!selected) {
