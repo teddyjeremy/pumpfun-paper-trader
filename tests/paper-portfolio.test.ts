@@ -58,4 +58,19 @@ describe("paper portfolio accounting",()=>{
   expect(state.maxConcurrentPositions).toBe(1);
   expect(state.highWaterEquityUsd).toBe(2.7);
  });
+
+ it("includes protocol, creator, pool, priority and transfer fees in the round-trip cap",()=>{
+  const p=createPaperPortfolio();
+  const buy=quote("mint","BUY");buy.protocolFeeUsd=0.03;
+  const sell=quote("mint","SELL");sell.creatorFeeUsd=0.03;
+  expect(()=>openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)})).toThrow(/cost exceeds/);
+ });
+ it("refuses an exit quote whose gross proceeds cannot cover its full fee breakdown",()=>{
+  const p=createPaperPortfolio();
+  const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
+  const sell=quote("mint","SELL","1000000",0.005);sell.protocolFeeUsd=0.01;
+  expect(()=>closePaperPosition(opened.state,{positionId:"p1",sellQuote:sell,exitReason:"TEST",closedAt:now,nowMs:Date.parse(now)}))
+    .toThrow(/negative net proceeds/);
+ });
+
 });
