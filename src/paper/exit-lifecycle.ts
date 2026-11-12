@@ -40,14 +40,11 @@ function wholeTokens(position: PaperPosition): number {
 }
 function netReturnPct(netProceedsUsd: number, position: PaperPosition): number {
   if (!Number.isFinite(netProceedsUsd) || netProceedsUsd < 0 ||
-      !Number.isFinite(position.stakeUsd) || position.stakeUsd <= 0) {
-    throw new Error("Net liquidation value or position stake is invalid.");
+      !Number.isFinite(position.stakeUsd) || position.stakeUsd <= 0 ||
+      !Number.isFinite(position.buyCostsUsd) || position.buyCostsUsd < 0) {
+    throw new Error("Net liquidation value or position accounting is invalid.");
   }
   return ((netProceedsUsd - position.stakeUsd - position.buyCostsUsd) / position.stakeUsd) * 100;
-}
-function highestCompletedReturnPct(position: PaperPosition): number {
-  const highWaterValue = position.highWaterPriceUsdPerToken * wholeTokens(position);
-  return netReturnPct(highWaterValue, position);
 }
 function expectedVenue(state: PumpMarketState): "PUMP_CURVE" | "PUMPSWAP" | null {
   if (state.status === "LIVE_CURVE") return "PUMP_CURVE";
@@ -62,7 +59,8 @@ function expectedVenue(state: PumpMarketState): "PUMP_CURVE" | "PUMPSWAP" | null
  * seconds, while protective stops use the fresh executable liquidation value.
  */
 export async function executePaperExit(input: PaperExitExecutionInput): Promise<PaperExitExecutionResult> {
-  const now = input.nowMs ?? Date.now();
+  const executionNow = () => input.nowMs ?? Date.now();
+  const now = executionNow();
   const position = input.position;
   if (!Number.isFinite(now) || !position.positionId.trim() ||
       !position.mint.trim() || position.status !== "OPEN") {
@@ -91,24 +89,34 @@ export async function executePaperExit(input: PaperExitExecutionInput): Promise<
     });
     const sdkQuote = result.quote;
     const actualVenue = "venue" in sdkQuote ? sdkQuote.venue : "PUMPSWAP";
+    const marketSlot = input.marketState.status === "LIVE_CURVE"
+      ? input.marketState.curve?.slot
+      : input.marketState.pool?.slot;
     if (sdkQuote.side !== "SELL" || sdkQuote.mint !== position.mint ||
         sdkQuote.inputAmountBaseUnits !== position.tokenAmountBaseUnits ||
         sdkQuote.baseDecimals !== position.tokenDecimals ||
         sdkQuote.quoteMint !== expectedQuoteMint || actualVenue !== venue ||
-        sdkQuote.slot < (input.marketState.status === "LIVE_CURVE"
-          ? (input.marketState.curve?.slot ?? Number.MAX_SAFE_INTEGER)
-          : (input.marketState.pool?.slot ?? Number.MAX_SAFE_INTEGER))) {
+        marketSlot === undefined || sdkQuote.slot < marketSlot) {
       return { status: "BLOCKED", reason: "Sell quote does not match the complete position balance, verified market venue, quote mint or market slot." };
     }
+    const afterQuoteNow = executionNow();
+    if (marketObservedAt > afterQuoteNow ||
+        afterQuoteNow - marketObservedAt > MARKET_EVIDENCE_MAX_AGE_MS) {
+      return { status: "BLOCKED", reason: "Verified market evidence expired while obtaining the sell quote." };
+    }
     const sellQuote = buildExecutablePaperQuote({
-      quote: sdkQuote, solUsd: result.context.solUsd, costs: result.context.costs, nowMs: executionNow()
+      quote: sdkQuote, solUsd: result.context.solUsd,
+      costs: result.context.costs, nowMs: afterQuoteNow
     });
     const netProceedsUsd = sellQuote.outputUsd - feeTotal(sellQuote);
     if (!Number.isFinite(netProceedsUsd) || netProceedsUsd < 0) {
       return { status: "BLOCKED", reason: "Executable sell quote has invalid net proceeds after all fees." };
     }
     const currentReturn = netReturnPct(netProceedsUsd, position);
-    const currentNetPrice = netProceedsUsd / wholeTokens(position);\n    const highestPrice = Math.max(position.highWaterPriceUsdPerToken, currentNetPrice);\n    const highestReturn = netReturnPct(highestPrice * wholeTokens(position), position);
+    const tokens = wholeTokens(position);
+    const currentNetPrice = netProceedsUsd / tokens;
+    const highestPrice = Math.max(position.highWaterPriceUsdPerToken, currentNetPrice);
+    const highestReturn = netReturnPct(highestPrice * tokens, position);
     const durations = [2, 5, 10, 30] as const;
     const config = input.strategyConfig ?? DYNAMIC_EXIT_CALIBRATION_V1;
     const evaluations = durations.map(windowSeconds => evaluateExit({
@@ -116,7 +124,9 @@ export async function executePaperExit(input: PaperExitExecutionInput): Promise<
       highestCompletedNetReturnPct: highestReturn,
       emergencyReason: input.emergencyReason ?? null,
       freshExecutableSellQuote: true,
-      windowsOldestFirst: input.windows.filter(window => window.windowSeconds === windowSeconds)\n        .sort((a, b) => a.endedAtMs - b.endedAtMs)
+      windowsOldestFirst: input.windows
+        .filter(window => window.windowSeconds === windowSeconds)
+        .sort((a, b) => a.endedAtMs - b.endedAtMs)
     }, config));
 
     const selected = evaluations.find(evaluation => evaluation.action === "sell");
