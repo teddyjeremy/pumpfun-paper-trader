@@ -201,6 +201,31 @@ describe("Durable Object audit storage contract", () => {
     expect(resumedMonitor?.queue.some(item => item.signature === createSignature)).toBe(true);
   });
 
+
+  it("repairs an orphaned backfill state by restoring its session mint index", async () => {
+    const storage = new MemoryDurableStorage();
+    seedSession(storage, true);
+    const mint = "So11111111111111111111111111111111111111112";
+    const signature = "5".repeat(64);
+    const state = createHistoricalBackfillState({
+      mint, bondingCurve: mint, createSignature: signature, launchBlockTime: 1000
+    });
+    storage.seed(`helius_backfill:runtime-test-session:${mint}`, state);
+
+    const coordinator = harness(storage).coordinator as unknown as {
+      activeSessionId: string | null;
+      beginHistoricalBackfill: (transaction: unknown) => Promise<void>;
+    };
+    coordinator.activeSessionId = "runtime-test-session";
+    await coordinator.beginHistoricalBackfill({
+      signature,
+      mint,
+      createEvents: [{ mint, bondingCurve: mint, timestamp: "1000" }]
+    });
+
+    expect(await storage.get<string[]>(`helius_backfill_mints:runtime-test-session`)).toEqual([mint]);
+  });
+
   it("keeps session metadata and event count consistent", async () => {
     const { coordinator, storage } = harness();
     seedSession(storage);
