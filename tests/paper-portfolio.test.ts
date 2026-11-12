@@ -73,4 +73,13 @@ describe("paper portfolio accounting",()=>{
     .toThrow(/negative net proceeds/);
  });
 
+
+ it("rechecks impact and tax limits on later exit quotes",()=>{
+  const p=createPaperPortfolio();
+  const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
+  const sell=quote("mint","SELL");sell.priceImpactPct=2.1;
+  expect(()=>closePaperPosition(opened.state,{positionId:"p1",sellQuote:sell,exitReason:"TEST",closedAt:now,nowMs:Date.parse(now)}))
+    .toThrow(/per-side impact or tax limit/);
+ });
+
 });
