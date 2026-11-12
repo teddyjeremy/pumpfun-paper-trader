@@ -53,6 +53,7 @@ export function buildCandidateTradeFlows(
     horizonSeconds?: number;
     incompleteMints?: readonly string[];
     coverageStartByMint?: Readonly<Record<string, number>>;
+    candidateMints?: readonly string[];
   } = {}
 ): CandidateTradeFlow[] {
   const nowSeconds = options.nowSeconds ?? Math.floor(Date.now() / 1_000);
