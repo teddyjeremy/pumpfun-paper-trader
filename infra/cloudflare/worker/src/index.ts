@@ -1134,6 +1134,72 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return { ...result, risk };
   }
 
+  /** Collect one bounded holder or wallet-link snapshot on each scheduled tick. */
+  async collectNextRiskEvidence(): Promise<unknown> {
+    await this.hydrate();
+    if (!this.status.enabled || !this.activeSessionId || !this.env.HELIUS_API_KEY) {
+      return { status: "IDLE", reason: "No active paper session or Helius API key." };
+    }
+
+    const monitoredMints = new Set(this.heliusState.subscriptions.map(item => item.mint));
+    const launches = new Set(this.verifiedTransactions.flatMap(tx => tx.createEvents).map(event => event.mint));
+    const candidates = this.discovery.candidates
+      .filter(candidate => candidate.status === "DISCOVERED" &&
+        monitoredMints.has(candidate.mint) && launches.has(candidate.mint))
+      .sort((a, b) => Date.parse(a.firstSeenAt) - Date.parse(b.firstSeenAt));
+    const now = Date.now();
+
+    for (const candidate of candidates) {
+      const mint = candidate.mint;
+      const lastAttempt = this.riskEvidenceAttemptedAtByMint[mint] ?? 0;
+      if (now - lastAttempt < 60_000) continue;
+
+      const holder = this.holderRiskSnapshots[mint];
+      const walletLinks = this.walletLinkSnapshots[mint];
+      const holderNeedsRefresh = !holder ||
+        (holder.status === "OBSERVED"
+          ? now - Date.parse(holder.snapshot.observedAt) >= 120_000
+          : now - lastAttempt >= 60_000);
+      const walletLinksNeedRefresh = !walletLinks ||
+        (walletLinks.status === "OBSERVED"
+          ? now - Date.parse(walletLinks.observedAt) >= 120_000
+          : now - lastAttempt >= 60_000);
+
+      let evidenceType: "HOLDER_CONCENTRATION" | "WALLET_CLUSTER";
+      if (holderNeedsRefresh) {
+        evidenceType = "HOLDER_CONCENTRATION";
+      } else if (walletLinksNeedRefresh) {
+        const distinctTradeWallets = new Set(this.verifiedTransactions.flatMap(tx => tx.tradeEvents)
+          .filter(trade => trade.mint === mint && trade.quoteAmount > 0n)
+          .map(trade => trade.user)).size;
+        if (distinctTradeWallets < 2) continue;
+        evidenceType = "WALLET_CLUSTER";
+      } else {
+        continue;
+      }
+
+      this.riskEvidenceAttemptedAtByMint[mint] = now;
+      await this.ctx.storage.put("risk_evidence_attempted_at_by_mint", this.riskEvidenceAttemptedAtByMint);
+      try {
+        if (evidenceType === "HOLDER_CONCENTRATION") {
+          await this.getHolderRisk(mint);
+        } else {
+          await this.collectWalletLinks(mint);
+        }
+        return { status: "COLLECTED", mint, evidenceType };
+      } catch (error) {
+        await this.appendAudit("DATA_GAP", mint, {
+          reason: "AUTOMATED_RISK_EVIDENCE_COLLECTION_FAILED",
+          evidenceType,
+          message: error instanceof Error ? error.message : "Risk evidence collection failed."
+        }, `risk-evidence-failed:${mint}:${Math.floor(now / 60_000)}`);
+        return { status: "DATA_INCOMPLETE", mint, evidenceType };
+      }
+    }
+
+    return { status: "IDLE", reason: "No monitored candidate currently needs a risk snapshot." };
+  }
+
   private async getSolUsdPrice(): Promise<Awaited<ReturnType<typeof fetchSolUsdPrice>>> {
     const now = Date.now();
     if (this.solUsdPriceCache && now - this.solUsdPriceFetchedAtMs < 1_000) {
@@ -2155,6 +2221,9 @@ export default {
     context: ExecutionContext
   ): Promise<void> {
     const coordinator = env.COORDINATOR.get(env.COORDINATOR.idFromName("primary"));
-    context.waitUntil(coordinator.ensureRunning());
+    context.waitUntil((async () => {
+      await coordinator.ensureRunning();
+      await coordinator.collectNextRiskEvidence();
+    })());
   }
 };
