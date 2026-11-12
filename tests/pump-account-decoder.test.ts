@@ -49,6 +49,8 @@ function poolData(creator = ZERO_KEY, baseMint = ZERO_KEY, quoteMint = ZERO_KEY,
   data[8] = 254;
   data[9] = 0; data[10] = 0; // canonical pool index 0
   writeU64(data, 203, 1_000n);
+  writeU64(data, 271, 100n);
+  writeU64(data, 279, 200n);
   return data;
 }
 function tokenVault(amount: bigint, mint = ZERO_KEY, authority = ZERO_KEY): Uint8Array {
@@ -111,7 +113,7 @@ describe("IDL-aligned Pump account decoders", () => {
     expect(decoded).toMatchObject({
       index: 0, creator: ZERO_KEY, baseMint: ZERO_KEY, quoteMint: ZERO_KEY,
       baseVault: ZERO_KEY, quoteVault: ZERO_KEY, virtualQuoteReserves: "0",
-      creatorFeeBps: "0", protocolFeesBaseUnits: "0", creatorFeesBaseUnits: "0",
+      creatorFeeBps: "0", protocolFeesBaseUnits: "100", creatorFeesBaseUnits: "200",
       isMayhemMode: false, isCashbackCoin: false, canEditCreatorFee: false, isHolderReward: false
     });
     const legacy = poolData().slice(0, 245);
