@@ -453,6 +453,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     for (const transaction of transactionsToArchive.values()) {
       if (archived.has(transaction.signature)) continue;
+      const transactionState = await this.ctx.storage.get<HistoricalBackfillState>(
+        `helius_backfill:${sessionId}:${transaction.mint}`
+      );
+      if (!transactionState) continue;
       await this.archiveVerifiedHistoricalTransaction(transaction);
       const acknowledged = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
       if (!acknowledged.has(transaction.signature)) {
