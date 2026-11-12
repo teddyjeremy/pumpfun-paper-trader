@@ -322,6 +322,61 @@ describe("Durable Object audit storage contract", () => {
     expect(links).not.toHaveBeenCalled();
   });
 
+
+  it("collects wallet-link evidence only after two distinct traders are observed", async () => {
+    const storage = new MemoryDurableStorage();
+    seedSession(storage, true);
+    const mint = "So11111111111111111111111111111111111111112";
+    const monitor = emptyHeliusMonitorState();
+    monitor.subscriptions = [{
+      requestId: 1, subscriptionId: null, mint, bondingCurve: mint, subscribedAt: null
+    }];
+    const discovery = emptyDiscoveryStore();
+    discovery.candidates = [{
+      kind: "new_token", mint, bondingCurve: mint, signature: null, creator: null,
+      name: null, symbol: null, receivedAt: "2026-11-12T12:00:00.000Z",
+      firstSeenAt: "2026-11-12T12:00:00.000Z", lastSeenAt: "2026-11-12T12:00:00.000Z",
+      observations: 1, status: "DISCOVERED"
+    }];
+    storage.seed("helius_monitor_state", monitor);
+    storage.seed("discovery_state", discovery);
+    storage.seed("holder_risk_snapshots", {
+      [mint]: { status: "OBSERVED", snapshot: { observedAt: new Date().toISOString() } }
+    });
+    storage.seed("verified_transactions", [{
+      createEvents: [{ mint }],
+      tradeEvents: [
+        { mint, user: "11111111111111111111111111111111", quoteAmount: 1n },
+        { mint, user: "Vote111111111111111111111111111111111111111", quoteAmount: 1n }
+      ]
+    }]);
+
+    const { coordinator } = harness(storage, { HELIUS_API_KEY: "test-key" });
+    const links = vi.spyOn(coordinator, "collectWalletLinks").mockResolvedValue({ status: "OBSERVED" });
+    const result = await coordinator.collectNextRiskEvidence();
+    expect(result).toMatchObject({ status: "COLLECTED", mint, evidenceType: "WALLET_CLUSTER" });
+    expect(links).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse stale holder balances when a refresh is incomplete", async () => {
+    const storage = new MemoryDurableStorage();
+    seedSession(storage, true);
+    const mint = "So11111111111111111111111111111111111111112";
+    storage.seed("wallet_holdings_by_mint", {
+      [mint]: [{ mint, wallet: "11111111111111111111111111111111", amount: "250000" }]
+    });
+    const { coordinator } = harness(storage, { HELIUS_API_KEY: "test-key" });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: { code: -32000 } })));
+    try {
+      const result = await coordinator.getHolderRisk(mint) as { status: string };
+      expect(result.status).toBe("DATA_INCOMPLETE");
+      const holdings = await storage.get<Record<string, unknown[]>>("wallet_holdings_by_mint");
+      expect(holdings?.[mint]).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps session metadata and event count consistent", async () => {
     const { coordinator, storage } = harness();
     seedSession(storage);
