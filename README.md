@@ -1,37 +1,51 @@
 # Pump.fun Paper Trader
 
-A **paper-only** Pump.fun research, market-monitoring and trading-simulation system. The project does not contain a wallet signer, submit Solana transactions, or execute real trades.
+A **paper-only** Pump.fun research, market-monitoring and trading-simulation system. It does not sign transactions, hold a wallet key, submit Solana transactions, or execute real trades.
 
-## Current implementation status
+## Repository status
 
-The repository has working foundations for discovery, verified market evidence, risk screening, historical backfill, persistence and strategy evaluation. It is **not yet trading-ready**: executable quotes and the strict entry rules are not fully connected to the paper execution lifecycle, and historical replay/calibration is still required.
+The current `main` branch contains the discovery and monitoring foundation, verified Pump/PumpSwap account and transaction evidence, strict strategy audit, quote adapters, portfolio simulation primitives, and dashboard/API foundations.
 
-### Implemented
+**Main is not yet paper-trading ready.** The strict evaluator intentionally cannot authorize a BUY while the pullback/reclaim volume thresholds, executable quote economics, and quote-to-position lifecycle are incomplete.
 
-- **Discovery:** PumpPortal launch/migration discovery with bounded, deduplicated candidate storage, expiry and reconnect/backoff handling.
-- **Transaction verification:** candidate-specific Helius monitoring, bounded queues, shared RPC budgeting, verified Pump create/trade event decoding and explicit incomplete-data outcomes.
-- **Historical recovery:** resumable Helius backfill with retry scheduling, session-scoped PostgreSQL checkpoints and archived verified transaction observations.
-- **Market verification:** official Pump/PumpSwap IDL-aligned account decoders, PDA derivation, same-context account snapshots, canonical PumpSwap pool/vault checks and curve-to-migrated-market state transitions.
-- **Risk evidence:** creator-sale screening, sampled wallet-funding links, wallet-cluster signals and scheduled top-holder concentration snapshots. Partial coverage remains UNKNOWN/incomplete, never a clearance.
-- **Strategy evidence:** overlapping rolling trade-flow windows, unique buyer aggregation, price/volume profiles and strict per-rule strategy audit. Pullback/reclaim volume thresholds remain uncalibrated.
-- **Paper accounting foundations:** portfolio sizing policy, durable session journal, PostgreSQL migrations, append-only audit/ledger projection, idempotency and worker lease primitives.
-- **Quote foundations:** official Pump SDK offline curve/PumpSwap quote adapters and normalized executable-paper-quote validation. The converter enforces freshness, size-specific amounts, explicit costs, latency expiry and verified-zero transfer tax; it does not by itself authorize a fill.
-- **Exit foundations:** protective and dynamic exit evaluators, 2/5/10/30-second evidence windows, quote-gated exit component and migration-aware position lifecycle primitives.
-- **Operations:** read-only dashboard/API foundations, diagnostics, deployment blueprints and CI validation.
+### Implemented on main
 
-See [the detailed roadmap](docs/ROADMAP.md), [strategy specification](docs/STRATEGY.md), [migration and exits](docs/MIGRATION_AND_DYNAMIC_EXITS.md), and [operations guide](docs/OPERATIONS.md).
+- PumpPortal launch/migration discovery with bounded candidate storage and reconnect/expiry handling.
+- Candidate-specific Helius monitoring, selective transaction verification, bounded queues/RPC budgeting and verified Pump create/trade decoding.
+- Creator, holder and wallet-cluster risk evidence modules and price/volume/trade-flow profiling.
+- Official Pump SDK offline curve and PumpSwap quote adapters using verified account snapshots.
+- Normalized executable-paper-quote validation, fresh SOL/USD normalization, explicit fee fields, quote TTL and latency-expiry checks.
+- Paper portfolio sizing, idempotent Durable Object session journal and position/exit primitives.
+- PostgreSQL base schema/migration runner, audit-event ingestion and worker-lease primitives.
+- Read-only dashboard/API and Cloudflare/GCP deployment blueprints.
+- Dynamic exit evidence-family evaluator: correlated metrics are grouped, with either two independent families across two windows or one family persisting across three complete windows.
 
-## What is not complete
+Relevant mainline work: [PR #34](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/34), [PR #36](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/36), [PR #39](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/39).
 
-1. **Executable quote integration:** complete non-zero Token-2022 transfer-fee support or explicitly reject unsupported mints; finalize authoritative live network/priority fee estimation, impact/slippage policy and quote economics; wire the official offline quote adapters to the verified same-slot market snapshots and paper execution.
-2. **Entry authorization:** calculate and validate the complete impulse/pullback/reclaim volume profile, including calibrated contraction and expansion thresholds. Until thresholds are established by replay, the strict evaluator must remain WATCH/NOT READY rather than BUY.
-3. **Position execution:** connect strategy decisions, fresh buy/sell quotes, deterministic simulated fills, the PostgreSQL position/trade ledger, and the dynamic exit scheduler. Enforce one entry per mint and release a slot only after a valid exit and confirmed zero token balance.
-4. **Migration operations:** finish the end-to-end worker path that detects graduation, verifies the canonical PumpSwap market, refreshes full-position sell quotes and resumes exit monitoring without treating migration as a sell signal.
-5. **Historical replay and calibration:** replay collected coins using the actual strategy rules and full fee/latency assumptions; report winners, losers, missed entries, false exits and rule-level reasons; calibrate on training data and validate on separate data.
-6. **Runtime acceptance:** test Cloudflare Durable Object eviction/restart, PostgreSQL outages/recovery, worker lease fencing, queue recovery and provider gaps. Verify the deployed PumpPortal handshake and perform a bounded paper-forward soak.
-7. **Dashboard completion:** expose the durable decision funnel, evidence coverage, quotes, positions, costs, PnL, exit blockers and provider health from persisted records.
+### Integration work not yet promoted to main
 
-No strategy threshold should be loosened merely to increase trade count. Missing, stale or contradictory critical evidence must fail closed.
+A separate integration chain contains additional work that was merged into feature branches, **not into main**:
+
+- [PR #19](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/19): PostgreSQL paper-ledger projections and idempotent event projection.
+- [PR #22](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/22): resumable Helius backfill queue.
+- [PR #24](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/24): bounded Helius retry reconciliation and quote-gated dynamic-exit component.
+- [PR #28](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/28): PostgreSQL Helius backfill archive/checkpoints.
+- [PR #31](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/31): scheduled holder and wallet-link evidence collection.
+- [PR #33](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/33): one-second sampled overlapping trade-flow windows.
+- [PR #37](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/37) was closed because its stale feature-branch base created a large, conflicting diff against main. Its historical replay implementation still needs to be rebased and validated against current main.
+
+These changes must not be described as deployed or merged into main until an integration PR is successfully rebased, CI-validated and merged.
+
+## What remains
+
+1. **Promote and validate the integration chain:** reconcile the PostgreSQL ledger, resumable backfill, Helius archive, retry and wallet/holder evidence changes with current main without overwriting newer mainline monitoring/quote work.
+2. **Historical replay:** port the replay module and decode-coverage migration onto current main; replay the actual strict strategy chronologically using verified observations.
+3. **Calibrate volume rules:** use chronological training/holdout sets to evaluate pullback contraction and reclaim expansion; do not invent thresholds or promote a weak holdout result.
+4. **Complete quote economics:** add supported Token-2022 transfer-fee handling or fail-closed rejection, authoritative network/priority fee estimates, and validated impact/slippage policy.
+5. **Connect paper execution:** wire fresh exact-size buy/sell quotes, strategy authorization, deterministic fills, persisted positions/trades and the dynamic exit scheduler.
+6. **Complete migration lifecycle:** verify graduation and canonical PumpSwap market state, monitor full-position sellability and keep positions open when quotes are unavailable.
+7. **Runtime acceptance:** test Durable Object eviction/restart, PostgreSQL outage/recovery, queue recovery, worker lease fencing, provider gaps and a bounded paper-forward soak.
+8. **Dashboard completion:** expose persisted decisions, evidence coverage, quotes, open/closed positions, costs, PnL and exit blockers.
 
 ## Paper portfolio policy
 
@@ -42,12 +56,12 @@ No strategy threshold should be loosened merely to increase trade count. Missing
 - Increase stake by 50% at each doubling, capped at **$100**.
 - Never reuse a slot until the prior position has a valid simulated exit and zero token balance confirmation.
 - Never buy the same mint more than once.
-- Do not exceed available simulated equity after accounting for committed principal and costs.
+- Do not exceed available simulated equity after committed principal and costs.
 - No maximum holding duration; migration is a market transition, not an automatic exit.
 
 ## Safety invariants
 
-1. Paper mode is enforced. No wallet signer or transaction submission is part of the system.
+1. Paper mode only. No wallet signer or transaction submission.
 2. Only verified, non-migrated Pump.fun bonding-curve tokens may be entered.
 3. A held token may migrate; keep the position open until its migrated market is verified and the exit policy produces a valid quote.
 4. Missing risk evidence, incomplete backfill, stale market data, unknown costs, unsupported token extensions or failed sellability checks block entry.
@@ -60,10 +74,8 @@ No strategy threshold should be loosened merely to increase trade count. Missing
 ## Deployment layout
 
 - **Cloudflare Worker / Durable Object:** bounded discovery, candidate monitoring and resumable coordination primitives.
-- **Google Cloud:** persistent Node.js worker, PostgreSQL ledger, Secret Manager, logging/monitoring and archive/checkpoint blueprint. Cloud resources have not been provisioned by repository changes alone.
-- **Vercel:** protected operator dashboard and read-only API surface; not the always-on market listener.
-
-Deployment documentation: [infra/gcp/DEPLOYMENT.md](infra/gcp/DEPLOYMENT.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+- **Google Cloud:** persistent Node.js worker, PostgreSQL ledger, Secret Manager, logging/monitoring and archive/checkpoint blueprint. Resources are not provisioned by repository changes alone.
+- **Vercel:** protected operator dashboard and read-only API; not the always-on market listener.
 
 ## Development
 
@@ -83,7 +95,7 @@ npm run build
 
 ## Readiness
 
-The service must remain not-ready for paper execution until the verified quote path, strict entry evidence, risk gates, durable ledger and position/exit lifecycle are connected and tested. A successful CI run or multi-hour soak validates integration and operations, **not profitability**.
+The service must remain not-ready for paper execution until the verified quote path, strict entry evidence, risk gates, durable ledger and position/exit lifecycle are connected and tested. CI and a multi-hour soak validate integration and operations, **not profitability**.
 
 ## Disclaimer
 
