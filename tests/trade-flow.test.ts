@@ -62,6 +62,18 @@ describe("verified Pump.fun trade-flow windows", () => {
     expect(flow?.flowConfirmationPass).toBe(false);
   });
 
+  it("does not treat old but consecutive windows as current flow confirmation", () => {
+    const events = [
+      trade(100n, trader(1), true, 10n), trade(100n, trader(2), true, 10n), trade(100n, trader(3), true, 10n),
+      trade(102n, trader(2), true, 10n), trade(102n, trader(3), true, 10n), trade(102n, trader(4), true, 10n),
+      trade(104n, trader(3), true, 10n), trade(104n, trader(4), true, 10n), trade(104n, trader(5), true, 10n)
+    ];
+    const [flow] = buildCandidateTradeFlows([tx(events)], { nowSeconds: 110, horizonSeconds: 60 });
+    expect(flow?.latestThreeWindowFlowPass).toBe(true);
+    expect(flow?.dataComplete).toBe(false);
+    expect(flow?.flowConfirmationPass).toBe(false);
+  });
+
   it("marks a candidate incomplete when its Helius stream has known data gaps", () => {
     const events = [
       trade(100n, trader(1), true, 10n), trade(100n, trader(2), true, 10n), trade(100n, trader(3), true, 10n)
