@@ -78,6 +78,7 @@ describe("historical strategy replay", () => {
     expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 20 })).toBe(true);
     expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 19 })).toBe(true);
     expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 21 })).toBe(false);
+    expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: -1 })).toBe(false);
   });
 
   it("requires a completed, timestamped full-size exit with a net return", () => {
@@ -95,6 +96,11 @@ describe("historical strategy replay", () => {
     expect(hasCompleteHistoricalExitEvidence({
       entryAt: 20, replayEndAt: 100, simulatedExitAt: 101,
       exitLifecycleCompleteAt: 102, simulatedExitPriceQuotePerToken: 1.4,
+      simulatedNetFinalReturnPct: 12
+    })).toBe(false);
+    expect(hasCompleteHistoricalExitEvidence({
+      entryAt: 20, replayEndAt: 100, simulatedExitAt: -1,
+      exitLifecycleCompleteAt: 0, simulatedExitPriceQuotePerToken: 1.4,
       simulatedNetFinalReturnPct: 12
     })).toBe(false);
   });
