@@ -42,7 +42,7 @@ const BPS = new BN(10_000);
 const MAX_U64 = 18_446_744_073_709_551_615n;
 
 function isU64BaseUnits(value: string): boolean {
-  return /^\\d+$/.test(value) && value.length <= 20 && BigInt(value) <= MAX_U64;
+  return /^\d+$/.test(value) && value.length <= 20 && BigInt(value) <= MAX_U64;
 }
 
 export interface PumpSdkSwapQuote {
