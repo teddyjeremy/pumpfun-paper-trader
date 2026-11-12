@@ -106,7 +106,10 @@ function eventPrice(event: PumpTradeEvent): number | null {
 
 function sortedTrades(input: HistoricalReplayCoinInput): PumpTradeEvent[] {
   return input.transactions.flatMap(transaction => transaction.tradeEvents)
-    .filter(event => event.mint === input.mint && Number.isFinite(eventTimestamp(event)))
+    // The historical price path is denominated in SOL. Non-SOL quote events
+    // must not be mixed into entry or forward-return prices.
+    .filter(event => event.mint === input.mint && isSolQuoteMint(event.quoteMint) &&
+      Number.isFinite(eventTimestamp(event)))
     .sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
 }
 
