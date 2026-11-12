@@ -25,7 +25,7 @@
 - [x] Fetch and validate fresh SOL/USDT last-trade reference data for USD-notional spam filtering; reject stale, malformed or unavailable observations (not an execution price)
 - [x] Direct creator-sale screening, bounded wallet-funding linkage inspection, and observed individual/linked-cluster hard rejects
 - [ ] Complete wallet attribution and full holder census; current funding inspection is sampled and top-20 holder evidence is partial
-- [ ] Verified Pump/PumpSwap executable quote adapter using official SDK quote math, dynamic protocol/creator fees, network/priority costs, impact and slippage accounting
+- [ ] Verified Pump/PumpSwap executable quote adapter using official SDK quote math, dynamic protocol/creator fees, network/priority costs, impact and slippage accounting (offline curve/AMM quotes and a USD cost/latency normalizer are implemented; non-zero transfer-fee support, production fee estimation and Worker wiring remain)
 - [x] Durable session journal core (append-only pages, idempotency, atomic session lifecycle, restart markers, pagination and JSON export)
 - [x] Durable Object journal storage-contract tests for concurrent appends, monotonic paging, idempotency, rollback and restart markers; real Cloudflare runtime acceptance tests and six-hour soak remain outstanding
 - [ ] PostgreSQL event/trade ledger writes, idempotent execution transitions and worker lease integration (ordered migrations and an explicit manual migration runner are implemented)
@@ -42,3 +42,12 @@ No implementation stage may bypass paper-only, strict-entry, fail-closed, no-fab
 - Added the official `@pump-fun/pump-sdk@4.3.1` dependency. The published package now includes the PumpSwap SDK at `@pump-fun/pump-sdk/swap`; do not add a duplicate standalone AMM SDK.
 - Dependency installation, typecheck, tests/build and Worker bundle validation passed after adding the official package (CI run 43185228566). A direct Vitest runtime import smoke test exposed Anchor CommonJS/ESM interop incompatibility and was removed. The Worker now imports both SDK entry points and reports module availability; its bundle compatibility check is pending CI.
 - Quote adapter implementation remains blocked on a safe integration contract: quotes must use one coherent, fresh market snapshot; the SDK's online RPC convenience methods can perform separate reads, so they must not be allowed to silently bypass the Helius same-slot verification. Also, an aggregate SDK fee total cannot be split into the ledger's protocol/creator/pool/transfer/network categories without authoritative fee evidence. Do not create an executable paper quote until those requirements are met.
+
+
+### Executable quote normalization (partial)
+- Added a normalized paper quote converter for official Pump curve and PumpSwap offline SDK results.
+- Converts exact SOL/WSOL base-unit amounts and SDK fee components using a fresh SOL/USD reference.
+- Preserves PumpSwap LP/protocol/creator fees separately and retains the curve SDK's aggregate venue fee without fabricating a split.
+- Requires explicit verified-zero transfer-tax evidence, fresh quote/price references, bounded quote TTL, explicit network/priority/provider costs and a simulated fill time before quote expiry.
+- Tests cover gross/net fee reconciliation, fee-category mapping, stale references, transfer-tax fail-closed behavior and simulated-latency expiry.
+- Still incomplete: non-zero Token-2022 transfer-fee calculation, live fee estimation, route/price impact slippage policy calibration, quote-to-Worker integration and end-to-end paper fills. The converter alone does not authorize entries.
