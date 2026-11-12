@@ -163,7 +163,8 @@ export function buildCandidateTradeFlows(
       entryEligible: false
     });
   }
-  return output.sort((a, b) => a.mint.localeCompare(b.mint) || a.quoteMint.localeCompare(b.quoteMint));
+  return output.sort((a, b) => a.mint.localeCompare(b.mint) ||
+    (a.quoteMint ?? "").localeCompare(b.quoteMint ?? ""));
 }
 
 function summarizeWindow(startTime: number, events: readonly PumpTradeEvent[]) {
