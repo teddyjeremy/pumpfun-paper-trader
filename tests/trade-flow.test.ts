@@ -158,7 +158,7 @@ describe("verified Pump.fun trade-flow windows", () => {
       trade(104n, trader(5), true, 10n), trade(104n, trader(6), true, 10n)
     ];
     const [flow] = buildCandidateTradeFlows([tx(events)], {
-      nowSeconds: 106, horizonSeconds: 60, coverageStartByMint: { [mint]: 101 }
+      nowSeconds: 106, horizonSeconds: 60, solUsdPriceUsd: 100, minimumTradeUsd: 0, coverageStartByMint: { [mint]: 101 }
     });
     expect(flow?.dataComplete).toBe(true);
     expect(flow?.flowConfirmationPass).toBe(true);
