@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS helius_transaction_observations (
   slot BIGINT NOT NULL CHECK (slot >= 0),
   provider TEXT NOT NULL CHECK (provider = 'helius'),
   commitment TEXT NOT NULL CHECK (commitment IN ('confirmed','finalized')),
+  observation_source TEXT NOT NULL CHECK (observation_source IN ('HISTORICAL_BACKFILL','LIVE_MONITOR')),
   received_at TIMESTAMPTZ NOT NULL,
   create_events JSONB NOT NULL DEFAULT '[]'::jsonb,
   trade_events JSONB NOT NULL DEFAULT '[]'::jsonb,
