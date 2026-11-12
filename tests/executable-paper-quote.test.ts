@@ -47,7 +47,11 @@ function swapBuyQuote(): PumpSdkSwapQuote {
     },
     unspentQuoteBaseUnits: "0", priceImpactPct: 0.7,
     baseDecimals: 6, quoteDecimals: 9,
-    transferTaxVerifiedZero: true, executionReady: false,
+    grossTokenAmountBaseUnits: side === "BUY" ? "1000000000" : "1000000",
+    netTokenAmountBaseUnits: side === "BUY" ? "1000000000" : "1000000",
+    transferFeeBaseUnits: "0", transferFeeMint: "So11111111111111111111111111111111111111112",
+    transferFeeEpoch: null, transferFeeBasisPoints: 0, transferFeeMaximumBaseUnits: "0",
+    transferFeeVerified: true, transferTaxVerifiedZero: true, executionReady: false,
     blockers: ["network fee and priority fee estimates are not attached"]
   };
 }
@@ -98,6 +102,43 @@ describe("executable paper quote adapter", () => {
     })).toThrow(/SOL\/USD reference is stale/);
   });
 
+  it("reports transfer-fee token loss without deducting it twice from cash costs", () => {
+    const raw = curveQuote("BUY");
+    const quote = buildExecutablePaperQuote({
+      quote: {
+        ...raw,
+        outputAmountBaseUnits: "990000000",
+        grossTokenAmountBaseUnits: "1000000000",
+        netTokenAmountBaseUnits: "990000000",
+        transferFeeBaseUnits: "10000000",
+        transferFeeMint: raw.mint,
+        transferFeeEpoch: 12,
+        transferFeeBasisPoints: 100,
+        transferFeeMaximumBaseUnits: "10000000",
+        transferFeeVerified: true,
+        transferTaxVerifiedZero: false
+      },
+      solUsd, costs, nowMs: now
+    });
+    expect(quote.taxPct).toBeCloseTo(1, 8);
+    expect(quote.transferFeeUsd).toBeCloseTo(0.001, 8);
+    expect(quote.feeBreakdownUsd.transfer).toBe(0);
+  });
+
+  it("rejects inconsistent transfer-fee evidence", () => {
+    expect(() => buildExecutablePaperQuote({
+      quote: {
+        ...curveQuote(),
+        transferFeeVerified: true,
+        grossTokenAmountBaseUnits: "100",
+        netTokenAmountBaseUnits: "80",
+        transferFeeBaseUnits: "10",
+        transferFeeMint: "different-mint"
+      },
+      solUsd, costs, nowMs: now
+    })).toThrow(/does not reconcile/);
+  });
+
   it("rejects fills whose simulated latency exceeds the quote validity window", () => {
     expect(() => buildExecutablePaperQuote({
       quote: { ...curveQuote(), observedAt: new Date(now - 700).toISOString() }, solUsd,
@@ -108,9 +149,9 @@ describe("executable paper quote adapter", () => {
 
   it("rejects unsupported transfer-tax evidence and invalid fee estimates", () => {
     expect(() => buildExecutablePaperQuote({
-      quote: { ...curveQuote(), transferTaxVerifiedZero: false } as PumpSdkCurveQuote,
+      quote: { ...curveQuote(), transferFeeVerified: false } as PumpSdkCurveQuote,
       solUsd, costs, nowMs: now
-    })).toThrow(/Transfer tax is not verified/);
+    })).toThrow(/Token transfer fee is not verified/);
     expect(() => buildExecutablePaperQuote({
       quote: curveQuote(), solUsd,
       costs: { ...costs, networkFeeLamports: "-1" },
