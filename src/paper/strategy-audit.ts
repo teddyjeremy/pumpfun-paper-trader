@@ -130,9 +130,10 @@ export function calculateReclaimConfirmation(input: {
   const nextObservation = input.nextObservationPrices
     .filter(observation => Number.isFinite(observation.timestampSeconds) &&
       observation.timestampSeconds > input.reclaimTimeSeconds! &&
-      observation.timestampSeconds <= input.nowSeconds &&
-      Number.isFinite(observation.price) && observation.price > 0)
+      observation.timestampSeconds <= input.nowSeconds)
     .sort((a, b) => a.timestampSeconds - b.timestampSeconds)[0];
-  const nextObservationConfirmed = nextObservation !== undefined && nextObservation.price >= threshold;
+  const nextObservationConfirmed = nextObservation !== undefined &&
+    Number.isFinite(nextObservation.price) && nextObservation.price > 0 &&
+    nextObservation.price >= threshold;
   return { signalAgeSeconds, nextObservationConfirmed };
 }
