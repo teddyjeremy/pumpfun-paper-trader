@@ -58,4 +58,15 @@ describe("strict strategy audit timing", () => {
     });
     expect(result).toEqual({ signalAgeSeconds: 2, nextObservationConfirmed: true });
   });
+  it("does not skip an invalid immediate observation to accept a later recovery", () => {
+    const result = calculateReclaimConfirmation({
+      reclaimTimeSeconds: 10, previousCompletedHigh: 100, nowSeconds: 12,
+      nextObservationPrices: [
+        { timestampSeconds: 11.5, price: 102 },
+        { timestampSeconds: 11, price: Number.NaN }
+      ]
+    });
+    expect(result.nextObservationConfirmed).toBe(false);
+  });
+
 });
