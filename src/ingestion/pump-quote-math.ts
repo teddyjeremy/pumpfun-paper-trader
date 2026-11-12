@@ -92,14 +92,24 @@ function quoteAfterFees(grossInput: bigint, fees: PumpTradeFeeBps): {
   return { net, charged };
 }
 
-function impactPct(executionPrice: number, spotPrice: number, side: "BUY" | "SELL"): number {
-  if (!Number.isFinite(executionPrice) || !Number.isFinite(spotPrice) ||
-      executionPrice <= 0 || spotPrice <= 0) {
+function impactPct(
+  executionNumerator: bigint,
+  executionDenominator: bigint,
+  spotNumerator: bigint,
+  spotDenominator: bigint,
+  side: "BUY" | "SELL"
+): number {
+  if (executionNumerator <= 0n || executionDenominator <= 0n ||
+      spotNumerator <= 0n || spotDenominator <= 0n) {
     throw new Error("Quote price cannot be represented safely.");
   }
-  const impact = side === "BUY"
-    ? (executionPrice / spotPrice - 1) * 100
-    : (1 - executionPrice / spotPrice) * 100;
+  // Keep the ratio in integer space so large base-unit reserves never pass
+  // through an imprecise Number(BigInt) conversion.
+  const scale = 1_000_000_000_000n;
+  const ratioScaled = executionNumerator * spotDenominator * scale /
+    (executionDenominator * spotNumerator);
+  const ratio = Number(ratioScaled) / Number(scale);
+  const impact = side === "BUY" ? (ratio - 1) * 100 : (1 - ratio) * 100;
   if (!Number.isFinite(impact)) throw new Error("Quote impact is invalid.");
   return Math.max(0, impact);
 }
@@ -153,11 +163,10 @@ export function quotePumpCurveBuy(input: {
   if (tokenOut <= 0n || tokenOut > realToken) {
     throw new Error("Bonding curve buy exceeds available real token reserves.");
   }
-  const spot = Number(virtualQuote) / Number(virtualToken);
-  const execution = Number(afterFees.net) / Number(tokenOut);
   return result({
     grossQuoteIn: budget, netQuoteIn: afterFees.net, tokenOut,
-    fees: afterFees.charged, impact: impactPct(execution, spot, "BUY")
+    fees: afterFees.charged,
+    impact: impactPct(afterFees.net, tokenOut, virtualQuote, virtualToken, "BUY")
   });
 }
 
@@ -178,11 +187,9 @@ export function quotePumpCurveSell(input: {
   const fees = feeAmounts(grossQuoteOut, { ...input.state.fees, lp: 0 });
   const netQuoteOut = grossQuoteOut - fees.total;
   if (netQuoteOut <= 0n) throw new Error("Bonding curve sell proceeds are consumed by fees.");
-  const spot = Number(virtualQuote) / Number(virtualToken);
-  const execution = Number(grossQuoteOut) / Number(tokenIn);
   return result({
     tokenIn, grossQuoteOut, netQuoteOut, fees,
-    impact: impactPct(execution, spot, "SELL")
+    impact: impactPct(grossQuoteOut, tokenIn, virtualQuote, virtualToken, "SELL")
   });
 }
 
@@ -202,11 +209,10 @@ export function quotePumpSwapBuy(input: {
   const afterFees = quoteAfterFees(budget, input.state.fees);
   const tokenOut = base * afterFees.net / (effectiveQuote + afterFees.net);
   if (tokenOut <= 0n || tokenOut >= base) throw new Error("PumpSwap buy output is outside pool reserves.");
-  const spot = Number(effectiveQuote) / Number(base);
-  const execution = Number(afterFees.net) / Number(tokenOut);
   return result({
     grossQuoteIn: budget, netQuoteIn: afterFees.net, tokenOut,
-    fees: afterFees.charged, impact: impactPct(execution, spot, "BUY")
+    fees: afterFees.charged,
+    impact: impactPct(afterFees.net, tokenOut, effectiveQuote, base, "BUY")
   });
 }
 
@@ -235,10 +241,8 @@ export function quotePumpSwapSell(input: {
   const fees = feeAmounts(grossQuoteOut, input.state.fees);
   const netQuoteOut = grossQuoteOut - fees.total;
   if (netQuoteOut <= 0n) throw new Error("PumpSwap sell proceeds are consumed by fees.");
-  const spot = Number(effectiveQuote) / Number(base);
-  const execution = Number(grossQuoteOut) / Number(tokenIn);
   return result({
     tokenIn, grossQuoteOut, netQuoteOut, fees,
-    impact: impactPct(execution, spot, "SELL")
+    impact: impactPct(grossQuoteOut, tokenIn, effectiveQuote, base, "SELL")
   });
 }
