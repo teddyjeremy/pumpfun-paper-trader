@@ -4,6 +4,7 @@ import { decodePumpSwapPoolAccount, PUMP_AMM_PROGRAM_ID, type DecodedPumpSwapPoo
 export interface HeliusAccountReadConfig extends HeliusRpcConfig {
   now?: () => number;
   maxAccountBytes?: number;
+  maxPoolCandidates?: number;
 }
 
 export interface HeliusAccountSnapshot {
@@ -144,7 +145,10 @@ export async function discoverPumpSwapPoolsForMint(
   const result = asRecord(envelope.result);
   const slot = parseContextSlot(result.context);
   if (!Array.isArray(result.value)) throw new Error("Helius pool discovery omitted account results.");
-  const maximumResults = config.maxAccountBytes === 0 ? 0 : 50;
+  const maximumResults = config.maxPoolCandidates ?? 25;
+  if (!Number.isSafeInteger(maximumResults) || maximumResults < 1 || maximumResults > 50) {
+    throw new Error("PumpSwap discovery candidate limit must be between 1 and 50.");
+  }
   if (result.value.length > maximumResults) {
     throw new Error("PumpSwap pool discovery exceeded the bounded candidate result limit.");
   }
