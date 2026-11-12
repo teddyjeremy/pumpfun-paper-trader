@@ -94,8 +94,8 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
   }
   if (!validPositive(quote.requestedUsd) || !validPositive(quote.outputUsd) ||
       !Number.isInteger(quote.tokenDecimals) || quote.tokenDecimals < 0 || quote.tokenDecimals > 18 ||
-      !/^\\d+$/.test(quote.inputAmountBaseUnits) ||
-      !/^\\d+$/.test(quote.outputAmountBaseUnits) || BigInt(quote.inputAmountBaseUnits) <= 0n ||
+      !/^\d+$/.test(quote.inputAmountBaseUnits) ||
+      !/^\d+$/.test(quote.outputAmountBaseUnits) || BigInt(quote.inputAmountBaseUnits) <= 0n ||
       BigInt(quote.outputAmountBaseUnits) <= 0n || !Number.isFinite(quote.priceImpactPct) ||
       !Number.isFinite(quote.taxPct) || quote.priceImpactPct < 0 || quote.taxPct < 0 ||
       !Number.isFinite(quote.networkFeeUsd) || quote.networkFeeUsd < 0 ||
