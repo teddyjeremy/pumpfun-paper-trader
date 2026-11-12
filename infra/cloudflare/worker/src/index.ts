@@ -804,16 +804,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const [status, portfolio, bankroll] = await Promise.all([
       this.getStatus(), this.getPaperPortfolio(), this.getPaperBankroll()
     ]);
+    const sessionId = this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
+    const meta = sessionId ? await this.ctx.storage.get<AuditSessionMeta>(`audit_session:${sessionId}`) : undefined;
+    const auditPage = meta && sessionId
+      ? await this.listAuditEvents(Math.max(0, meta.eventCount - 100), 100, sessionId) as { events?: StoredAuditEvent[] }
+      : { events: [] as StoredAuditEvent[] };
+    const recentActivity = (auditPage.events ?? [])
+      .filter(event => ["STRATEGY_DECISION", "PAPER_ENTRY", "PAPER_EXIT", "REJECTION_REASON", "QUOTE_RESULT"].includes(event.kind))
+      .slice(-50).reverse().map(event => ({ ...event, data: jsonSafe(event.data) }));
     return {
       generatedAt: new Date().toISOString(),
       status,
-      sessionId: this.activeSessionId,
+      sessionId,
       portfolio,
       bankroll,
       candidates: this.discovery.candidates.slice(-30).reverse().map(candidate => ({
         mint: candidate.mint, status: candidate.status, firstSeenAt: candidate.firstSeenAt,
-        lastSeenAt: candidate.lastSeenAt
-      }))
+        lastSeenAt: candidate.lastSeenAt, observations: candidate.observations
+      })),
+      recentActivity
     };
   }
 
