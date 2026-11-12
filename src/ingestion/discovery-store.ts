@@ -24,6 +24,7 @@ export interface DiscoveryStoreState {
   overflow: number;
   overflowMints: string[];
   incomplete: number;
+  expired: number;
   lastPersistedAt: string | null;
 }
 
@@ -40,6 +41,7 @@ export function emptyDiscoveryStore(): DiscoveryStoreState {
     overflow: 0,
     overflowMints: [],
     incomplete: 0,
+    expired: 0,
     lastPersistedAt: null
   };
 }
@@ -131,5 +133,29 @@ export function applyDiscoveryEvent(
       migrations: current.migrations + (event.kind === "migration" ? 1 : 0)
     },
     outcome: "ADDED"
+  };
+}
+
+
+/** Remove stale candidates during idle periods as well as when new events arrive. */
+export function pruneExpiredCandidates(
+  current: DiscoveryStoreState,
+  now: string,
+  ttlMs = DEFAULT_DISCOVERY_TTL_MS
+): DiscoveryStoreState {
+  const nowMs = validTimestamp(now);
+  if (nowMs === null) {
+    return { ...current, incomplete: current.incomplete + 1 };
+  }
+  const candidates = current.candidates.filter((candidate) => {
+    const seen = validTimestamp(candidate.lastSeenAt);
+    return seen !== null && nowMs - seen <= ttlMs;
+  });
+  const removed = current.candidates.length - candidates.length;
+  if (removed <= 0) return current;
+  return {
+    ...current,
+    candidates,
+    expired: (current.expired ?? 0) + removed
   };
 }
