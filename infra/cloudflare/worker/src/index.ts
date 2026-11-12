@@ -30,7 +30,7 @@ import {
   type CandidateMonitoringEvidence
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
-import { buildCandidateTradeFlows } from "../../../../src/ingestion/trade-flow.js";
+import { buildCandidateTradeFlows, SOL_QUOTE_MINT } from "../../../../src/ingestion/trade-flow.js";
 import { fetchHolderConcentration } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
@@ -455,6 +455,37 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const ids = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
     const sessions = await Promise.all(ids.map(id => this.ctx.storage.get<AuditSessionMeta>(`audit_session:${id}`)));
     return sessions.filter((item): item is AuditSessionMeta => item !== undefined);
+  }
+
+  private async recordCandidateTradePrice(
+    trade: { mint: string; quoteMint: string; quoteAmount: string; tokenAmount: string; timestamp: string; signature: string; isBuy: boolean },
+    tradeIndex: number
+  ): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId) return;
+    const processedKey = `processed_trade:${trade.signature}:${tradeIndex}`;
+    await this.ctx.storage.transaction(async txn => {
+      if (await txn.get<boolean>(processedKey)) return;
+      const trackerKey = `candidate_price:${trade.mint}:${trade.quoteMint}`;
+      const previous = await txn.get<CandidatePriceTracker>(trackerKey) ?? null;
+      const tracker = updateCandidatePriceTracker(previous, trade);
+      const metaKey = `audit_session:${sessionId}`;
+      const meta = await txn.get<AuditSessionMeta>(metaKey);
+      if (!meta) throw new Error("Audit session metadata missing.");
+      const sequence = meta.eventCount + 1;
+      const pageNumber = Math.floor((sequence - 1) / AUDIT_PAGE_SIZE);
+      const pageKey = `audit_events:${sessionId}:${String(pageNumber).padStart(8, "0")}`;
+      const page = await txn.get<StoredAuditEvent[]>(pageKey) ?? [];
+      const eventId = `candidate-price:${trade.signature}:${tradeIndex}`;
+      page.push({ sessionId, sequence, eventId, kind: "CANDIDATE_OUTCOME",
+        occurredAt: trade.timestamp, mint: trade.mint,
+        strategyVersion: meta.strategyVersion, data: jsonSafe(tracker) });
+      await txn.put(pageKey, page);
+      await txn.put(`audit_event_id:${sessionId}:${eventId}`, sequence);
+      await txn.put(metaKey, { ...meta, eventCount: sequence });
+      await txn.put(trackerKey, tracker);
+      await txn.put(processedKey, true);
+    });
   }
 
   async listCandidateOutcomes(): Promise<unknown> {
@@ -1031,23 +1062,20 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           }, `helius:${work.signature}`);
           for (let tradeIndex = 0; tradeIndex < result.transaction.tradeEvents.length; tradeIndex += 1) {
             const trade = result.transaction.tradeEvents[tradeIndex]!;
-            const quoteAmount = trade.quoteAmount > 0n ? trade.quoteAmount : trade.solAmount;
+            const quoteAmount = trade.quoteMint === SOL_QUOTE_MINT
+              ? (trade.quoteAmount > 0n ? trade.quoteAmount : trade.solAmount)
+              : trade.quoteAmount;
             if (quoteAmount <= 0n || trade.tokenAmount <= 0n) {
               await this.appendAudit("DATA_GAP", work.mint, {
                 signature: work.signature, tradeIndex, reason: "TRADE_PRICE_UNAVAILABLE"
               }, `trade-price-missing:${work.signature}:${tradeIndex}`);
               continue;
             }
-            const trackerKey = `candidate_price:${trade.mint}:${trade.quoteMint}`;
-            const previous = await this.ctx.storage.get<CandidatePriceTracker>(trackerKey) ?? null;
-            const tracker = updateCandidatePriceTracker(previous, {
+            await this.recordCandidateTradePrice({
               mint: trade.mint, quoteMint: trade.quoteMint, quoteAmount: quoteAmount.toString(),
               tokenAmount: trade.tokenAmount.toString(), timestamp: new Date(Number(trade.timestamp) * 1000).toISOString(),
               signature: work.signature, isBuy: trade.isBuy
-            });
-            await this.ctx.storage.put(trackerKey, tracker);
-            await this.appendAudit("CANDIDATE_OUTCOME", trade.mint, tracker,
-              `candidate-price:${work.signature}:${tradeIndex}`);
+            }, tradeIndex);
           }
           this.status.verifiedTransactions += 1;
           // Re-rank the six evidence-follow-up slots as verified events arrive.
