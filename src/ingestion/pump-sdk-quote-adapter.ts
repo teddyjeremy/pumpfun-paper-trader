@@ -174,7 +174,9 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedSwapContext 
   const quoteMintAccount = unpackMint(quoteMint, accountInfo(quoteMintRaw), new PublicKey(quoteMintRaw.owner));
   const baseMintAccount: RawMint = {
     ...unpackedBaseMint,
+    mintAuthority: unpackedBaseMint.mintAuthority ?? PublicKey.default,
     mintAuthorityOption: unpackedBaseMint.mintAuthority ? 1 : 0,
+    freezeAuthority: unpackedBaseMint.freezeAuthority ?? PublicKey.default,
     freezeAuthorityOption: unpackedBaseMint.freezeAuthority ? 1 : 0
   };
   if (getTransferFeeConfig(unpackedBaseMint) || getTransferFeeConfig(quoteMintAccount)) {
