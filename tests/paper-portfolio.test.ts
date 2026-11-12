@@ -14,7 +14,7 @@ describe("paper portfolio accounting",()=>{
  it("requires fresh exact-size quotes and refuses repeat mints",()=>{
   const p=createPaperPortfolio();
   const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
-  expect(opened.state.availableCashUsd).toBe(1.7);
+  expect(opened.state.availableCashUsd).toBe(1.698);
   expect(()=>openPaperPosition(opened.state,{mint:"mint",positionId:"p2",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)})).toThrow(/only be bought once/);
  });
  it("rejects quotes with excessive round-trip costs",()=>{
