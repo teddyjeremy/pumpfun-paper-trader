@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ComputeBudgetProgram, Keypair, SystemProgram, TransactionMessage } from "@solana/web3.js";
-import { estimateSolanaTransactionFees } from "../src/ingestion/solana-fee-estimator.js";
+import { compileUnsignedFeeMessage, estimateSolanaTransactionFees } from "../src/ingestion/solana-fee-estimator.js";
 
 const account = "11111111111111111111111111111111";
 const now = Date.parse("2026-11-12T12:00:00.000Z");
@@ -199,5 +199,52 @@ describe("Solana transaction fee estimator", () => {
       fetcher: feeFetcher({ baseFee: null })
     });
     expect(result.status).toBe("UNAVAILABLE");
+  });
+});
+
+
+describe("unsigned transaction fee-message compiler", () => {
+  it("compiles the supplied venue instructions with one explicit CU limit and derives writable locks", async () => {
+    const result = await compileUnsignedFeeMessage({
+      payer: payer.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [SystemProgram.transfer({
+        fromPubkey: payer.publicKey, toPubkey: recipient, lamports: 1
+      })],
+      computeUnitLimit: 240_000
+    });
+    expect(result.computeUnitLimit).toBe(240_000);
+    expect(result.messageBase64.length).toBeGreaterThan(0);
+    expect(result.messageSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.writableAccountKeys).toContain(payer.publicKey.toBase58());
+    expect(result.writableAccountKeys).toContain(recipient.toBase58());
+    const decoded = Message.from(Buffer.from(result.messageBase64, "base64"));
+    expect(decoded.instructions).toHaveLength(2);
+    expect(decoded.instructions[0]?.data[0]).toBe(2);
+    expect(decoded.instructions[0]?.data.readUInt32LE(1)).toBe(240_000);
+  });
+
+  it("rejects caller-provided compute-budget instructions to prevent fee-setting ambiguity", async () => {
+    await expect(compileUnsignedFeeMessage({
+      payer: payer.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1 }),
+        SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: recipient, lamports: 1 })
+      ],
+      computeUnitLimit: 240_000
+    })).rejects.toThrow(/must not contain Compute Budget/);
+  });
+
+  it("rejects empty instruction sets and invalid compute limits", async () => {
+    await expect(compileUnsignedFeeMessage({
+      payer: payer.publicKey, recentBlockhash: blockhash,
+      instructions: [], computeUnitLimit: 240_000
+    })).rejects.toThrow(/non-empty/);
+    await expect(compileUnsignedFeeMessage({
+      payer: payer.publicKey, recentBlockhash: blockhash,
+      instructions: [SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: recipient, lamports: 1 })],
+      computeUnitLimit: 0
+    })).rejects.toThrow(/compute-unit limit/);
   });
 });
