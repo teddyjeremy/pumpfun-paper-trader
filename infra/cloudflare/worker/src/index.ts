@@ -39,7 +39,7 @@ import {
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
 import { buildCandidateTradeFlows, isSolQuoteMint, SOL_QUOTE_MINT } from "../../../../src/ingestion/trade-flow.js";
-import { fetchHolderConcentration } from "../../../../src/ingestion/holder-risk.js";
+import { fetchHolderConcentration, type HolderConcentrationResult } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
 import { officialPumpSdkModulesAvailable } from "../../../../src/ingestion/pump-sdk-runtime.js";
@@ -157,6 +157,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private verifiedTransactions: VerifiedPumpTransaction[] = [];
   private walletLinkSnapshots: Record<string, WalletFundingEvidenceResult> = {};
   private walletHoldingsByMint: Record<string, WalletHoldingEvidence[]> = {};
+  private holderRiskSnapshots: Record<string, HolderConcentrationResult> = {};
+  private riskEvidenceAttemptedAtByMint: Record<string, number> = {};
   private status: CoordinatorStatus = { ...INITIAL_STATUS };
   private discovery: DiscoveryStoreState = emptyDiscoveryStore();
   private hydrated = false;
@@ -317,18 +319,22 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   private async hydrate(): Promise<void> {
     if (this.hydrated) return;
-    const [savedStatus, savedDiscovery, enabled, savedWalletLinks, savedWalletHoldings, activeSessionId] = await Promise.all([
+    const [savedStatus, savedDiscovery, enabled, savedWalletLinks, savedWalletHoldings, savedHolderRisk, savedRiskAttempts, activeSessionId] = await Promise.all([
       this.ctx.storage.get<CoordinatorStatus>("status"),
       this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
       this.ctx.storage.get<boolean>("enabled"),
       this.ctx.storage.get<Record<string, WalletFundingEvidenceResult>>("wallet_link_snapshots"),
       this.ctx.storage.get<Record<string, WalletHoldingEvidence[]>>("wallet_holdings_by_mint"),
+      this.ctx.storage.get<Record<string, HolderConcentrationResult>>("holder_risk_snapshots"),
+      this.ctx.storage.get<Record<string, number>>("risk_evidence_attempted_at_by_mint"),
       this.ctx.storage.get<string>("active_audit_session_id")
     ]);
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
     this.activeSessionId = activeSessionId ?? null;
     this.walletLinkSnapshots = savedWalletLinks ?? {};
     this.walletHoldingsByMint = savedWalletHoldings ?? {};
+    this.holderRiskSnapshots = savedHolderRisk ?? {};
+    this.riskEvidenceAttemptedAtByMint = savedRiskAttempts ?? {};
     this.heliusState = normalizeHeliusMonitorState(await this.ctx.storage.get<HeliusMonitorState>("helius_monitor_state"));
     this.verifiedTransactions = (await this.ctx.storage.get<VerifiedPumpTransaction[]>("verified_transactions")) ?? [];
     // A Durable Object restart destroys outbound WebSockets. Without historical
@@ -390,6 +396,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put("verified_transactions", []);
         await txn.put("wallet_link_snapshots", {});
         await txn.put("wallet_holdings_by_mint", {});
+        await txn.put("holder_risk_snapshots", {});
+        await txn.put("risk_evidence_attempted_at_by_mint", {});
         await txn.put(`helius_backfill_mints:${sessionId}`, []);
         await txn.put(`paper_bankroll:${sessionId}`, createBankrollState(2.70));
         await txn.put(`paper_portfolio:${sessionId}`, createPaperPortfolio(2.70));
@@ -1080,14 +1088,17 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       apiKey: this.env.HELIUS_API_KEY,
       fetcher: this.rateLimitedHeliusFetcher()
     });
-    await this.appendAudit("RISK_EVIDENCE", mint, { evidenceType: "HOLDER_CONCENTRATION", result: jsonSafe(result) });
+    this.holderRiskSnapshots[mint] = result;
     if (result.status === "OBSERVED") {
       this.walletHoldingsByMint[mint] = result.snapshot.accounts.map(account => ({
         mint, wallet: account.owner, amount: account.amount
       }));
       this.reconcileHelius();
-      await this.persist();
     }
+    await this.persist();
+    await this.appendAudit("RISK_EVIDENCE", mint, {
+      evidenceType: "HOLDER_CONCENTRATION", result: jsonSafe(result)
+    }, `holder-risk:${mint}:${Math.floor(Date.now() / 60_000)}`);
     return result;
   }
 
@@ -1117,7 +1128,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       links: result.links,
       holdings: this.walletHoldingsByMint[mint] ?? []
     });
-    await this.appendAudit("RISK_EVIDENCE", mint, { evidenceType: "WALLET_CLUSTER", fundingEvidence: jsonSafe(result), risk: jsonSafe(risk) });
+    await this.appendAudit("RISK_EVIDENCE", mint, {
+      evidenceType: "WALLET_CLUSTER", fundingEvidence: jsonSafe(result), risk: jsonSafe(risk)
+    }, `wallet-links:${mint}:${Math.floor(Date.now() / 60_000)}`);
     return { ...result, risk };
   }
 
@@ -1205,7 +1218,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           links: snapshot?.links ?? [],
           holdings: this.walletHoldingsByMint[mint] ?? []
         }),
-        collection: snapshot ?? null
+        collection: snapshot ?? null,
+        holderConcentration: this.holderRiskSnapshots[mint] ?? null
       };
     });
     const creatorRiskRank = (status: string): number =>
@@ -1248,6 +1262,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           mint: candidate.mint,
           status: candidate.status,
           creatorSellStatus: creatorRiskByMint.get(candidate.mint)?.status ?? "UNKNOWN",
+          holderEvidenceStatus: this.holderRiskSnapshots[candidate.mint]?.status ?? "NOT_COLLECTED",
+          walletLinkEvidenceStatus: this.walletLinkSnapshots[candidate.mint]?.status ?? "NOT_COLLECTED",
           monitoring: subscription?.subscriptionId !== null && subscription?.subscriptionId !== undefined
             ? "SUBSCRIBED"
             : subscription ? "SUBSCRIPTION_PENDING" : "NOT_MONITORED"
@@ -1951,7 +1967,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       helius_monitor_state: this.heliusState,
       verified_transactions: this.verifiedTransactions,
       wallet_link_snapshots: this.walletLinkSnapshots,
-      wallet_holdings_by_mint: this.walletHoldingsByMint
+      wallet_holdings_by_mint: this.walletHoldingsByMint,
+      holder_risk_snapshots: this.holderRiskSnapshots,
+      risk_evidence_attempted_at_by_mint: this.riskEvidenceAttemptedAtByMint
     }));
     this.persistChain = write.catch(() => undefined);
     try {
