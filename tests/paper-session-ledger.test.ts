@@ -98,3 +98,14 @@ describe("strict strategy audit", () => {
   expect(after.maxMultipleFromDecision).toBeCloseTo(1.04);
   expect(after.reached3xFromDecision).toBe(false);
  });
+ it("uses the rejection price as the initial 1x post-decision high-water mark", () => {
+  const after = updateCandidatePriceTracker(null, {
+   mint:"mint",quoteMint:"SOL",quoteAmount:"90",tokenAmount:"1000",
+   timestamp:"2026-11-12T12:06:00Z",signature:"after",isBuy:true,
+   decisionPriceQuotePerToken:0.25,decisionAt:"2026-11-12T12:05:00Z",
+   discoveryPriceQuotePerToken:0.1
+  });
+  expect(after.maxMultipleFromDecision).toBe(1);
+  expect(after.decisionPeakPriceQuotePerToken).toBe(0.25);
+  expect(after.decisionPeakObservedAt).toBe("2026-11-12T12:05:00Z");
+ });

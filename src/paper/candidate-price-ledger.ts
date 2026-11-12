@@ -22,6 +22,7 @@ export interface CandidatePriceTracker {
   decisionAt: string | null;
   decisionPeakQuoteAmount: string | null;
   decisionPeakTokenAmount: string | null;
+  decisionPeakPriceQuotePerToken: number | null;
   decisionPeakObservedAt: string | null;
   decisionPeakSignature: string | null;
   discoveryPriceQuotePerToken: number | null;
@@ -83,8 +84,11 @@ export function updateCandidatePriceTracker(
   );
   const decisionPeakQuote = improvesDecisionPeak ? quote : oldDecisionQuote;
   const decisionPeakTokens = improvesDecisionPeak ? tokens : oldDecisionTokens;
-  const decisionPeakPrice = decisionPeakQuote !== null && decisionPeakTokens !== null
+  const observedDecisionPeakPrice = decisionPeakQuote !== null && decisionPeakTokens !== null
     ? Number(decisionPeakQuote) / Number(decisionPeakTokens) : null;
+  // The decision price itself is the initial 1.0x post-decision high-water mark.
+  const decisionPeakPrice = decisionPrice !== null && decisionPrice > 0
+    ? Math.max(decisionPrice, observedDecisionPeakPrice ?? 0) : observedDecisionPeakPrice;
   const discoveryPrice = trade.discoveryPriceQuotePerToken ?? previous?.discoveryPriceQuotePerToken ?? null;
   const decisionMultiple = decisionPrice !== null && decisionPrice > 0 && decisionPeakPrice !== null
     ? decisionPeakPrice / decisionPrice : null;
@@ -105,8 +109,9 @@ export function updateCandidatePriceTracker(
     decisionPriceQuotePerToken: decisionPrice, decisionAt,
     decisionPeakQuoteAmount: decisionPeakQuote?.toString() ?? null,
     decisionPeakTokenAmount: decisionPeakTokens?.toString() ?? null,
-    decisionPeakObservedAt: decisionPeakAt,
-    decisionPeakSignature: improvesDecisionPeak ? trade.signature : previous?.decisionPeakSignature ?? null,
+    decisionPeakPriceQuotePerToken: decisionPeakPrice,
+    decisionPeakObservedAt: decisionPeakPrice === decisionPrice ? decisionAt : decisionPeakAt,
+    decisionPeakSignature: decisionPeakPrice === decisionPrice ? null : improvesDecisionPeak ? trade.signature : previous?.decisionPeakSignature ?? null,
     discoveryPriceQuotePerToken: discoveryPrice,
     maxMultipleFromDecision: decisionMultiple === null ? null : Math.round(decisionMultiple * 1e6) / 1e6,
     maxMultipleFromDiscovery: discoveryMultiple === null ? null : Math.round(discoveryMultiple * 1e6) / 1e6,
