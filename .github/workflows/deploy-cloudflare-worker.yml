@@ -2,9 +2,6 @@ name: Deploy Cloudflare paper worker
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -23,6 +20,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install application dependencies
+        run: npm install
       - name: Deploy Cloudflare Worker
         run: npx --yes wrangler@4 deploy --config infra/cloudflare/worker/wrangler.jsonc
         env:
