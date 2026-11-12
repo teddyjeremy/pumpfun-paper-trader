@@ -174,7 +174,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.env = env;
-    this.postgresLeaseOwnerId = ctx.id.toString();
+    this.postgresLeaseOwnerId = ctx.id?.toString() ?? "paper-coordinator-test";
   }
   private readonly env: Env;
 
