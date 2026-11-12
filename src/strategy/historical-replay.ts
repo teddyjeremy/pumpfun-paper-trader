@@ -22,8 +22,9 @@ export interface HistoricalReplayCoinInput {
   entryEvidenceCompleteAt?: number;
   /** Historical second when the dynamic exit lifecycle completed with a fresh full-size sell quote and zero-balance confirmation. */
   exitLifecycleCompleteAt?: number;
-  /** Simulated exit timestamp and net quote price, supplied only by a full dynamic-exit replay. */
+  /** Simulated exit timestamp, in Unix seconds, supplied only by a full dynamic-exit replay. */
   simulatedExitAt?: number;
+  /** Gross SOL/WSOL quote amount per token at the simulated exit; net return is supplied separately after all fees. */
   simulatedExitPriceQuotePerToken?: number;
   /** Exact simulated net return after SDK entry/exit quotes and all costs; not a reserve-price estimate. */
   simulatedNetFinalReturnPct?: number;
