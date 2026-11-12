@@ -230,10 +230,10 @@ function metrics(input: {
       maxAdverseExcursionPct <= input.label.maxAdverseExcursionPct;
     label = metExcursions && netFinalReturnPct > 0 ? "SUCCESS" : "FAILURE";
     labelReason = label === "SUCCESS"
-      ? "Risk-cleared candidate path met both excursion criteria and remained net-positive after the supplied round-trip cost."
+      ? "Risk-cleared candidate path met both excursion criteria and remained net-positive after the simulated SDK entry/exit costs."
       : !metExcursions
         ? "Risk-cleared candidate path failed at least one configured excursion criterion."
-        : "Risk-cleared candidate final return was not positive after the supplied round-trip cost.";
+        : "Risk-cleared candidate final return was not positive after the simulated SDK entry/exit costs.";
   } else if (!input.decodeComplete) {
     labelReason = "Transaction decoding coverage is incomplete; outcome is not labelled.";
   }
