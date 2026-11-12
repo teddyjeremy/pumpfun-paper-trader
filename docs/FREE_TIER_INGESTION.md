@@ -17,7 +17,7 @@ The live listener remains disabled until the selective pipeline is deployed and 
 2. It sends only `subscribeNewToken` and `subscribeMigration`.
 3. `src/ingestion/pumpportal.ts` parses `create` and `migrate` discovery messages. Trade messages are ignored.
 4. `src/ingestion/discovery-store.ts` deduplicates by mint, retains a bounded candidate set (initial cap 100), expires entries after 15 minutes, and records duplicate, migration, overflow and incomplete counts.
-5. The Durable Object stores the candidate snapshot and status in one storage batch. It flushes after 25 relevant events and on the minute cron, stop, and socket close. Writes are serialized to avoid an older snapshot overwriting a newer one.
+5. The Durable Object stores the candidate snapshot and status in one storage batch. It flushes after 25 relevant events and on the minute cron, stop, and socket close. Writes are serialized to avoid an older snapshot overwriting a newer one. Expiry is swept during cron and candidate reads, so stale candidates disappear even during quiet periods; an expiry counter is retained.
 6. Authenticated `GET /candidates` returns the bounded discovery snapshot. `GET /status` reports candidate and data-gap counters.
 
 Provider receipt time is local receipt time, not a chain timestamp. PumpPortal messages remain untrusted hints: missing creator/signature values are retained as null and must be established through chain verification. A candidate is not an entry signal.
@@ -41,7 +41,7 @@ These RPC primitives are not yet wired into the Worker. The new candidate store 
 ## Not yet enabled / incomplete
 
 - Deployed no-key PumpPortal handshake and real connection verification.
-- Exponential reconnect/backoff, connection health and provider-gap reconciliation.
+- Provider-gap reconciliation and health checks that prove subscription delivery rather than only socket-open state.
 - Helius transaction verification and selective bonding-curve account monitoring.
 - Verified bonding-curve PDA derivation and account decoder.
 - Candidate admission limits selected from measured launch volume and Cloudflare budget.
