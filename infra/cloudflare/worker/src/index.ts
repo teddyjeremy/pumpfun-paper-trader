@@ -33,7 +33,7 @@ import {
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork, resetHeliusSubscriptionIds,
-  enqueueHeliusSignatureWork,
+  enqueueHeliusSignatureWork, retryHeliusSignatureWork,
   type HeliusMonitorState,
   type HeliusSignatureWork,
   type CandidateMonitoringEvidence
