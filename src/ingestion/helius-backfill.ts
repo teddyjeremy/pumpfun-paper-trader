@@ -45,6 +45,9 @@ export function createHistoricalBackfillState(input: {
   if (!BASE58_ADDRESS.test(input.mint)) throw new Error("Invalid mint address.");
   if (!BASE58_ADDRESS.test(input.bondingCurve)) throw new Error("Invalid bonding-curve address.");
   if (!BASE58_SIGNATURE.test(input.createSignature)) throw new Error("Invalid create signature.");
+  if (input.launchBlockTime !== null && (!Number.isSafeInteger(input.launchBlockTime) || input.launchBlockTime < 0)) {
+    throw new Error("Invalid verified launch block time.");
+  }
   const horizonSeconds = input.horizonSeconds ?? DEFAULT_BACKFILL_HORIZON_SECONDS;
   const maxSignatures = input.maxSignatures ?? DEFAULT_BACKFILL_MAX_SIGNATURES;
   if (!Number.isSafeInteger(horizonSeconds) || horizonSeconds < 60 || horizonSeconds > 1800) {
@@ -154,9 +157,14 @@ export function applyAddressSignaturesPage(
   const additions: AddressSignatureInfo[] = [];
   let foundCreate = false;
   let crossedBeforeLaunch = false;
+  let processedCount = 0;
 
   for (const item of parsed) {
+    processedCount += 1;
     if (item.signature === current.createSignature) {
+      if (item.blockTime === null || item.blockTime !== launchTime) {
+        return incomplete("The verified create signature has a missing or mismatched blockTime.");
+      }
       foundCreate = true;
       additions.push(item);
       break;
@@ -176,7 +184,9 @@ export function applyAddressSignaturesPage(
   }
 
   const merged = [...current.signatures, ...additions];
-  const scannedCount = current.scannedCount + parsed.length;
+  // Count only records through the create signature. RPC pages can contain
+  // newer transactions after the launch boundary; they are not part of this scan.
+  const scannedCount = current.scannedCount + processedCount;
   if (merged.length > current.maxSignatures || scannedCount > current.maxSignatures) {
     return incomplete("Historical backfill reached its configured signature-scan cap before coverage was proven.");
   }
