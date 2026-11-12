@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, enqueueHeliusSignatureWork, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, selectHeliusCandidates, confirmHeliusSubscription,
-  takeHeliusWork, MAX_HELIUS_CANDIDATES, resetHeliusSubscriptionIds,
+  takeHeliusWork, MAX_HELIUS_CANDIDATES, MAX_HELIUS_SIGNATURE_QUEUE, resetHeliusSubscriptionIds,
   FRESH_LAUNCH_SLOT_RESERVE
 } from "../src/ingestion/helius-monitor.js";
 import type { DiscoveryCandidate } from "../src/ingestion/discovery-store.js";
@@ -119,7 +119,7 @@ describe("bounded Helius candidate monitor", () => {
   it("marks candidate incomplete when the bounded queue overflows", () => {
     let state = reconcileHeliusSubscriptions(emptyHeliusMonitorState(), [candidate(0)]);
     state = confirmHeliusSubscription(state, state.subscriptions[0]!.requestId, 77);
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < MAX_HELIUS_SIGNATURE_QUEUE; i++) {
       state = enqueueHeliusNotification(state, { subscriptionId: 77, signature: sigFor(i), slot: i, err: null }).state;
     }
     const overflow = enqueueHeliusNotification(state, { subscriptionId: 77, signature: "9".repeat(64), slot: 101, err: null });
@@ -133,6 +133,6 @@ describe("bounded Helius candidate monitor", () => {
     const taken = takeHeliusWork(state);
     expect(taken.work?.signature).toBe(sig);
     expect(taken.state.queue).toHaveLength(0);
-    expect(normalizeHeliusMonitorState({ queue: Array(150).fill({}) }).queue).toHaveLength(100);
+    expect(normalizeHeliusMonitorState({ queue: Array(250).fill({}) }).queue).toHaveLength(MAX_HELIUS_SIGNATURE_QUEUE);
   });
 });

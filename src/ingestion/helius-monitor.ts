@@ -1,7 +1,7 @@
 import type { DiscoveryCandidate } from "./discovery-store.js";
 
 export const MAX_HELIUS_CANDIDATES = 10;
-export const MAX_HELIUS_SIGNATURE_QUEUE = 100;
+export const MAX_HELIUS_SIGNATURE_QUEUE = 200;
 export const MAX_HELIUS_SEEN_SIGNATURES = 5_000;
 export const FRESH_LAUNCH_SLOT_RESERVE = 4;
 export const FRESH_LAUNCH_WINDOW_MS = 60_000;
