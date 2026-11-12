@@ -28,6 +28,13 @@ export interface ExecutablePaperQuoteWithLatency extends ExecutablePaperQuote {
   quoteMint: string;
   grossQuoteAmountBaseUnits: string;
   netQuoteAmountBaseUnits: string;
+  grossTokenAmountBaseUnits: string;
+  netTokenAmountBaseUnits: string;
+  transferFeeBaseUnits: string;
+  transferFeeMint: string;
+  transferFeeEpoch: number | null;
+  transferFeeBasisPoints: number;
+  transferFeeMaximumBaseUnits: string;
   feeBreakdownUsd: {
     protocol: number;
     creator: number;
@@ -105,9 +112,11 @@ function sdkFees(quote: OfflinePumpQuote): {
  * No RPC convenience quote is used here: all market inputs must already have
  * passed the adapter's same-context Helius verification.
  *
- * Token-2022 transfer-fee and transfer-hook mints remain fail-closed in the
- * underlying SDK adapters. This converter accepts only their explicit
- * verified-zero-transfer-tax result; it never silently assumes a zero tax.
+ * Token-2022 transfer-fee mints are priced with their verified epoch schedule.
+ * Transfer hooks remain fail-closed because their extra-account execution is
+ * not simulated. Transfer-fee USD is informational: the withheld token amount
+ * is already reflected in the net token quantity/proceeds and is not deducted
+ * a second time from the cash-flow fee total.
  */
 export function buildExecutablePaperQuote(input: {
   quote: OfflinePumpQuote;
@@ -117,8 +126,8 @@ export function buildExecutablePaperQuote(input: {
 }): ExecutablePaperQuoteWithLatency {
   const { quote, solUsd, costs } = input;
   const now = input.nowMs ?? Date.now();
-  if (quote.transferTaxVerifiedZero !== true) {
-    throw new Error("Transfer tax is not verified; quote cannot be used for a paper fill.");
+  if (quote.transferFeeVerified !== true) {
+    throw new Error("Token transfer fee is not verified; quote cannot be used for a paper fill.");
   }
   if (quote.executionReady !== false) {
     throw new Error("Unexpected SDK quote readiness state.");
@@ -161,6 +170,24 @@ export function buildExecutablePaperQuote(input: {
   const netQuoteUsd = baseUnitsToNumber(quote.netQuoteAmountBaseUnits, quote.quoteDecimals) * solUsd.priceUsd;
   const outputAmount = assertBaseUnits(quote.outputAmountBaseUnits, "SDK output amount");
   const inputAmount = assertBaseUnits(quote.inputAmountBaseUnits, "SDK input amount");
+  const grossTokenAmount = assertBaseUnits(quote.grossTokenAmountBaseUnits, "Gross token amount");
+  const netTokenAmount = assertBaseUnits(quote.netTokenAmountBaseUnits, "Net token amount");
+  const transferFeeAmount = assertBaseUnits(quote.transferFeeBaseUnits, "Token transfer fee", true);
+  const transferFeeMaximum = assertBaseUnits(quote.transferFeeMaximumBaseUnits, "Maximum token transfer fee", true);
+  if (grossTokenAmount - transferFeeAmount !== netTokenAmount ||
+      transferFeeAmount > transferFeeMaximum ||
+      !Number.isInteger(quote.transferFeeBasisPoints) ||
+      quote.transferFeeBasisPoints < 0 || quote.transferFeeBasisPoints > 10_000 ||
+      (transferFeeAmount > 0n && quote.transferFeeEpoch === null) ||
+      quote.transferFeeMint !== quote.mint) {
+    throw new Error("Token transfer fee evidence does not reconcile with the quoted mint and amounts.");
+  }
+  if (quote.side === "BUY" && outputAmount !== netTokenAmount) {
+    throw new Error("Buy quote output must equal the net token amount after transfer fees.");
+  }
+  if (quote.side === "SELL" && inputAmount !== grossTokenAmount) {
+    throw new Error("Sell quote input must equal the gross token amount supplied by the paper position.");
+  }
   const feeTotal = protocolFeeUsd + creatorFeeUsd + poolFeeUsd + pumpFeeUsd;
   if (quote.side === "BUY" && Math.abs((netQuoteUsd + feeTotal) - grossQuoteUsd) > Math.max(0.00000001, grossQuoteUsd * 0.000001)) {
     throw new Error("SDK buy quote gross/net amounts do not reconcile with its fee breakdown.");
@@ -171,6 +198,13 @@ export function buildExecutablePaperQuote(input: {
 
   const requestedUsd = quote.side === "BUY" ? netQuoteUsd : grossQuoteUsd;
   const outputUsd = quote.side === "BUY" ? netQuoteUsd : grossQuoteUsd;
+  const grossTokenUi = baseUnitsToNumber(quote.grossTokenAmountBaseUnits, quote.baseDecimals);
+  const netTokenUi = baseUnitsToNumber(quote.netTokenAmountBaseUnits, quote.baseDecimals);
+  const transferFeeUi = baseUnitsToNumber(quote.transferFeeBaseUnits, quote.baseDecimals);
+  const taxPct = grossTokenUi > 0 ? transferFeeUi / grossTokenUi * 100 : 0;
+  const transferFeeUsd = quote.side === "BUY"
+    ? (grossTokenUi > 0 ? transferFeeUi / grossTokenUi * netQuoteUsd : 0)
+    : (netTokenUi > 0 ? transferFeeUi / netTokenUi * grossQuoteUsd : 0);
   if (!(requestedUsd > 0) || !(outputUsd > 0) || !Number.isFinite(outputUsd)) {
     throw new Error("SDK quote has no positive USD notional.");
   }
@@ -203,7 +237,7 @@ export function buildExecutablePaperQuote(input: {
     tokenDecimals: quote.baseDecimals,
     outputUsd,
     priceImpactPct: nonNegative(quote.priceImpactPct, "Price impact"),
-    taxPct: 0,
+    taxPct,
     networkFeeUsd,
     priorityFeeUsd,
     providerFeeUsd,
@@ -211,7 +245,7 @@ export function buildExecutablePaperQuote(input: {
     creatorFeeUsd,
     poolFeeUsd,
     ...(pumpFeeUsd > 0 ? { pumpFeeUsd } : {}),
-    transferFeeUsd: 0,
+    transferFeeUsd,
     routeId: `${venue}:${quote.quoteMint}:${quote.slot}`,
     executable: true,
     venue,
@@ -219,6 +253,13 @@ export function buildExecutablePaperQuote(input: {
     quoteMint: quote.quoteMint,
     grossQuoteAmountBaseUnits: quote.grossQuoteAmountBaseUnits,
     netQuoteAmountBaseUnits: quote.netQuoteAmountBaseUnits,
+    grossTokenAmountBaseUnits: quote.grossTokenAmountBaseUnits,
+    netTokenAmountBaseUnits: quote.netTokenAmountBaseUnits,
+    transferFeeBaseUnits: quote.transferFeeBaseUnits,
+    transferFeeMint: quote.transferFeeMint,
+    transferFeeEpoch: quote.transferFeeEpoch,
+    transferFeeBasisPoints: quote.transferFeeBasisPoints,
+    transferFeeMaximumBaseUnits: quote.transferFeeMaximumBaseUnits,
     feeBreakdownUsd,
     simulatedLatencyMs: costs.simulatedLatencyMs,
     simulatedFillAt: new Date(simulatedFillAtMs).toISOString(),
