@@ -10,6 +10,7 @@ export interface ExecutablePaperQuote {
   requestedUsd: number;
   inputAmountBaseUnits: string;
   outputAmountBaseUnits: string;
+  /** Gross output value before protocol, creator, pool, transfer and network fees. */
   outputUsd: number;
   priceImpactPct: number;
   taxPct: number;
