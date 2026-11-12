@@ -77,7 +77,7 @@ export interface HistoricalCoinReplay {
   snapshots: HistoricalSetupSnapshot[];
   firstSetup: HistoricalSetupSnapshot | null;
   outcome: HistoricalEntryOutcome | null;
-  status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY";
+  status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY" | "RISK_NOT_CLEARED";
 }
 
 export interface VolumeThresholdCandidate {
@@ -134,6 +134,7 @@ function metrics(input: {
   horizonEnd: number;
   label?: HistoricalReplayConfig["label"];
   decodeComplete: boolean;
+  riskCleared: boolean;
 }): HistoricalEntryOutcome | null {
   const future = input.trades.filter(event => {
     const at = eventTimestamp(event);
@@ -152,15 +153,17 @@ function metrics(input: {
   const netFinalReturnPct = roundTripCostPct === null ? null : grossFinalReturnPct - roundTripCostPct;
   let label: HistoricalEntryOutcome["label"] = "UNKNOWN";
   let labelReason = "A complete forward window, explicit excursion thresholds and an assumed round-trip cost are required.";
-  if (input.decodeComplete && input.label && netFinalReturnPct !== null) {
+  if (!input.riskCleared) {
+    labelReason = "Creator and complete holder/cluster evidence were not cleared at the candidate time; reserve-price performance is exploratory and is not labelled as a strategy outcome.";
+  } else if (input.decodeComplete && input.label && netFinalReturnPct !== null) {
     const metExcursions = maxFavorableExcursionPct >= input.label.minFavorableExcursionPct &&
       maxAdverseExcursionPct <= input.label.maxAdverseExcursionPct;
     label = metExcursions && netFinalReturnPct > 0 ? "SUCCESS" : "FAILURE";
     labelReason = label === "SUCCESS"
-      ? "Observed forward path met both excursion criteria and remained net-positive after the supplied round-trip cost."
+      ? "Risk-cleared candidate path met both excursion criteria and remained net-positive after the supplied round-trip cost."
       : !metExcursions
-        ? "Observed forward path failed at least one configured excursion criterion."
-        : "Observed final return was not positive after the supplied round-trip cost.";
+        ? "Risk-cleared candidate path failed at least one configured excursion criterion."
+        : "Risk-cleared candidate final return was not positive after the supplied round-trip cost.";
   } else if (!input.decodeComplete) {
     labelReason = "Transaction decoding coverage is incomplete; outcome is not labelled.";
   }
@@ -307,12 +310,14 @@ export function replayHistoricalCoin(
   const outcome = entryAt !== null && entryPrice !== null
     ? metrics({
         trades, entryAt, entryPrice, horizonEnd,
-        label: config.label, decodeComplete: input.decodeComplete
+        label: config.label, decodeComplete: input.decodeComplete,
+        riskCleared: firstSetup.riskClearedSetupEligible
       })
     : null;
   const status = !input.decodeComplete ? "INCOMPLETE"
     : !firstSetup ? "NO_SETUP"
-      : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
+      : !firstSetup.riskClearedSetupEligible ? "RISK_NOT_CLEARED"
+        : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
   return {
     mint: input.mint,
     launchBlockTime: input.launchBlockTime,
