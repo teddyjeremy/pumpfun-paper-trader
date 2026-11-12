@@ -195,6 +195,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.markHeliusCoverageGap();
     }
     if (!this.activeSessionId) {
+      // A new session starts from a clean candidate/observation cache. Previous
+      // sessions remain intact in their own journal and candidate namespaces.
+      this.discovery = emptyDiscoveryStore();
+      this.verifiedTransactions = [];
+      this.heliusState = emptyHeliusMonitorState();
+      this.walletLinkSnapshots = {};
+      this.walletHoldingsByMint = {};
+      this.status = { ...INITIAL_STATUS };
       const sessionId = crypto.randomUUID();
       const meta: AuditSessionMeta = {
         sessionId, startedAt: new Date().toISOString(), stoppedAt: null, strategyVersion: "strict-v1",
@@ -213,6 +221,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put(`audit_session:${sessionId}`, { ...meta, eventCount: 1 });
         await txn.put("active_audit_session_id", sessionId);
         await txn.put("audit_session_ids", [...sessions, sessionId]);
+        await txn.put("discovery_state", emptyDiscoveryStore());
+        await txn.put("helius_monitor_state", emptyHeliusMonitorState());
+        await txn.put("verified_transactions", []);
+        await txn.put("wallet_link_snapshots", {});
+        await txn.put("wallet_holdings_by_mint", {});
         await txn.put(`paper_bankroll:${sessionId}`, createBankrollState(2.70));
         await txn.put(`paper_portfolio:${sessionId}`, createPaperPortfolio(2.70));
         await txn.put(`audit_events:${sessionId}:00000000`, [firstEvent]);
