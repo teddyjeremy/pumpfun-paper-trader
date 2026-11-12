@@ -109,7 +109,7 @@ export function buildCandidateTradeFlows(
     }
     const largestBuyerVolume = [...buyerVolumes.values()].reduce((max, amount) => amount > max ? amount : max, 0n);
     const largestBuyerShareBps = totalBuyVolume > 0n
-      ? Number((largestBuyerVolume * 10_000n) / totalBuyVolume)
+      ? Number((largestBuyerVolume * 10_000n + totalBuyVolume - 1n) / totalBuyVolume)
       : null;
     const latestThreeWindowFlowPass = Boolean(latestThree?.every(window => window.flowWindowPass));
     const flowConfirmationPass = latestThreeWindowFlowPass &&
