@@ -14,7 +14,7 @@ function feeFetcher(options: {
     const request = JSON.parse(String(init?.body)) as { method: string };
     let result: unknown;
     if (request.method === "getFeeForMessage") {
-      result = { context: { slot: options.feeContextSlot ?? 110 }, value: options.baseFee ?? 5_000 };
+      result = { context: { slot: options.feeContextSlot ?? 110 }, value: Object.prototype.hasOwnProperty.call(options, "baseFee") ? options.baseFee : 5_000 };
     } else if (request.method === "getRecentPrioritizationFees") {
       result = options.samples ?? Array.from({ length: 10 }, (_, index) => ({
         slot: 100 + index,
@@ -67,7 +67,7 @@ describe("Solana transaction fee estimator", () => {
   it("fails closed when the exact-message base fee context is stale", async () => {
     const result = await estimateSolanaTransactionFees({
       ...baseInput,
-      fetcher: feeFetcher({ feeContextSlot: 1 })
+      fetcher: feeFetcher({ feeContextSlot: 1, slot: 300 })
     });
     expect(result.status).toBe("UNAVAILABLE");
   });
