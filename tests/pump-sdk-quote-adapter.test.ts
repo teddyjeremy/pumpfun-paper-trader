@@ -10,6 +10,7 @@ describe("official PumpSwap quote adapter safety gates", () => {
     expect(() => quotePumpSwapBuyFromSnapshot({} as never, "0")).toThrow(/positive base-unit/);
     expect(() => quotePumpSwapBuyFromSnapshot({} as never, "-1")).toThrow(/positive base-unit/);
     expect(() => quotePumpSwapBuyFromSnapshot({} as never, "1.2")).toThrow(/positive base-unit/);
+    expect(() => quotePumpSwapBuyFromSnapshot({} as never, "18446744073709551616")).toThrow(/positive base-unit/);
   });
 
   it("does not quote when the discovery read cannot find the canonical pool", async () => {
@@ -32,5 +33,6 @@ describe("official PumpSwap quote adapter safety gates", () => {
     expect(() => quotePumpSwapSellFromSnapshot({} as never, "0")).toThrow(/positive base-unit/);
     expect(() => quotePumpSwapSellFromSnapshot({} as never, "-1")).toThrow(/positive base-unit/);
     expect(() => quotePumpSwapSellFromSnapshot({} as never, "1.2")).toThrow(/positive base-unit/);
+    expect(() => quotePumpSwapSellFromSnapshot({} as never, "18446744073709551616")).toThrow(/positive base-unit/);
   });
 });
