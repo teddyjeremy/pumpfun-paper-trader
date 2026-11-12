@@ -36,6 +36,7 @@ import { buildCandidateTradeFlows, SOL_QUOTE_MINT } from "../../../../src/ingest
 import { fetchHolderConcentration } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
+import { officialPumpSdkModulesAvailable } from "../../../../src/ingestion/pump-sdk-runtime.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import { evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
 import { collectWalletFundingEvidence, type WalletFundingEvidenceResult } from "../../../../src/ingestion/wallet-link-collector.js";
@@ -64,6 +65,7 @@ interface CoordinatorStatus {
   subscriptionsSent: boolean;
   enabled: boolean;
   tradingReady: false;
+  quoteSdkModules: { curve: boolean; pumpSwap: boolean };
   blocker: string;
   connectedAt: string | null;
   lastMessageAt: string | null;
@@ -98,6 +100,7 @@ const INITIAL_STATUS: CoordinatorStatus = {
   subscriptionsSent: false,
   enabled: false,
   tradingReady: false,
+  quoteSdkModules: officialPumpSdkModulesAvailable(),
   blocker: "On-chain verification, selective Helius monitoring, strategy evaluation, executable quotes and paper ledger are not connected.",
   connectedAt: null,
   lastMessageAt: null,
