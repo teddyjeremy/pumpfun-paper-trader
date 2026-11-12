@@ -2,7 +2,10 @@ import {
   OnlinePumpSdk,
   PUMP_SDK,
   getBuyV3TokenAmountFromQuoteAmount,
-  getSellSolAmountFromTokenAmount
+  getBuyTokenAmountFromSolAmount,
+  getBuySolAmountFromTokenAmount,
+  getSellSolAmountFromTokenAmount,
+  computeFeesBps
 } from "@pump-fun/pump-sdk";
 import {
   OnlinePumpAmmSdk,
@@ -26,7 +29,10 @@ export function officialPumpSdkModulesAvailable(): {
       typeof PUMP_SDK.decodeGlobal === "function" &&
       typeof PUMP_SDK.decodeFeeConfig === "function" &&
       typeof getBuyV3TokenAmountFromQuoteAmount === "function" &&
-      typeof getSellSolAmountFromTokenAmount === "function",
+      typeof getBuyTokenAmountFromSolAmount === "function" &&
+      typeof getBuySolAmountFromTokenAmount === "function" &&
+      typeof getSellSolAmountFromTokenAmount === "function" &&
+      typeof computeFeesBps === "function",
     pumpSwap: typeof OnlinePumpAmmSdk === "function" &&
       typeof PUMP_AMM_SDK === "object" &&
       typeof buyQuoteInput === "function" &&
