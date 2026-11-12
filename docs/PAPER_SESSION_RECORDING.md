@@ -83,3 +83,12 @@ The six-hour paper session remains blocked until the missing quote source, execu
 - Migration sequence is `0001_initial_ledger.sql`, `0002_migration_aware_positions.sql`, then `0003_dynamic_exit_observations.sql`. The former duplicate `0002` filename was removed so migration order is deterministic.
 - `npm run db:migrate` applies unapplied files in lexical order, serializes concurrent runners with a PostgreSQL advisory transaction lock, and executes each migration in its own transaction. Duplicate numeric prefixes and malformed filenames are rejected before connecting.
 - Migrations are **not** applied during server startup. Review and explicitly approve the target database before running the command. The Cloudflare Worker still uses its Durable Object journal; PostgreSQL trade/event writes, idempotency transitions and leader-lease integration remain incomplete.
+
+## Dynamic exit-window observations
+- Added a pure builder for complete verified 2/5/10/30-second samples. It derives buy/sell ratio, buy-volume decline, buyer-rate decline, sell-volume expansion, price response per unit of buy volume, and quote-liquidity change.
+- Baselines reset across gaps, incomplete windows, quote-mint changes, venue changes and market-phase changes. Missing baselines remain null; no missing value is converted to zero.
+- These observations can feed the existing dynamic exhaustion evaluator, but the builder is not connected to the Worker position loop and its thresholds still require historical replay/backtest calibration.
+
+## Durable Object journal contract tests
+- Added a mocked Durable Object storage contract harness covering concurrent append ordering, monotonic sequences, 100-event page boundaries, idempotent duplicate events, transaction rollback after simulated storage failure, restart markers and session metadata counts.
+- These are deterministic storage-contract tests, not a full Miniflare/Cloudflare runtime acceptance test. Real Durable Object restart/eviction/quota tests and the six-hour soak remain outstanding.
