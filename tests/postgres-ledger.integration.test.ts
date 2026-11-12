@@ -193,8 +193,9 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       createEvents: [{ mint: backfillMint, bondingCurve: state.bondingCurve }],
       tradeEvents: []
     };
-    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction });
-    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction });
+    const decodeCoverage = { complete: true, reason: null, verifiedTransactionCount: 1 };
+    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, decodeCoverage, transaction });
+    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, decodeCoverage, transaction });
 
     const archived = await inspector!.query(
       `SELECT j.status,j.pages_scanned,j.signature_count,j.launch_block_time,
@@ -210,7 +211,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
 
     await expect(ledgerPersistence!.persistHeliusBackfillArchive({
       sessionId, mint: backfillMint, state,
-      transaction: { ...transaction, slot: 124 }
+      decodeCoverage, transaction: { ...transaction, slot: 124 }
     })).rejects.toThrow(/verified signature evidence|conflicts/);
 
     const incompleteMint = "11111111111111111111111111111111";
@@ -225,7 +226,8 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       reason: "Verified launch block time is unavailable."
     };
     await ledgerPersistence!.persistHeliusBackfillArchive({
-      sessionId, mint: incompleteMint, state: incomplete
+      sessionId, mint: incompleteMint, state: incomplete,
+      decodeCoverage: { complete: false, reason: "Verified launch block time is unavailable.", verifiedTransactionCount: 0 }
     });
     const incompleteRow = await inspector!.query(
       "SELECT status,launch_block_time,reason FROM helius_backfill_jobs WHERE session_id=$1 AND mint=$2",
