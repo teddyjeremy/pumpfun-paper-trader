@@ -149,7 +149,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async start(): Promise<CoordinatorStatus> {
     await this.hydrate();
-    this.markHeliusCoverageGap();
+    if (!this.status.enabled || this.heliusSocket?.readyState !== WebSocket.OPEN) {
+      this.markHeliusCoverageGap();
+    }
     await this.ctx.storage.put("enabled", true);
     this.status.enabled = true;
     this.status.nextReconnectAt = null;
