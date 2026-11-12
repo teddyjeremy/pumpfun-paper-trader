@@ -130,12 +130,12 @@ describe("IDL-aligned Pump account decoders", () => {
   });
 
   it("rejects a noncanonical pool, mismatched vault authority and cross-slot vault snapshot", () => {
-    const pool = account("pool", PUMP_AMM_PROGRAM_ID, poolData());
+    const pool = account(ZERO_KEY, PUMP_AMM_PROGRAM_ID, poolData());
     const baseVault = account(ZERO_KEY, SPL_TOKEN_PROGRAM_ID, tokenVault(10_000n));
     const quoteVault = account(ZERO_KEY, SPL_TOKEN_PROGRAM_ID, tokenVault(20_000n));
     expect(() => verifyCanonicalPumpSwapPoolSnapshot({
       poolAccount: pool, baseVaultAccount: baseVault, quoteVaultAccount: quoteVault,
-      expectedMint: ZERO_KEY, expectedPoolAddress: "pool",
+      expectedMint: ZERO_KEY, expectedPoolAddress: ZERO_KEY,
       expectedPoolCreatorAuthority: "not-the-creator", expectedPoolAuthority: ZERO_KEY,
       nowMs: Date.parse(observedAt)
     })).toThrow(/canonical/);
