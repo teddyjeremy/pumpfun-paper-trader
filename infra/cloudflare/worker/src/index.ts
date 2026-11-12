@@ -1621,7 +1621,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const existing = await this.ctx.storage.get<HistoricalBackfillState>(key);
     let state = existing;
     if (!state) {
-      const launchBlockTime = Number(create.timestamp);
+      const launchBlockTime = transaction.blockTime ?? null;
       try {
         state = createHistoricalBackfillState({
           mint: transaction.mint,
@@ -1650,6 +1650,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (existing) return;
 
     await this.ctx.storage.put(key, state!);
+    if (state!.status === "INCOMPLETE") {
+      await this.appendAudit("DATA_GAP", transaction.mint, {
+        reason: "HISTORICAL_BACKFILL_LAUNCH_BLOCK_TIME_UNAVAILABLE",
+        detail: state!.reason,
+        createEventTimestamp: String(create.timestamp)
+      }, `backfill-launch-time-missing:${transaction.signature}`);
+      return;
+    }
     await this.appendAudit("OBSERVATION", transaction.mint, {
       historicalBackfill: "STARTED", horizonSeconds: state!.horizonSeconds,
       maxSignatures: state!.maxSignatures, launchBlockTime: state!.launchBlockTime
