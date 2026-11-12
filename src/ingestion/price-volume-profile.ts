@@ -62,6 +62,7 @@ export interface CandidatePriceVolumeProfile {
   dataComplete: boolean;
   coverage: "OBSERVED_EVENTS_ONLY";
   entryEligible: false;
+  microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE";
 }
 
 interface TimedTrade {
@@ -141,9 +142,9 @@ function summarizeBucket(bucket: MutableBucket): PriceVolumeBucket | null {
 }
 
 function volumeRatioPct(part: StageVolume, base: StageVolume): number | null {
-  const denominator = BigInt(base.totalQuoteVolume);
+  const denominator = BigInt(base.buyQuoteVolume);
   if (denominator <= 0n) return null;
-  const numerator = BigInt(part.totalQuoteVolume);
+  const numerator = BigInt(part.buyQuoteVolume);
   return Number((numerator * 10_000n + denominator / 2n) / denominator) / 100;
 }
 
@@ -186,6 +187,8 @@ export function buildCandidatePriceVolumeProfiles(
     incompleteMints?: readonly string[];
     coverageStartByMint?: Readonly<Record<string, number>>;
     candidateMints?: readonly string[];
+    solUsdPriceUsd?: number;
+    minimumTradeUsd?: number;
   } = {}
 ): CandidatePriceVolumeProfile[] {
   const now = options.nowSeconds ?? Math.floor(Date.now() / 1_000);
@@ -194,6 +197,8 @@ export function buildCandidatePriceVolumeProfiles(
       horizon < PRICE_VOLUME_BUCKET_SECONDS) {
     throw new Error("Invalid price-volume profile time range.");
   }
+  const minimumTradeUsd = options.minimumTradeUsd ?? 0.01;
+  if (!Number.isFinite(minimumTradeUsd) || minimumTradeUsd < 0) throw new Error("Invalid minimum trade notional.");
   const lower = now - horizon;
   const groups = new Map<string, {
     mint: string;
