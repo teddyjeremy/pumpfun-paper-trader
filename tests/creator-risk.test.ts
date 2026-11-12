@@ -79,6 +79,17 @@ describe("direct creator sell screening", () => {
     expect(result[0]?.status).toBe("PENDING");
   });
 
+  it("excludes a sale exactly at the 60-second boundary", () => {
+    const boundarySale = { ...trade(creator, 10_000n), timestamp: 160n };
+    const result = evaluateCreatorSellRisk(
+      [transaction([createEvent()], [boundarySale])],
+      { nowSeconds: 160, coverageStartByMint: { [mint]: 100 } }
+    );
+    expect(result[0]).toMatchObject({
+      creatorSellTokenAmount: "0", status: "PASS_COMPLETE"
+    });
+  });
+
   it("does not attribute another wallet's sale to the creator", () => {
     const result = evaluateCreatorSellRisk(
       [transaction([createEvent()], [trade("wallet-2", 10_000n)])],
