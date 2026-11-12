@@ -278,9 +278,7 @@ export async function fetchPumpCurveSdkQuote(input: {
   amountBaseUnits: string;
   config: HeliusAccountReadConfig;
 }): Promise<PumpCurveSdkQuote> {
-  if (!PublicKey.isOnCurve(new PublicKey(input.mint).toBytes()) && !input.mint) {
-    throw new Error("Mint address is invalid.");
-  }
+  if (!input.mint.trim()) throw new Error("Mint address is required.");
   const mint = new PublicKey(input.mint);
   const curveAddress = derivePumpBondingCurvePda(input.mint);
   const snapshot = await fetchVerifiedPumpQuoteAccountSnapshot({
