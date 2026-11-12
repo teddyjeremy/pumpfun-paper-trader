@@ -35,7 +35,7 @@ These components are already on current `main`:
 7. [ ] Connect dynamic exit evaluation to the position scheduler and exact full-position sell quotes.
 8. [ ] Complete authoritative migration detection, canonical PumpSwap pool monitoring and exit-blocked recovery.
 9. [ ] Test Durable Object eviction/restart, PostgreSQL outages/recovery, queue recovery, provider gaps and lease fencing.
-10. [x] Add authenticated Worker status proxy, combined read-only snapshot and live discovery monitor controls to the dashboard (PR #49, pending CI).
+10. [x] Add authenticated Worker status proxy, combined read-only snapshot and live discovery monitor controls to the dashboard (PR #49, merged).
 11. [ ] Complete dashboard consumption of persisted decisions, simulated fills, open positions and exits.
 12. [ ] Run bounded paper-forward validation before considering any readiness change.
 
