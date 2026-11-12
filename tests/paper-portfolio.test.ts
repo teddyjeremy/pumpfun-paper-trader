@@ -45,6 +45,6 @@ describe("paper portfolio accounting",()=>{
   expect(state.bankroll.totalTopUpsUsd).toBe(2.7);
   expect(state.positionSizeUsd).toBe(1);
   expect(state.maxConcurrentPositions).toBe(1);
-  expect(state.highWaterEquityUsd).toBeLessThan(2.7);
+  expect(state.highWaterEquityUsd).toBe(2.7);
  });
 });
