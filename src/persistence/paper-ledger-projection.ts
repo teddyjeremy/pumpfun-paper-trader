@@ -194,9 +194,19 @@ export function buildPaperLedgerProjection(event: AuditEvent): PaperLedgerProjec
     result.quotes.push(sell);
     result.trades.push(tradeFromQuote(event, position, sell));
   } else if (event.kind === "POSITION_MARK" && Array.isArray(data.positions)) {
+    if (!Array.isArray(data.sellQuotes)) return result;
     for (const value of data.positions) result.positions.push(projectPosition(value));
-    if (Array.isArray(data.sellQuotes)) {
-      for (const value of data.sellQuotes) result.quotes.push(projectQuote(value));
+    for (const value of data.sellQuotes) {
+      const quote = projectQuote(value);
+      const position = result.positions.find(item => item.mint === quote.mint);
+      if (!position || quote.side !== "SELL" ||
+          quote.inputAmountBaseUnits !== position.tokenAmountBaseUnits) {
+        throw new Error("Paper mark quote does not match an open full-balance position.");
+      }
+      result.quotes.push(quote);
+    }
+    if (result.positions.length !== result.quotes.length) {
+      throw new Error("Paper mark projection requires one exact-size sell quote per open position.");
     }
   }
   return result;
