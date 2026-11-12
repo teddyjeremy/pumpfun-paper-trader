@@ -331,7 +331,7 @@ export async function persistPaperAuditEvents(
   let duplicates = 0;
   try {
     await client.query("BEGIN");
-    const first = ordered[0];
+    const first = ordered[0]!;
     await client.query(
       `INSERT INTO paper_sessions (id,status,started_at,strategy_version,last_sequence,last_event_at)
        VALUES ($1,'active',$2,$3,0,$2)
@@ -342,8 +342,9 @@ export async function persistPaperAuditEvents(
       "SELECT last_sequence::text FROM paper_sessions WHERE id=$1 FOR UPDATE",
       [sessionId]
     );
-    if (sessionResult.rows.length !== 1) throw new Error("Paper session row could not be locked.");
-    let lastSequence = BigInt(sessionResult.rows[0].last_sequence);
+    const lockedSession = sessionResult.rows[0];
+    if (!lockedSession) throw new Error("Paper session row could not be locked.");
+    let lastSequence = BigInt(lockedSession.last_sequence);
 
     for (const event of ordered) {
       const sequence = BigInt(event.sequence);
@@ -352,9 +353,10 @@ export async function persistPaperAuditEvents(
           "SELECT event_id,event_type FROM paper_session_events WHERE session_id=$1 AND sequence=$2",
           [sessionId, event.sequence]
         );
-        if (existing.rows.length !== 1 ||
-            existing.rows[0].event_id !== event.eventId ||
-            existing.rows[0].event_type !== event.kind) {
+        const existingEvent = existing.rows[0];
+        if (!existingEvent ||
+            existingEvent.event_id !== event.eventId ||
+            existingEvent.event_type !== event.kind) {
           throw new Error("Paper audit replay conflicts with an existing session sequence.");
         }
         duplicates++;
