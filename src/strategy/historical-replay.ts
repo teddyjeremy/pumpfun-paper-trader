@@ -356,3 +356,76 @@ export function calibrateVolumeThresholds(
       : "The best training thresholds did not meet minimum holdout performance. Do not promote them into the entry rules."
   };
 }
+
+
+const CREATE_EVENT_BIGINT_FIELDS = [
+  "timestamp","virtualTokenReserves","virtualSolReserves","realTokenReserves",
+  "tokenTotalSupply","virtualQuoteReserves","creatorFeeBps"
+] as const;
+const TRADE_EVENT_BIGINT_FIELDS = [
+  "solAmount","tokenAmount","timestamp","virtualSolReserves","virtualTokenReserves",
+  "realSolReserves","realTokenReserves","feeBasisPoints","fee","creatorFeeBasisPoints",
+  "creatorFee","totalUnclaimedTokens","totalClaimedTokens","currentSolVolume",
+  "lastUpdateTimestamp","cashbackFeeBasisPoints","cashback","buybackFeeBasisPoints",
+  "buybackFee","quoteAmount","virtualQuoteReserves","realQuoteReserves",
+  "holderRewardsBps","holderRewards","creatorFeeUnclaimed"
+] as const;
+
+function hydrateEventBigInts(value: unknown, fields: readonly string[]): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Archived Pump event is not an object.");
+  }
+  const event = { ...(value as Record<string, unknown>) };
+  for (const field of fields) {
+    const raw = event[field];
+    if (typeof raw === "bigint") continue;
+    if (typeof raw === "string" && /^\\d+$/.test(raw)) {
+      event[field] = BigInt(raw);
+    } else if (typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0) {
+      event[field] = BigInt(raw);
+    } else {
+      throw new Error(`Archived Pump event field ${field} is not a valid base-unit integer.`);
+    }
+  }
+  return event;
+}
+
+/** Restore JSON-safe PostgreSQL observations into the bigint event types used by the replay builders. */
+export function hydrateArchivedVerifiedTransaction(value: unknown): VerifiedPumpTransaction {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Archived Helius transaction is malformed.");
+  }
+  const raw = value as Record<string, unknown>;
+  const address = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  const signature = raw.signature;
+  const slot = raw.slot;
+  if (typeof raw.mint !== "string" || !address.test(raw.mint) ||
+      typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(signature) ||
+      typeof slot !== "number" || !Number.isSafeInteger(slot) || slot < 0 ||
+      raw.provider !== "helius" || !["confirmed","finalized"].includes(String(raw.commitment)) ||
+      typeof raw.receivedAt !== "string" || !Number.isFinite(Date.parse(raw.receivedAt)) ||
+      !Array.isArray(raw.createEvents) || !Array.isArray(raw.tradeEvents)) {
+    throw new Error("Archived Helius transaction failed identity or provenance validation.");
+  }
+  const createEvents = raw.createEvents.map(event => hydrateEventBigInts(event, CREATE_EVENT_BIGINT_FIELDS));
+  const tradeEvents = raw.tradeEvents.map(event => hydrateEventBigInts(event, TRADE_EVENT_BIGINT_FIELDS));
+  for (const event of [...createEvents, ...tradeEvents]) {
+    if (event.mint !== raw.mint) throw new Error("Archived Pump event mint does not match its transaction.");
+  }
+  const blockTime = raw.blockTime === null || raw.blockTime === undefined ? null : Number(raw.blockTime);
+  if (blockTime !== null && (!Number.isSafeInteger(blockTime) || blockTime < 0)) {
+    throw new Error("Archived Helius block time is invalid.");
+  }
+  return {
+    ...raw,
+    mint: raw.mint,
+    signature,
+    slot,
+    blockTime,
+    provider: "helius",
+    commitment: raw.commitment,
+    receivedAt: raw.receivedAt,
+    createEvents,
+    tradeEvents
+  } as unknown as VerifiedPumpTransaction;
+}
