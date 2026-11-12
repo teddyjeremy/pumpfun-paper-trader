@@ -299,7 +299,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         return;
       }
     }
+    const archivedKey = `helius_archived_transaction_signatures:${this.activeSessionId}`;
+    const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
     for (const transaction of this.verifiedTransactions) {
+      if (archived.has(transaction.signature)) continue;
       try {
         const state = await this.ctx.storage.get<HistoricalBackfillState>(
           `helius_backfill:${this.activeSessionId}:${transaction.mint}`
@@ -312,6 +315,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           transaction: jsonSafe(transaction)
         });
         if (!response.ok) throw new Error("Transaction archive was not acknowledged.");
+        archived.add(transaction.signature);
+        await this.ctx.storage.put(archivedKey, [...archived].slice(-5_000));
       } catch {
         this.status.lastError = "Verified Helius transactions are waiting for PostgreSQL persistence.";
         await this.ctx.storage.setAlarm(Date.now() + 30_000);
