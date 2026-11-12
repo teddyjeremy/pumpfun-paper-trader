@@ -45,6 +45,7 @@ import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/pri
 import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
 import { officialPumpSdkModulesAvailable } from "../../../../src/ingestion/pump-sdk-runtime.js";
 import { fetchPumpSwapSdkQuote } from "../../../../src/ingestion/pump-sdk-quote-adapter.js";
+import { fetchPumpCurveSdkQuote } from "../../../../src/ingestion/pump-curve-sdk-quote-adapter.js";
 import {
   createHistoricalBackfillState, fetchHeliusAddressSignaturesPage,
   type HistoricalBackfillState
@@ -642,6 +643,39 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await this.appendAudit("QUOTE_RESULT", input.mint, {
         requestId, status: "BLOCKED", reason
       }, `quote-result:${requestId}`);
+      throw error;
+    }
+  }
+
+
+  /** Read-only, audited SDK quote for an active Pump bonding curve. */
+  async requestPumpCurveQuote(input: {
+    mint: string; side: "BUY" | "SELL"; amountBaseUnits: string;
+  }): Promise<unknown> {
+    await this.hydrate();
+    if (!this.activeSessionId) throw new Error("No active paper session.");
+    const requestId = crypto.randomUUID();
+    await this.appendAudit("QUOTE_REQUESTED", input.mint, {
+      requestId, venue: "pump-bonding-curve", side: input.side,
+      amountBaseUnits: input.amountBaseUnits
+    }, `curve-quote-request:${requestId}`);
+    try {
+      const quote = await fetchPumpCurveSdkQuote({
+        ...input,
+        config: { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" }
+      });
+      await this.appendAudit("QUOTE_RESULT", input.mint, {
+        requestId, status: "QUOTED", quote
+      }, `curve-quote-result:${requestId}`);
+      return quote;
+    } catch (error) {
+      const rawReason = error instanceof Error ? error.message : "Quote request failed.";
+      const reason = this.env.HELIUS_API_KEY
+        ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
+        : rawReason;
+      await this.appendAudit("QUOTE_RESULT", input.mint, {
+        requestId, status: "BLOCKED", reason
+      }, `curve-quote-result:${requestId}`);
       throw error;
     }
   }
@@ -1741,6 +1775,34 @@ export default {
     }
     if (url.pathname === "/candidates" && request.method === "GET") {
       return Response.json(await coordinator.listCandidates());
+    }
+
+
+    if (url.pathname === "/paper-curve-quote" && request.method === "POST") {
+      let body: unknown;
+      try { body = await request.json(); } catch {
+        return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      const value = body && typeof body === "object" ? body as Record<string, unknown> : {};
+      const { mint, side, amountBaseUnits } = value;
+      if (typeof mint !== "string" || !mint.trim() ||
+          (side !== "BUY" && side !== "SELL") ||
+          typeof amountBaseUnits !== "string" || !/^\\d+$/.test(amountBaseUnits) ||
+          amountBaseUnits.length > 20 || BigInt(amountBaseUnits || "0") <= 0n ||
+          BigInt(amountBaseUnits || "0") > 18_446_744_073_709_551_615n) {
+        return Response.json({
+          error: "mint, side (BUY|SELL), and positive u64 amountBaseUnits are required"
+        }, { status: 400 });
+      }
+      try {
+        return Response.json(await coordinator.requestPumpCurveQuote({
+          mint, side, amountBaseUnits
+        }));
+      } catch (error) {
+        return Response.json({
+          error: error instanceof Error ? error.message : "Unable to create Pump curve quote"
+        }, { status: 409 });
+      }
     }
 
     if (url.pathname === "/paper-quote" && request.method === "POST") {
