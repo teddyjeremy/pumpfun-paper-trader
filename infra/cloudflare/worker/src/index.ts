@@ -133,6 +133,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
     this.heliusState = normalizeHeliusMonitorState(await this.ctx.storage.get<HeliusMonitorState>("helius_monitor_state"));
     this.verifiedTransactions = (await this.ctx.storage.get<VerifiedPumpTransaction[]>("verified_transactions")) ?? [];
+    // A Durable Object restart destroys outbound WebSockets. Without historical
+    // backfill, the interrupted interval must be represented as a data gap.
+    this.markHeliusCoverageGap();
     this.heliusState = resetHeliusSubscriptionIds(this.heliusState);
     if (savedDiscovery) this.discovery = { ...emptyDiscoveryStore(), ...savedDiscovery, expired: savedDiscovery.expired ?? 0 };
     this.status.enabled = enabled === true;
@@ -210,6 +213,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (this.heliusSocket?.readyState === WebSocket.OPEN &&
         this.heliusConnectedAtMs > 0 && Date.now() - this.heliusConnectedAtMs >= 14 * 60 * 1000) {
       const oldHeliusSocket = this.heliusSocket;
+      this.markHeliusCoverageGap();
       this.heliusSocket = null;
       this.status.heliusConnected = false;
       oldHeliusSocket.close(4001, "Scheduled Helius connection rotation");
@@ -217,6 +221,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (this.heliusSocket?.readyState === WebSocket.CONNECTING &&
         this.heliusConnectingSinceMs > 0 && Date.now() - this.heliusConnectingSinceMs >= 30_000) {
       const oldHeliusSocket = this.heliusSocket;
+      this.markHeliusCoverageGap();
       this.heliusSocket = null;
       oldHeliusSocket.close(4000, "Helius connection attempt timed out");
     }
@@ -510,6 +515,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         this.status.heliusConnected = false;
         this.heliusConnectedAtMs = 0;
         this.heliusConnectingSinceMs = 0;
+        if (this.status.enabled) this.markHeliusCoverageGap();
         void this.persist().catch(() => undefined);
       });
       socket.addEventListener("error", () => {
@@ -601,6 +607,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     } finally {
       this.drainingHelius = false;
     }
+  }
+
+  private markHeliusCoverageGap(): void {
+    const previouslyIncomplete = new Set(this.heliusState.incompleteMints);
+    const newlyIncomplete = [...new Set(this.heliusState.subscriptions.map(item => item.mint))]
+      .filter(mint => !previouslyIncomplete.has(mint));
+    if (newlyIncomplete.length === 0) return;
+    this.heliusState = {
+      ...this.heliusState,
+      incompleteMints: [...this.heliusState.incompleteMints, ...newlyIncomplete].slice(-10)
+    };
+    this.status.incompleteHeliusTransactions += newlyIncomplete.length;
   }
 
   private markHeliusIncomplete(): void {
