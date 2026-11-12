@@ -376,6 +376,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return { ...this.status };
   }
 
+  private auditInBackground(kind: AuditKind, mint: string | null, data: unknown, idempotencyKey?: string): void {
+    this.ctx.waitUntil(this.appendAudit(kind, mint, data, idempotencyKey).catch(() => {
+      this.status.lastError = "Audit journal append failed.";
+    }));
+  }
+
   private async appendAudit(kind: AuditKind, mint: string | null, data: unknown, idempotencyKey?: string): Promise<void> {
     if (!this.activeSessionId) return;
     const sessionId = this.activeSessionId;
@@ -838,7 +844,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           return;
         }
         this.status.connected = true;
-        void this.appendAudit("PROVIDER_STATUS", null, { provider: "pumpportal", status: "CONNECTED" }).catch(() => undefined);
+        this.auditInBackground("PROVIDER_STATUS", null, { provider: "pumpportal", status: "CONNECTED" });
         this.status.subscriptionsSent = false;
         this.status.connectedAt = new Date().toISOString();
         this.connectingSinceMs = 0;
@@ -931,7 +937,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       socket.addEventListener("error", () => {
         if (this.socket !== socket || !this.status.enabled) return;
         this.status.lastError = "PumpPortal WebSocket transport error.";
-        void this.appendAudit("ERROR", null, { subsystem: "PUMPPORTAL_WEBSOCKET", message: this.status.lastError }).catch(() => undefined);
+        this.auditInBackground("ERROR", null, { subsystem: "PUMPPORTAL_WEBSOCKET", message: this.status.lastError });
         void this.persist().catch(() => undefined);
       });
     } catch {
@@ -940,7 +946,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.status.subscriptionsSent = false;
       this.connectingSinceMs = 0;
       this.status.lastError = "Unable to create the PumpPortal WebSocket connection.";
-      void this.appendAudit("ERROR", null, { subsystem: "PUMPPORTAL_CONNECT", message: this.status.lastError }).catch(() => undefined);
+      this.auditInBackground("ERROR", null, { subsystem: "PUMPPORTAL_CONNECT", message: this.status.lastError });
       if (this.status.enabled) this.scheduleReconnect();
     }
   }
@@ -1043,7 +1049,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           return;
         }
         this.status.heliusConnected = true;
-        void this.appendAudit("PROVIDER_STATUS", null, { provider: "helius", status: "CONNECTED" }).catch(() => undefined);
+        this.auditInBackground("PROVIDER_STATUS", null, { provider: "helius", status: "CONNECTED" });
         this.heliusConnectedAtMs = Date.now();
         this.heliusConnectingSinceMs = 0;
         this.heliusState = resetHeliusSubscriptionIds(this.heliusState);
@@ -1069,10 +1075,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
               incompleteMints: [...new Set([...this.heliusState.incompleteMints, failed.mint])].slice(-10)
             };
             this.status.incompleteHeliusTransactions += 1;
-            void this.appendAudit("DATA_GAP", failed?.mint ?? null, {
+            this.auditInBackground("DATA_GAP", failed?.mint ?? null, {
               provider: "helius", reason: "SUBSCRIPTION_REJECTED", requestId: record.id,
               error: jsonSafe(record.error)
-            }).catch(() => undefined);
+            });
           }
           void this.persist().catch(() => undefined);
           return;
@@ -1105,7 +1111,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       socket.addEventListener("error", () => {
         if (this.heliusSocket !== socket) return;
         this.status.lastError = "Helius WebSocket transport error.";
-        void this.appendAudit("ERROR", null, { subsystem: "HELIUS_WEBSOCKET", message: this.status.lastError }).catch(() => undefined);
+        this.auditInBackground("ERROR", null, { subsystem: "HELIUS_WEBSOCKET", message: this.status.lastError });
         void this.persist().catch(() => undefined);
       });
     } catch {
@@ -1114,7 +1120,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.heliusConnectedAtMs = 0;
       this.heliusConnectingSinceMs = 0;
       this.status.lastError = "Unable to create the Helius WebSocket connection.";
-      void this.appendAudit("ERROR", null, { subsystem: "HELIUS_CONNECT", message: this.status.lastError }).catch(() => undefined);
+      this.auditInBackground("ERROR", null, { subsystem: "HELIUS_CONNECT", message: this.status.lastError });
     }
   }
 
@@ -1202,7 +1208,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       }
     } catch {
       this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
-      void this.appendAudit("ERROR", activeWork?.mint ?? null, { subsystem: "HELIUS_QUEUE", message: this.status.lastError }).catch(() => undefined);
+      this.auditInBackground("ERROR", activeWork?.mint ?? null, { subsystem: "HELIUS_QUEUE", message: this.status.lastError });
       // Only remove the item that actually failed. A storage failure after a
       // successful dequeue must never discard the next candidate's work.
       if (activeWork) {
@@ -1235,12 +1241,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       incompleteMints: [...this.heliusState.incompleteMints, ...newlyIncomplete].slice(-10)
     };
     this.status.incompleteHeliusTransactions += newlyIncomplete.length;
-    void this.appendAudit("DATA_GAP", null, { reason: "HELIUS_COVERAGE_INTERRUPTED", affectedMints: newlyIncomplete }).catch(() => undefined);
+    this.auditInBackground("DATA_GAP", null, { reason: "HELIUS_COVERAGE_INTERRUPTED", affectedMints: newlyIncomplete });
   }
 
   private markHeliusIncomplete(): void {
     const mint = this.heliusState.queue[0]?.mint;
-    void this.appendAudit("DATA_GAP", mint ?? null, { provider: "helius", reason: "INCOMPLETE_NOTIFICATION_OR_QUEUE_ITEM" }).catch(() => undefined);
+    this.auditInBackground("DATA_GAP", mint ?? null, { provider: "helius", reason: "INCOMPLETE_NOTIFICATION_OR_QUEUE_ITEM" });
     if (mint) this.heliusState = {
       ...this.heliusState,
       incompleteMints: [...new Set([...this.heliusState.incompleteMints, mint])].slice(-10)
@@ -1253,10 +1259,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.status.reconnectAttempts += 1;
     const delayMs = Math.min(60_000, 1_000 * (2 ** Math.min(this.status.reconnectAttempts - 1, 6)));
     this.status.nextReconnectAt = new Date(Date.now() + delayMs).toISOString();
-    void this.appendAudit("PROVIDER_STATUS", null, {
+    this.auditInBackground("PROVIDER_STATUS", null, {
       provider: "pumpportal", status: "RECONNECT_SCHEDULED",
       attempt: this.status.reconnectAttempts, nextReconnectAt: this.status.nextReconnectAt
-    }).catch(() => undefined);
+    });
   }
 
   private syncCounts(): void {
