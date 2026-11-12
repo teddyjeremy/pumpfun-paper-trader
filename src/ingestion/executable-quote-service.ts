@@ -16,7 +16,8 @@ export type OfflineQuoteFetcher = (input: {
 }) => Promise<OfflinePumpQuote>;
 
 export interface ExecutableRoundTripQuote {
-  status: "READY";
+  status: "QUOTES_VALIDATED";
+  paperEntryAuthorized: false;
   buyQuote: ExecutablePaperQuoteWithLatency;
   initialSellQuote: ExecutablePaperQuoteWithLatency;
   sellability: {
@@ -50,7 +51,8 @@ export interface ExecutableRoundTripQuote {
 
 /**
  * Produces a fresh exact-size buy quote and an immediate full-output sellability
- * quote. This is a read-only quote check; it does not create a position or fill.
+ * quote. This is a read-only quote check; it does not authorize an entry,
+ * create a position, record a fill or submit a transaction.
  */
 export async function fetchExecutableRoundTripQuote(input: {
   fetchQuote: OfflineQuoteFetcher;
@@ -77,7 +79,8 @@ export async function fetchExecutableRoundTripQuote(input: {
   const minimumNetReturnPct = input.minimumRoundTripNetReturnPct ?? 0;
   const providerFeeUsd = input.providerFeeUsdPerTransaction ?? 0;
   const percentile = input.priorityFeePercentile ?? 75;
-  if (!/^\d+$/.test(input.buyAmountBaseUnits) || BigInt(input.buyAmountBaseUnits) <= 0n) {
+  if (!/^\d+$/.test(input.buyAmountBaseUnits) || BigInt(input.buyAmountBaseUnits) <= 0n ||
+      BigInt(input.buyAmountBaseUnits) > 18_446_744_073_709_551_615n) {
     throw new Error("Buy quote amount must be a positive unsigned base-unit integer.");
   }
   if (!Number.isSafeInteger(executionDelayMs) || executionDelayMs < 0 || executionDelayMs > 1_000) {
@@ -184,7 +187,8 @@ export async function fetchExecutableRoundTripQuote(input: {
     throw new Error("Round-trip net return calculation is not finite.");
   }
   return {
-    status: "READY",
+    status: "QUOTES_VALIDATED",
+    paperEntryAuthorized: false,
     buyQuote,
     initialSellQuote,
     sellability: {
