@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PumpCreateEvent, PumpTradeEvent } from "../src/ingestion/pump-events.js";
 import type { VerifiedPumpTransaction } from "../src/ingestion/helius.js";
-import { calibrateVolumeThresholds, classifyHistoricalWalletClusterRisk, hasCompleteHistoricalEntryEvidence, hasCompleteHistoricalExitEvidence, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
+import { calibrateVolumeThresholds, classifyHistoricalWalletClusterRisk, splitChronologicalCalibrationCoins, hasCompleteHistoricalEntryEvidence, hasCompleteHistoricalExitEvidence, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
 
 const mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const quoteMint = "So11111111111111111111111111111111111111112";
@@ -249,6 +249,35 @@ describe("historical strategy replay", () => {
     }, (_key, value) => typeof value === "bigint" ? value.toString() : value));
     raw.tradeEvents[0].mint = key;
     expect(() => hydrateArchivedVerifiedTransaction(raw)).toThrow(/mint does not match/);
+  });
+
+  it("keeps coins launched in the same second together across the chronological holdout boundary", () => {
+    const coins = [
+      { mint: "a", launchBlockTime: 1 },
+      { mint: "b", launchBlockTime: 2 },
+      { mint: "c", launchBlockTime: 2 },
+      { mint: "d", launchBlockTime: 3 },
+      { mint: "e", launchBlockTime: 4 }
+    ];
+    const { training, holdout } = splitChronologicalCalibrationCoins(coins, 0.6);
+    expect(training.map(coin => coin.mint)).toEqual(["a", "b", "c"]);
+    expect(holdout.map(coin => coin.mint)).toEqual(["d", "e"]);
+    expect(Math.max(...training.map(coin => coin.launchBlockTime)))
+      .toBeLessThan(Math.min(...holdout.map(coin => coin.launchBlockTime)));
+  });
+
+  it("does not create a false chronological holdout when every coin has the same launch timestamp", () => {
+    const coins = Array.from({ length: 4 }, (_, index) => ({
+      mint: String(index), launchBlockTime: 100
+    }));
+    const { training, holdout } = splitChronologicalCalibrationCoins(coins);
+    expect(training).toHaveLength(0);
+    expect(holdout).toHaveLength(4);
+  });
+
+  it("rejects invalid chronological training fractions", () => {
+    expect(() => splitChronologicalCalibrationCoins([], 0)).toThrow(/Training fraction/);
+    expect(() => splitChronologicalCalibrationCoins([], 1)).toThrow(/Training fraction/);
   });
 
 });
