@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, enqueueHeliusSignatureWork, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, selectHeliusCandidates, confirmHeliusSubscription,
-  takeHeliusWork, MAX_HELIUS_CANDIDATES, MAX_HELIUS_SIGNATURE_QUEUE, resetHeliusSubscriptionIds,
+  takeHeliusWork, retryHeliusSignatureWork, MAX_HELIUS_CANDIDATES, MAX_HELIUS_SIGNATURE_QUEUE, resetHeliusSubscriptionIds,
   FRESH_LAUNCH_SLOT_RESERVE
 } from "../src/ingestion/helius-monitor.js";
 import type { DiscoveryCandidate } from "../src/ingestion/discovery-store.js";
