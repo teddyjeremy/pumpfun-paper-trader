@@ -231,6 +231,8 @@ app.get("/api/results/summary", async () => {
   const state = snapshot();
   const counters = state.counters;
   const ledger = await getTradingDashboardSnapshot();
+  const ledgerPortfolio = ledger.available && ledger.portfolio !== null ? ledger.portfolio : null;
+  const ledgerUnavailableReason = "reason" in ledger ? ledger.reason : "Ledger snapshot is unavailable.";
   return {
     mode: "paper",
     portfolio: {
@@ -238,13 +240,13 @@ app.get("/api/results/summary", async () => {
       positionSizeUsd: config.PAPER_POSITION_SIZE_USD,
       maxOpenPositions: config.PAPER_MAX_OPEN_POSITIONS,
       maxAllocatedUsd: config.PAPER_POSITION_SIZE_USD * config.PAPER_MAX_OPEN_POSITIONS,
-      available: ledger.available,
-      realizedNetPnlUsd: ledger.available ? ledger.portfolio.realizedPnlUsd : null,
-      realizedNetPnlSol: ledger.available ? ledger.portfolio.realizedPnlSol : null,
-      openPositions: ledger.available ? ledger.portfolio.openPositions : null,
-      closedPositions: ledger.available ? ledger.portfolio.closedPositions : null,
-      unrealizedPnlSol: ledger.available ? ledger.portfolio.unrealizedPnlSol : null,
-      note: ledger.available ? ledger.portfolio.usdValuationNote : ledger.reason
+      available: ledgerPortfolio !== null,
+      realizedNetPnlUsd: ledgerPortfolio?.realizedPnlUsd ?? null,
+      realizedNetPnlSol: ledgerPortfolio?.realizedPnlSol ?? null,
+      openPositions: ledgerPortfolio?.openPositions ?? null,
+      closedPositions: ledgerPortfolio?.closedPositions ?? null,
+      unrealizedPnlSol: ledgerPortfolio?.unrealizedPnlSol ?? null,
+      note: ledgerPortfolio?.usdValuationNote ?? ledgerUnavailableReason
     },
     activity: {
       discovered: counters["candidate.discovered"] ?? 0,
