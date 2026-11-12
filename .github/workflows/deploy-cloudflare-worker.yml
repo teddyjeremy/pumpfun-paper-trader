@@ -2,6 +2,14 @@ name: Deploy Cloudflare paper worker
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "infra/cloudflare/worker/**"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy-cloudflare-worker.yml"
 
 permissions:
   contents: read
