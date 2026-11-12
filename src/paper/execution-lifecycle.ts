@@ -27,6 +27,24 @@ export interface PaperEntryExecutionInput {
     sellQuote: ExecutablePaperQuoteWithLatency;
   }) => Promise<unknown>;
 }
+const REQUIRED_ENTRY_RULES = Object.freeze([
+  "CANDIDATE_AGE",
+  "IMPULSE",
+  "PULLBACK",
+  "RECLAIM",
+  "THREE_FLOW_WINDOWS",
+  "DISTINCT_BUYERS",
+  "BUYER_CONCENTRATION",
+  "CREATOR_SELL_RISK",
+  "WALLET_CLUSTER_RISK",
+  "ATTRIBUTION_CONFIDENCE",
+  "PULLBACK_VOLUME_CONTRACTION",
+  "RECLAIM_VOLUME_EXPANSION",
+  "SIGNAL_FRESHNESS",
+  "EXECUTABLE_QUOTE",
+  "ROUND_TRIP_COST"
+] as const);
+
 export type PaperEntryExecutionResult =
   | { status: "BLOCKED"; reason: string }
   | { status: "DUPLICATE"; buyQuoteId: string; sellQuoteId: string }
@@ -48,9 +66,19 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
   if (input.strategy.decision !== "BUY" || input.strategy.buyAllowed !== true) {
     return { status: "BLOCKED", reason: "Strategy has not explicitly authorized a BUY." };
   }
-  if (!Array.isArray(input.strategy.rules) || input.strategy.rules.length === 0 ||
-      input.strategy.rules.some(rule => rule.status !== "PASS")) {
-    return { status: "BLOCKED", reason: "Every mandatory strategy rule must PASS; FAIL and UNKNOWN both block entry." };
+  if (!Array.isArray(input.strategy.rules) || input.strategy.rules.length !== REQUIRED_ENTRY_RULES.length) {
+    return { status: "BLOCKED", reason: "The complete mandatory strategy rule set is required; missing or extra rules block entry." };
+  }
+  const suppliedRules = new Map<string, string>();
+  for (const rule of input.strategy.rules) {
+    if (!rule || typeof rule.rule !== "string" || suppliedRules.has(rule.rule)) {
+      return { status: "BLOCKED", reason: "Strategy rules must have unique, valid rule identifiers." };
+    }
+    suppliedRules.set(rule.rule, rule.status);
+  }
+  if (REQUIRED_ENTRY_RULES.some(rule => suppliedRules.get(rule) !== "PASS") ||
+      [...suppliedRules.keys()].some(rule => !(REQUIRED_ENTRY_RULES as readonly string[]).includes(rule))) {
+    return { status: "BLOCKED", reason: "Every recognized mandatory strategy rule must PASS exactly once; FAIL, UNKNOWN, missing, duplicate and unrecognized rules all block entry." };
   }
   if (input.portfolio.enteredMints.includes(input.mint)) {
     return { status: "BLOCKED", reason: "This mint has already been entered in the paper session." };
