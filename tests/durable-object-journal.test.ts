@@ -226,6 +226,33 @@ describe("Durable Object audit storage contract", () => {
     expect(await storage.get<string[]>(`helius_backfill_mints:runtime-test-session`)).toEqual([mint]);
   });
 
+
+  it("does not substitute the Pump event timestamp for a missing verified RPC block time", async () => {
+    const storage = new MemoryDurableStorage();
+    seedSession(storage, true);
+    const mint = "So11111111111111111111111111111111111111112";
+    const signature = "5".repeat(64);
+    const coordinator = harness(storage).coordinator as unknown as {
+      activeSessionId: string | null;
+      beginHistoricalBackfill: (transaction: unknown) => Promise<void>;
+    };
+    coordinator.activeSessionId = "runtime-test-session";
+    await coordinator.beginHistoricalBackfill({
+      signature,
+      mint,
+      createEvents: [{ mint, bondingCurve: mint, timestamp: "1000" }]
+    });
+
+    const state = await storage.get<{
+      status: string; launchBlockTime: number | null; reason: string | null
+    }>(`helius_backfill:runtime-test-session:${mint}`);
+    expect(state).toMatchObject({
+      status: "INCOMPLETE",
+      launchBlockTime: null,
+      reason: "Verified launch block time is unavailable."
+    });
+  });
+
   it("keeps session metadata and event count consistent", async () => {
     const { coordinator, storage } = harness();
     seedSession(storage);
