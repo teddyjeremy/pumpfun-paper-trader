@@ -35,6 +35,7 @@ import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
 import { buildCandidateTradeFlows, SOL_QUOTE_MINT } from "../../../../src/ingestion/trade-flow.js";
 import { fetchHolderConcentration } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
+import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import { evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
 import { collectWalletFundingEvidence, type WalletFundingEvidenceResult } from "../../../../src/ingestion/wallet-link-collector.js";
@@ -519,7 +520,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
     if (monitoredMints.length === 0) return;
     const report = await this.listTradeFlows() as {
-      flows: Array<{ mint: string; quoteMint: string | null; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
+      solUsdPrice?: Awaited<ReturnType<typeof fetchSolUsdPrice>>;
+      flows: Array<{ mint: string; quoteMint: string | null; microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE"; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
       priceVolumeProfiles: Array<{ mint:string; quoteMint:string|null; baselinePrice:number|null; reclaimTime:number|null; buckets:Array<{closePrice:number;highPrice:number;endTime:number}>; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
       creatorSellRisk: Array<{mint:string;status:string}>;
       walletClusterRisk: Array<{mint:string;status:string}>;
@@ -569,7 +571,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         flow: flow ? {
           dataComplete: flow.dataComplete, latestThreeWindowFlowPass: flow.latestThreeWindowFlowPass, windows: flow.windows.map(window => ({...window, flowWindowPass: window.flowWindowPass})),
           distinctBuyersAcrossLatestThree: flow.distinctBuyersAcrossLatestThree,
-          largestBuyerShareAcrossLatestThreeBps: flow.largestBuyerShareAcrossLatestThreeBps
+          largestBuyerShareAcrossLatestThreeBps: flow.largestBuyerShareAcrossLatestThreeBps,
+          microTradeFilterStatus: flow.microTradeFilterStatus
         } : null,
         creatorRiskStatus: creatorRisk?.status ?? null,
         walletClusterRiskStatus: walletRisk?.status ?? null,
@@ -577,7 +580,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         signalAgeSeconds: freshness.signalAgeSeconds, nextObservationConfirmed: freshness.nextObservationConfirmed,
         executableQuoteAvailable: false
       });
-      await this.appendAudit("FEATURE_SNAPSHOT", mint, { triggerSignature, profile, flow },
+      await this.appendAudit("FEATURE_SNAPSHOT", mint, { triggerSignature, profile, flow, solUsdPrice: report.solUsdPrice ?? null },
         `features:${triggerSignature}:${mint}`);
       const decisionPriceQuotePerToken = profile?.buckets.at(-1)?.closePrice ?? null;
       await this.appendAudit("STRATEGY_DECISION", mint, {
@@ -819,7 +822,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const candidateMints = this.discovery.candidates
       .filter(candidate => candidate.status === "DISCOVERED")
       .map(candidate => candidate.mint);
+    const solUsdPrice = await fetchSolUsdPrice();
+    const solUsdPriceUsd = solUsdPrice.status === "AVAILABLE" ? solUsdPrice.observation.priceUsd : undefined;
     const flows = buildCandidateTradeFlows(this.verifiedTransactions, {
+      solUsdPriceUsd,
       incompleteMints,
       coverageStartByMint,
       candidateMints
@@ -866,6 +872,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         (b.largestBuyerShareAcrossLatestThreeBps ?? Number.MAX_SAFE_INTEGER)
     );
     const priceVolumeProfiles = buildCandidatePriceVolumeProfiles(this.verifiedTransactions, {
+      solUsdPriceUsd,
       incompleteMints,
       coverageStartByMint,
       candidateMints: this.discovery.candidates
@@ -876,6 +883,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       provider: "helius",
       mode: "paper",
       generatedAt: new Date().toISOString(),
+      solUsdPrice,
       retainedVerifiedTransactions: this.verifiedTransactions.length,
       retentionMayBeTruncated,
       knownIncompleteMints: incompleteMints,
