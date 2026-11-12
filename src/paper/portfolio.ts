@@ -64,7 +64,7 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
       now - observed > PAPER_PORTFOLIO_POLICY.maxQuoteAgeMs || expires <= now) {
     throw new Error("Executable quote is stale or expired.");
   }
-  if (!validPositive(quote.outputUsd) || !/^\d+$/.test(quote.inputAmountBaseUnits) ||
+  if (!validPositive(quote.requestedUsd) || !validPositive(quote.outputUsd) || !/^\d+$/.test(quote.inputAmountBaseUnits) ||
       !/^\d+$/.test(quote.outputAmountBaseUnits) || BigInt(quote.inputAmountBaseUnits) <= 0n ||
       BigInt(quote.outputAmountBaseUnits) <= 0n || !Number.isFinite(quote.priceImpactPct) ||
       !Number.isFinite(quote.taxPct) || quote.priceImpactPct < 0 || quote.taxPct < 0 ||
@@ -178,6 +178,9 @@ export function markPaperPosition(state: PaperPortfolioState, input: {
 export function closePaperPosition(state: PaperPortfolioState, input: {
   positionId: string; sellQuote: ExecutablePaperQuote; exitReason: string; closedAt: string; nowMs?: number;
 }): { state: PaperPortfolioState; position: PaperPosition } {
+  if (!Number.isFinite(Date.parse(input.closedAt)) || !input.exitReason.trim()) {
+    throw new Error("Exit timestamp and reason are required.");
+  }
   const index = state.positions.findIndex(position => position.positionId === input.positionId);
   const previous = state.positions[index];
   if (!previous || previous.status !== "OPEN") throw new Error("Open paper position not found.");
