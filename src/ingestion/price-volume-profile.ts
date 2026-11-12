@@ -54,6 +54,8 @@ export interface CandidatePriceVolumeProfile {
   impulseVolume: StageVolume;
   pullbackVolume: StageVolume;
   reclaimVolume: StageVolume;
+  pullbackVolumeVsImpulsePct: number | null;
+  reclaimVolumeVsPullbackPct: number | null;
   buckets: PriceVolumeBucket[];
   profileStatus: "NO_VERIFIED_TRADES" | "NO_IMPULSE" | "IMPULSE_ONLY" | "PULLBACK_TOO_DEEP" | "PULLBACK_IN_PROGRESS" | "RECLAIM_DETECTED";
   coverageStatus: "COMPLETE_FROM_LAUNCH" | "PARTIAL_FROM_LAUNCH" | "GAPPED" | "UNKNOWN";
@@ -127,6 +129,13 @@ function summarizeBucket(bucket: MutableBucket): PriceVolumeBucket | null {
     sellQuoteVolume: sell.toString(),
     totalQuoteVolume: (buy + sell).toString()
   };
+}
+
+function volumeRatioPct(part: StageVolume, base: StageVolume): number | null {
+  const denominator = BigInt(base.totalQuoteVolume);
+  if (denominator <= 0n) return null;
+  const numerator = BigInt(part.totalQuoteVolume);
+  return Number((numerator * 10_000n + denominator / 2n) / denominator) / 100;
 }
 
 function summarizeStage(buckets: readonly PriceVolumeBucket[]): StageVolume {
@@ -298,6 +307,9 @@ export function buildCandidatePriceVolumeProfiles(
     const reclaimBuckets = reclaimIndex >= 0
       ? buckets.slice(pullbackLowIndex + 1, reclaimIndex + 1)
       : [];
+    const impulseVolume = impulseBuckets.length ? summarizeStage(impulseBuckets) : empty;
+    const pullbackVolume = pullbackBuckets.length ? summarizeStage(pullbackBuckets) : empty;
+    const reclaimVolume = reclaimBuckets.length ? summarizeStage(reclaimBuckets) : empty;
     const coverageStart = options.coverageStartByMint?.[group.mint];
     const coverageStatus = incomplete.has(group.mint)
       ? "GAPPED"
@@ -330,9 +342,11 @@ export function buildCandidatePriceVolumeProfiles(
       reclaimTime: reclaimIndex >= 0 ? buckets[reclaimIndex]!.endTime : null,
       reclaimPrice: reclaimIndex >= 0 ? buckets[reclaimIndex]!.closePrice : null,
       reclaimAbovePreviousFiveSecondHighPct: reclaimAbovePct,
-      impulseVolume: impulseBuckets.length ? summarizeStage(impulseBuckets) : empty,
-      pullbackVolume: pullbackBuckets.length ? summarizeStage(pullbackBuckets) : empty,
-      reclaimVolume: reclaimBuckets.length ? summarizeStage(reclaimBuckets) : empty,
+      impulseVolume,
+      pullbackVolume,
+      reclaimVolume,
+      pullbackVolumeVsImpulsePct: volumeRatioPct(pullbackVolume, impulseVolume),
+      reclaimVolumeVsPullbackPct: volumeRatioPct(reclaimVolume, pullbackVolume),
       buckets,
       profileStatus,
       coverageStatus,
