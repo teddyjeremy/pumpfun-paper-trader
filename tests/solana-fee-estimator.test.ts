@@ -32,7 +32,7 @@ function feeFetcher(options: {
 const baseInput = {
   apiKey: "test-api-key",
   messageBase64: "AQ==",
-  accountKeys: [account],
+  writableAccountKeys: [account],
   computeUnitLimit: 200_000,
   nowMs: now
 };
@@ -85,7 +85,7 @@ describe("Solana transaction fee estimator", () => {
       ...baseInput, messageBase64: "not base64", fetcher
     });
     const duplicateLocks = await estimateSolanaTransactionFees({
-      ...baseInput, accountKeys: [account, account], fetcher
+      ...baseInput, writableAccountKeys: [account, account], fetcher
     });
     const badLimit = await estimateSolanaTransactionFees({
       ...baseInput, computeUnitLimit: 1_400_001, fetcher
