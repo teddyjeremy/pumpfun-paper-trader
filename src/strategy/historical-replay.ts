@@ -20,7 +20,7 @@ export interface HistoricalReplayConfig {
   label?: {
     minFavorableExcursionPct: number;
     maxAdverseExcursionPct: number;
-    roundTripCostPct?: number;
+    roundTripCostPct: number;
   };
 }
 
@@ -137,13 +137,16 @@ function metrics(input: {
   const roundTripCostPct = input.label?.roundTripCostPct ?? null;
   const netFinalReturnPct = roundTripCostPct === null ? null : grossFinalReturnPct - roundTripCostPct;
   let label: HistoricalEntryOutcome["label"] = "UNKNOWN";
-  let labelReason = "A complete forward window and explicit outcome thresholds are required.";
-  if (input.decodeComplete && input.label) {
-    label = maxFavorableExcursionPct >= input.label.minFavorableExcursionPct &&
-      maxAdverseExcursionPct <= input.label.maxAdverseExcursionPct ? "SUCCESS" : "FAILURE";
+  let labelReason = "A complete forward window, explicit excursion thresholds and an assumed round-trip cost are required.";
+  if (input.decodeComplete && input.label && netFinalReturnPct !== null) {
+    const metExcursions = maxFavorableExcursionPct >= input.label.minFavorableExcursionPct &&
+      maxAdverseExcursionPct <= input.label.maxAdverseExcursionPct;
+    label = metExcursions && netFinalReturnPct > 0 ? "SUCCESS" : "FAILURE";
     labelReason = label === "SUCCESS"
-      ? "Observed forward path met the configured favorable-excursion and adverse-excursion criteria."
-      : "Observed forward path failed at least one configured excursion criterion.";
+      ? "Observed forward path met both excursion criteria and remained net-positive after the supplied round-trip cost."
+      : !metExcursions
+        ? "Observed forward path failed at least one configured excursion criterion."
+        : "Observed final return was not positive after the supplied round-trip cost.";
   } else if (!input.decodeComplete) {
     labelReason = "Transaction decoding coverage is incomplete; outcome is not labelled.";
   }
