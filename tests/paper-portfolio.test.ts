@@ -120,4 +120,23 @@ describe("paper portfolio accounting",()=>{
   expect(marked.bankroll.currentEquityUsd).toBeCloseTo(3.686);
  });
 
+ it("rejects duplicate position IDs",()=>{
+  const opened=openPaperPosition(createPaperPortfolio(),{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
+  expect(()=>openPaperPosition(opened.state,{mint:"mint2",positionId:"p1",occurredAt:now,buyQuote:quote("mint2","BUY"),sellQuote:quote("mint2","SELL"),nowMs:Date.parse(now)})).toThrow(/position ID must be unique/);
+ });
+ it("adds a slot at $5 and a third slot at $10 while increasing stake by 50% per doubling",()=>{
+  const openAndMark=(value:number)=>{
+   const opened=openPaperPosition(createPaperPortfolio(),{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
+   return markPaperPosition(opened.state,{sellQuotes:[quote("mint","SELL","1000000",value+0.007)],markedAt:now,nowMs:Date.parse(now)});
+  };
+  const atFive=openAndMark(3.307);
+  expect(atFive.bankroll.currentEquityUsd).toBeCloseTo(5);
+  expect(atFive.maxConcurrentPositions).toBe(2);
+  expect(atFive.positionSizeUsd).toBe(1.5);
+  const atTen=openAndMark(8.307);
+  expect(atTen.bankroll.currentEquityUsd).toBeCloseTo(10);
+  expect(atTen.maxConcurrentPositions).toBe(3);
+  expect(atTen.positionSizeUsd).toBeCloseTo(2.25);
+ });
+
 });
