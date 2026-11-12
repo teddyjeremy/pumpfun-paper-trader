@@ -9,6 +9,7 @@ import {
   type HeliusMonitorState
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
+import { buildCandidateTradeFlows } from "../../../../src/ingestion/trade-flow.js";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
@@ -262,6 +263,21 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     await this.hydrate();
     const boundedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 100;
     return this.verifiedTransactions.slice(-boundedLimit).map(value => jsonSafe(value));
+  }
+
+  async listTradeFlows(): Promise<unknown> {
+    await this.hydrate();
+    return {
+      provider: "helius",
+      mode: "paper",
+      generatedAt: new Date().toISOString(),
+      retainedVerifiedTransactions: this.verifiedTransactions.length,
+      retentionMayBeTruncated: this.verifiedTransactions.length >= 2_000,
+      knownIncompleteMints: [...this.heliusState.incompleteMints],
+      flows: buildCandidateTradeFlows(this.verifiedTransactions, {
+        incompleteMints: this.heliusState.incompleteMints
+      })
+    };
   }
 
   async listCandidates(): Promise<DiscoveryStoreState> {
@@ -658,6 +674,9 @@ export default {
         count: transactions.length,
         transactions
       });
+    }
+    if (url.pathname === "/flow" && request.method === "GET") {
+      return Response.json(await coordinator.listTradeFlows());
     }
     return Response.json({ error: "Not found" }, { status: 404 });
   },
