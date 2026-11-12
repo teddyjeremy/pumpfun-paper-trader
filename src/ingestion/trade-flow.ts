@@ -79,6 +79,7 @@ export function buildCandidateTradeFlows(
         groups.set(key, group);
       }
       const windowStart = Math.floor(timestamp / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
+      if (windowStart + TRADE_FLOW_WINDOW_SECONDS > nowSeconds) continue;
       const events = group.windows.get(windowStart) ?? [];
       events.push(trade);
       group.windows.set(windowStart, events);
@@ -113,8 +114,8 @@ export function buildCandidateTradeFlows(
     const latestThreeWindowFlowPass = Boolean(latestThree?.every(window => window.flowWindowPass));
     const flowConfirmationPass = latestThreeWindowFlowPass &&
       distinctBuyers >= 5 &&
-      largestBuyerShareBps !== null &&
-      largestBuyerShareBps <= 7_200;
+      totalBuyVolume > 0n &&
+      largestBuyerVolume * 100n <= totalBuyVolume * 72n;
 
     output.push({
       mint: group.mint,
@@ -143,7 +144,9 @@ function summarizeWindow(startTime: number, events: readonly PumpTradeEvent[]) {
   const sellers = new Set<string>();
 
   for (const event of events) {
-    const amount = event.quoteAmount > 0n ? event.quoteAmount : event.solAmount;
+    const amount = event.quoteMint === SOL_QUOTE_MINT
+      ? (event.quoteAmount > 0n ? event.quoteAmount : event.solAmount)
+      : event.quoteAmount;
     if (amount <= 0n) continue;
     if (event.isBuy) {
       buyVolume += amount;
@@ -157,7 +160,7 @@ function summarizeWindow(startTime: number, events: readonly PumpTradeEvent[]) {
 
   const largestBuyerVolume = [...buyerVolumes.values()].reduce((max, amount) => amount > max ? amount : max, 0n);
   const largestBuyerShareBps = buyVolume > 0n
-    ? Number((largestBuyerVolume * 10_000n) / buyVolume)
+    ? Number((largestBuyerVolume * 10_000n + buyVolume - 1n) / buyVolume)
     : null;
   const flowWindowPass = buyVolume > sellVolume * 3n &&
     buyers.size >= 3 &&
