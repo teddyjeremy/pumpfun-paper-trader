@@ -144,6 +144,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private pendingWrites = 0;
   private activeSessionId: string | null = null;
   private persistChain: Promise<void> = Promise.resolve();
+  private auditChain: Promise<void> = Promise.resolve();
   private connectingSinceMs = 0;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -234,6 +235,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   async stop(): Promise<CoordinatorStatus> {
     await this.hydrate();
     this.markHeliusCoverageGap();
+    await this.auditChain;
     if (this.activeSessionId) {
       const completedSessionId = this.activeSessionId;
       const stoppedAt = new Date().toISOString();
@@ -383,9 +385,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     // pointer after its final transaction, but this event still belongs to it.
     const sessionId = this.activeSessionId;
     if (!sessionId) return;
-    this.ctx.waitUntil(this.appendAudit(kind, mint, data, idempotencyKey, sessionId).catch(() => {
+    const append = this.auditChain.then(() =>
+      this.appendAudit(kind, mint, data, idempotencyKey, sessionId)
+    );
+    this.auditChain = append.catch(() => {
       this.status.lastError = "Audit journal append failed.";
-    }));
+    });
+    this.ctx.waitUntil(this.auditChain);
   }
 
   private async appendAudit(kind: AuditKind, mint: string | null, data: unknown,
