@@ -523,7 +523,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       }
     } catch {
       this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
-      this.markHeliusIncomplete();
+      // Do not leave a failing head item at the front forever. Mark its mint
+      // incomplete and discard this one signature so later candidates can
+      // continue; the status makes the evidence gap explicit.
+      const failedWork = takeHeliusWork(this.heliusState);
+      this.heliusState = failedWork.state;
+      if (failedWork.work) {
+        this.heliusState = {
+          ...this.heliusState,
+          incompleteMints: [...new Set([...this.heliusState.incompleteMints, failedWork.work.mint])].slice(-10)
+        };
+      }
+      this.status.incompleteHeliusTransactions += 1;
+      await this.ctx.storage.put({
+        helius_monitor_state: this.heliusState,
+        verified_transactions: this.verifiedTransactions,
+        status: this.status
+      }).catch(() => undefined);
     } finally {
       this.drainingHelius = false;
     }
