@@ -352,10 +352,10 @@ export async function persistPaperAuditEvents(
       if (sequence <= lastSequence) {
         const existing = await client.query<{ event_id: string; event_type: string; same_event: boolean }>(
           `SELECT event_id,event_type,
-             (payload=$4::jsonb AND occurred_at=$5 AND mint IS NOT DISTINCT FROM $6
-               AND strategy_version=$7) AS same_event
+             (payload=$3::jsonb AND occurred_at=$4 AND mint IS NOT DISTINCT FROM $5
+               AND strategy_version=$6) AS same_event
            FROM paper_session_events WHERE session_id=$1 AND sequence=$2`,
-          [sessionId, event.sequence, event.eventId, JSON.stringify(event.data ?? {}),
+          [sessionId, event.sequence, JSON.stringify(event.data ?? {}),
             event.occurredAt, event.mint, event.strategyVersion]
         );
         const existingEvent = existing.rows[0];
