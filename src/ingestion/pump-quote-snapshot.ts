@@ -1,7 +1,9 @@
 import {
   fetchHeliusMultipleAccounts,
+  fetchHeliusEpochInfo,
   type HeliusAccountReadConfig,
-  type HeliusAccountSnapshot
+  type HeliusAccountSnapshot,
+  type HeliusEpochInfo
 } from "./helius-accounts.js";
 import type { RawProgramAccount } from "./pump-account-decoder.js";
 
@@ -41,6 +43,7 @@ export interface VerifiedPumpQuoteSnapshot {
     "market" | "baseMint" | "quoteMint" | "globalConfig" | "feeConfig"
   >;
   accountCount: number;
+  epochInfo?: HeliusEpochInfo;
 }
 
 const DEFAULT_MAX_AGE_MS = 2_000;
@@ -52,7 +55,7 @@ const DEFAULT_MAX_AGE_MS = 2_000;
  */
 export function verifyPumpQuoteAccountSnapshot(input: {
   addresses: PumpQuoteAccountAddresses;
-  snapshot: HeliusAccountSnapshot;
+  snapshot: HeliusAccountSnapshot & { epochInfo?: HeliusEpochInfo };
   nowMs?: number;
   maxAgeMs?: number;
 }): VerifiedPumpQuoteSnapshot {
@@ -80,6 +83,16 @@ export function verifyPumpQuoteAccountSnapshot(input: {
   if (input.snapshot.accounts.length !== entries.length) {
     throw new Error("Pump quote snapshot account count does not match its requested address set.");
   }
+  if (input.snapshot.epochInfo) {
+    const { epoch, absoluteSlot, slotIndex } = input.snapshot.epochInfo;
+    const epochStartSlot = absoluteSlot - slotIndex;
+    if (!Number.isSafeInteger(epoch) || epoch < 0 ||
+        !Number.isSafeInteger(absoluteSlot) || absoluteSlot < input.snapshot.slot ||
+        !Number.isSafeInteger(slotIndex) || slotIndex < 0 ||
+        input.snapshot.slot < epochStartSlot || input.snapshot.slot > absoluteSlot) {
+      throw new Error("Helius epoch context does not cover the verified Pump quote snapshot slot.");
+    }
+  }
   const accounts = {} as Partial<Record<PumpQuoteAccountRole, RawProgramAccount | null>>;
   for (let index = 0; index < entries.length; index += 1) {
     const [role, address] = entries[index]!;
@@ -106,13 +119,15 @@ export function verifyPumpQuoteAccountSnapshot(input: {
     commitment: input.snapshot.commitment,
     observedAt: input.snapshot.observedAt,
     accounts: accounts as VerifiedPumpQuoteSnapshot["accounts"],
-    accountCount: entries.length
+    accountCount: entries.length,
+    ...(input.snapshot.epochInfo ? { epochInfo: input.snapshot.epochInfo } : {})
   };
 }
 
 export async function fetchVerifiedPumpQuoteAccountSnapshot(input: {
   addresses: PumpQuoteAccountAddresses;
   config: HeliusAccountReadConfig;
+  includeEpochInfo?: boolean;
 }): Promise<VerifiedPumpQuoteSnapshot> {
   const roles = Object.keys(input.addresses) as PumpQuoteAccountRole[];
   const requestRoles = roles.filter(role =>
@@ -121,14 +136,16 @@ export async function fetchVerifiedPumpQuoteAccountSnapshot(input: {
   const requestAddresses = requestRoles.map(role => input.addresses[role]!);
   const fetched = await fetchHeliusMultipleAccounts(requestAddresses, input.config);
   let requestIndex = 0;
-  const snapshot: HeliusAccountSnapshot = {
+  const epochInfo = input.includeEpochInfo ? await fetchHeliusEpochInfo(input.config) : undefined;
+  const snapshot: HeliusAccountSnapshot & { epochInfo?: HeliusEpochInfo } = {
     ...fetched,
     accounts: roles.map(role => {
       if (role === "quoteMint" && input.addresses.quoteMint === "11111111111111111111111111111111") {
         return null;
       }
       return fetched.accounts[requestIndex++] ?? null;
-    })
+    }),
+    ...(epochInfo ? { epochInfo } : {})
   };
   return verifyPumpQuoteAccountSnapshot({
     addresses: input.addresses,
