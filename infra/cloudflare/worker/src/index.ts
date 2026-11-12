@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "../../../../src/paper/session-ledger.js";
 
 type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "WORKER_RESTARTED" | "DISCOVERY" |
   "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "OBSERVATION" | "DATA_GAP" |
@@ -318,6 +319,39 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await txn.put(metaKey, { ...meta, eventCount: sequence,
         topUpCount: meta.topUpCount, totalTopUpsUsd: meta.totalTopUpsUsd });
     });
+  }
+
+  async recordPaperEquity(equityUsd: number): Promise<unknown> {
+    await this.hydrate();
+    if (!this.activeSessionId) throw new Error("No active paper session.");
+    const saved = await this.ctx.storage.get<BankrollState>("paper_bankroll_state") ?? createBankrollState(2.70);
+    const marked = markPaperEquity(saved, equityUsd);
+    const replenished = replenishPaperBankroll(marked, new Date().toISOString(), 2.70, 1.00);
+    await this.ctx.storage.put("paper_bankroll_state", replenished.state);
+    if (replenished.event) {
+      await this.appendAudit("BANKROLL_TOP_UP", null, replenished.event.data);
+      const metaKey = `audit_session:${this.activeSessionId}`;
+      const meta = await this.ctx.storage.get<AuditSessionMeta>(metaKey);
+      if (meta) await this.ctx.storage.put(metaKey, {
+        ...meta, topUpCount: replenished.state.topUpCount,
+        totalTopUpsUsd: replenished.state.totalTopUpsUsd
+      });
+    }
+    return {
+      initialBankrollUsd: replenished.state.initialBankrollUsd,
+      topUpCount: replenished.state.topUpCount,
+      totalTopUpsUsd: replenished.state.totalTopUpsUsd,
+      totalCapitalContributedUsd: replenished.state.totalCapitalContributedUsd,
+      currentEquityUsd: replenished.state.currentEquityUsd,
+      netPnlUsd: replenished.state.currentEquityUsd - replenished.state.totalCapitalContributedUsd,
+      lastTopUpAt: replenished.state.lastTopUpAt
+    };
+  }
+
+  async getPaperBankroll(): Promise<unknown> {
+    await this.hydrate();
+    const state = await this.ctx.storage.get<BankrollState>("paper_bankroll_state") ?? createBankrollState(2.70);
+    return { ...state, netPnlUsd: state.currentEquityUsd - state.totalCapitalContributedUsd };
   }
 
   async listAuditEvents(after = 0, limit = 100): Promise<unknown> {
@@ -993,6 +1027,16 @@ export default {
     }
     if (url.pathname === "/candidates" && request.method === "GET") {
       return Response.json(await coordinator.listCandidates());
+    }
+    if (url.pathname === "/paper-bankroll" && request.method === "GET") {
+      return Response.json(await coordinator.getPaperBankroll());
+    }
+    if (url.pathname === "/paper-equity" && request.method === "POST") {
+      let body: unknown;
+      try { body = await request.json(); } catch { return Response.json({ error: "Invalid JSON body" }, { status: 400 }); }
+      const equityUsd = body && typeof body === "object" ? (body as Record<string, unknown>).equityUsd : null;
+      if (typeof equityUsd !== "number" || !Number.isFinite(equityUsd) || equityUsd < 0) return Response.json({ error: "equityUsd must be a finite non-negative number" }, { status: 400 });
+      try { return Response.json(await coordinator.recordPaperEquity(equityUsd)); } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to record paper equity" }, { status: 409 }); }
     }
     if (url.pathname === "/audit" && request.method === "GET") {
       const after = Number(url.searchParams.get("after") ?? "0");
