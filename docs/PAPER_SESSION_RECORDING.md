@@ -94,3 +94,5 @@ The six-hour paper session remains blocked until the missing quote source, execu
 - These are deterministic storage-contract tests, not a full Miniflare/Cloudflare runtime acceptance test. Real Durable Object restart/eviction/quota tests and the six-hour soak remain outstanding.
 
 - Paper quote accounting now requires explicit protocol, creator, pool/LP, transfer, network, priority and provider fee amounts. Gross output is stored before those costs; net sell proceeds and realized PnL subtract the complete fee breakdown. Every later exit quote is rechecked against the per-side 2% impact and 2% tax limits, and a sell quote with negative net proceeds is rejected.
+
+- A small market verifier now connects the raw account decoders to `updatePumpMarketState`: a verified live curve becomes LIVE_CURVE, a completed curve becomes MIGRATION_PENDING, and only the fully verified canonical pool/vault snapshot advances it to MIGRATED_POOL_VERIFIED. This remains a pure adapter; Worker fetching and SDK PDA derivation are still separate integration tasks.
