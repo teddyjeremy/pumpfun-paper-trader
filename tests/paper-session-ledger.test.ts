@@ -1,0 +1,21 @@
+import { describe, expect, it } from "vitest";
+import { calculateCandidateOutcome, createBankrollState, markPaperEquity, replenishPaperBankroll } from "../src/paper/session-ledger.js";
+describe("paper bankroll and missed-candidate outcomes", () => {
+ it("starts at $2.70", () => expect(createBankrollState()).toMatchObject({initialBankrollUsd:2.7,currentEquityUsd:2.7,totalCapitalContributedUsd:2.7,topUpCount:0}));
+ it("does not top up at exactly $1", () => expect(replenishPaperBankroll(markPaperEquity(createBankrollState(),1),"2026-11-12T12:00:00Z").event).toBeNull());
+ it("adds $2.70 below $1 and records each top-up", () => {
+  const first=replenishPaperBankroll(markPaperEquity(createBankrollState(),0.72),"2026-11-12T12:00:00Z");
+  expect(first.state).toMatchObject({totalTopUpsUsd:2.7,topUpCount:1,currentEquityUsd:3.42,totalCapitalContributedUsd:5.4});
+  expect(first.event?.data).toMatchObject({replenishmentNumber:1,balanceBeforeUsd:0.72,amountAddedUsd:2.7,balanceAfterUsd:3.42});
+  const second=replenishPaperBankroll(markPaperEquity(first.state,0.5),"2026-11-12T13:00:00Z");
+  expect(second.state).toMatchObject({topUpCount:2,totalTopUpsUsd:5.4,totalCapitalContributedUsd:8.1});
+ });
+ it("measures a rejected coin from both rejection and discovery prices", () => {
+  const out=calculateCandidateOutcome({mint:"mint-1",decision:"REJECT",decisionAt:"2026-11-12T12:00:00Z",decisionPriceUsd:0.000002,discoveryPriceUsd:0.000001,observedPricesUsd:[{priceUsd:0.000006,observedAt:"2026-11-12T12:20:00Z"}],rejectionReasons:["LOW_BUYER_COUNT","LOW_BUYER_COUNT"],followUpStatus:"COMPLETE"});
+  expect(out).toMatchObject({maxMultipleFromDecision:3,maxMultipleFromDiscovery:6,reached15x:true,reached2x:true,reached3x:true,rejectionReasons:["LOW_BUYER_COUNT"]});
+ });
+ it("does not fabricate multiples without observations or a reference price", () => {
+  const out=calculateCandidateOutcome({mint:"mint-2",decision:"WATCH",decisionAt:"2026-11-12T12:00:00Z",decisionPriceUsd:null,discoveryPriceUsd:null,observedPricesUsd:[],followUpStatus:"MISSING"});
+  expect(out.maxMultipleFromDecision).toBeNull(); expect(out.reached3x).toBe(false); expect(out.followUpStatus).toBe("MISSING");
+ });
+});
