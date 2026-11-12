@@ -281,7 +281,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
-  private async flushHeliusBackfillArchivesToPostgres(sessionId: string | null = sessionId): Promise<void> {
+  private async flushHeliusBackfillArchivesToPostgres(sessionId: string | null = this.activeSessionId): Promise<void> {
     if (!this.postgresIngestConfigured || !sessionId) return;
     const listKey = `helius_backfill_mints:${sessionId}`;
     const mints = await this.ctx.storage.get<string[]>(listKey) ?? [];
