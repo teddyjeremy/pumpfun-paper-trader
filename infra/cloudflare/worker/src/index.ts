@@ -152,10 +152,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
       this.ctx.storage.get<boolean>("enabled"),
       this.ctx.storage.get<Record<string, WalletFundingEvidenceResult>>("wallet_link_snapshots"),
-      this.ctx.storage.get<Record<string, WalletHoldingEvidence[]>>("wallet_holdings_by_mint")
+      this.ctx.storage.get<Record<string, WalletHoldingEvidence[]>>("wallet_holdings_by_mint"),
+      this.ctx.storage.get<string>("active_audit_session_id")
     ]);
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
-    this.activeSessionId = activeSessionId ?? null;\n    this.walletLinkSnapshots = savedWalletLinks ?? {};
+    this.activeSessionId = activeSessionId ?? null;
+    this.walletLinkSnapshots = savedWalletLinks ?? {};
     this.walletHoldingsByMint = savedWalletHoldings ?? {};
     this.heliusState = normalizeHeliusMonitorState(await this.ctx.storage.get<HeliusMonitorState>("helius_monitor_state"));
     this.verifiedTransactions = (await this.ctx.storage.get<VerifiedPumpTransaction[]>("verified_transactions")) ?? [];
@@ -539,7 +541,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           socket.close(1000, "Coordinator disabled before connection opened");
           return;
         }
-        this.status.connected = true;\n        void this.appendAudit("PROVIDER_STATUS", null, { provider: "pumpportal", status: "CONNECTED" }).catch(() => undefined);
+        this.status.connected = true;
+        void this.appendAudit("PROVIDER_STATUS", null, { provider: "pumpportal", status: "CONNECTED" }).catch(() => undefined);
         this.status.subscriptionsSent = false;
         this.status.connectedAt = new Date().toISOString();
         this.connectingSinceMs = 0;
@@ -567,7 +570,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         );
         if (parsed.status === "IGNORED") return;
         if (parsed.status === "DATA_INCOMPLETE") {
-          this.discovery.incomplete += 1;\n          void this.appendAudit("DISCOVERY_INCOMPLETE", null, { status: parsed.status, rawMessage: typeof message.data === "string" ? message.data.slice(0, 2000) : "NON_TEXT_MESSAGE" }).catch(() => { this.status.lastError = "Audit journal append failed."; });
+          this.discovery.incomplete += 1;
+          void this.appendAudit("DISCOVERY_INCOMPLETE", null, { status: parsed.status, rawMessage: typeof message.data === "string" ? message.data.slice(0, 2000) : "NON_TEXT_MESSAGE" }).catch(() => { this.status.lastError = "Audit journal append failed."; });
           this.pendingWrites += 1;
           this.syncCounts();
           if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist().catch(() => undefined);
@@ -605,7 +609,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
       socket.addEventListener("error", () => {
         if (this.socket !== socket || !this.status.enabled) return;
-        this.status.lastError = "PumpPortal WebSocket transport error.";\n        void this.appendAudit("ERROR", null, { subsystem: "PUMPPORTAL_WEBSOCKET", message: this.status.lastError }).catch(() => undefined);
+        this.status.lastError = "PumpPortal WebSocket transport error.";
+        void this.appendAudit("ERROR", null, { subsystem: "PUMPPORTAL_WEBSOCKET", message: this.status.lastError }).catch(() => undefined);
         void this.persist().catch(() => undefined);
       });
     } catch {
@@ -715,7 +720,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           socket.close(1000, "Coordinator disabled before Helius connection opened");
           return;
         }
-        this.status.heliusConnected = true;\n        void this.appendAudit("PROVIDER_STATUS", null, { provider: "helius", status: "CONNECTED" }).catch(() => undefined);
+        this.status.heliusConnected = true;
+        void this.appendAudit("PROVIDER_STATUS", null, { provider: "helius", status: "CONNECTED" }).catch(() => undefined);
         this.heliusConnectedAtMs = Date.now();
         this.heliusConnectingSinceMs = 0;
         this.heliusState = resetHeliusSubscriptionIds(this.heliusState);
@@ -772,7 +778,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       });
       socket.addEventListener("error", () => {
         if (this.heliusSocket !== socket) return;
-        this.status.lastError = "Helius WebSocket transport error.";\n        void this.appendAudit("ERROR", null, { subsystem: "HELIUS_WEBSOCKET", message: this.status.lastError }).catch(() => undefined);
+        this.status.lastError = "Helius WebSocket transport error.";
+        void this.appendAudit("ERROR", null, { subsystem: "HELIUS_WEBSOCKET", message: this.status.lastError }).catch(() => undefined);
         void this.persist().catch(() => undefined);
       });
     } catch {
@@ -820,7 +827,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           commitment: "confirmed"
         });
         if (result.status === "VERIFIED") {
-          this.verifiedTransactions = [...this.verifiedTransactions, result.transaction].slice(-2_000);\n          void this.appendAudit("OBSERVATION", work.mint, { signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction), retentionPolicy: "LATEST_2000_TRANSACTION_SNAPSHOT_PLUS_APPEND_ONLY_AUDIT" }).catch(() => { this.status.lastError = "Audit journal append failed."; });
+          this.verifiedTransactions = [...this.verifiedTransactions, result.transaction].slice(-2_000);
+          void this.appendAudit("OBSERVATION", work.mint, { signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction), retentionPolicy: "LATEST_2000_TRANSACTION_SNAPSHOT_PLUS_APPEND_ONLY_AUDIT" }).catch(() => { this.status.lastError = "Audit journal append failed."; });
           this.status.verifiedTransactions += 1;
           // Re-rank the six evidence-follow-up slots as verified events arrive.
           // Fresh launches remain protected by the four-slot first-minute reserve.
@@ -843,7 +851,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         activeWork = null;
       }
     } catch {
-      this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";\n      void this.appendAudit("ERROR", activeWork?.mint ?? null, { subsystem: "HELIUS_QUEUE", message: this.status.lastError }).catch(() => undefined);
+      this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
+      void this.appendAudit("ERROR", activeWork?.mint ?? null, { subsystem: "HELIUS_QUEUE", message: this.status.lastError }).catch(() => undefined);
       // Only remove the item that actually failed. A storage failure after a
       // successful dequeue must never discard the next candidate's work.
       if (activeWork) {
@@ -875,7 +884,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       ...this.heliusState,
       incompleteMints: [...this.heliusState.incompleteMints, ...newlyIncomplete].slice(-10)
     };
-    this.status.incompleteHeliusTransactions += newlyIncomplete.length;\n    void this.appendAudit("DATA_GAP", null, { reason: "HELIUS_COVERAGE_INTERRUPTED", affectedMints: newlyIncomplete }).catch(() => undefined);
+    this.status.incompleteHeliusTransactions += newlyIncomplete.length;
+    void this.appendAudit("DATA_GAP", null, { reason: "HELIUS_COVERAGE_INTERRUPTED", affectedMints: newlyIncomplete }).catch(() => undefined);
   }
 
   private markHeliusIncomplete(): void {
@@ -984,7 +994,12 @@ export default {
     if (url.pathname === "/candidates" && request.method === "GET") {
       return Response.json(await coordinator.listCandidates());
     }
-    if (url.pathname === "/audit" && request.method === "GET") {\n      const after = Number(url.searchParams.get("after") ?? "0");\n      const limit = Number(url.searchParams.get("limit") ?? "100");\n      return Response.json(await coordinator.listAuditEvents(after, limit));\n    }\n    if (url.pathname === "/observations" && request.method === "GET") {
+    if (url.pathname === "/audit" && request.method === "GET") {
+      const after = Number(url.searchParams.get("after") ?? "0");
+      const limit = Number(url.searchParams.get("limit") ?? "100");
+      return Response.json(await coordinator.listAuditEvents(after, limit));
+    }
+    if (url.pathname === "/observations" && request.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? "100");
       const transactions = await coordinator.listVerifiedTransactions(limit);
       return Response.json({
