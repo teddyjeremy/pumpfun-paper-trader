@@ -1,6 +1,9 @@
 import {
   OnlinePumpSdk,
   PUMP_SDK,
+  GLOBAL_PDA,
+  PUMP_FEE_CONFIG_PDA,
+  getBuyV3QuoteAmountFromTokenAmount,
   getBuyV3TokenAmountFromQuoteAmount,
   getBuyTokenAmountFromSolAmount,
   getBuySolAmountFromTokenAmount,
@@ -28,6 +31,8 @@ export function officialPumpSdkModulesAvailable(): {
       typeof PUMP_SDK.decodeBondingCurve === "function" &&
       typeof PUMP_SDK.decodeGlobal === "function" &&
       typeof PUMP_SDK.decodeFeeConfig === "function" &&
+      GLOBAL_PDA instanceof Object && PUMP_FEE_CONFIG_PDA instanceof Object &&
+      typeof getBuyV3QuoteAmountFromTokenAmount === "function" &&
       typeof getBuyV3TokenAmountFromQuoteAmount === "function" &&
       typeof getBuyTokenAmountFromSolAmount === "function" &&
       typeof getBuySolAmountFromTokenAmount === "function" &&
