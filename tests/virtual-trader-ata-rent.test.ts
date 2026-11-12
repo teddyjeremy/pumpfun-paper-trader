@@ -59,9 +59,9 @@ describe("virtual trader ATA rent accounting", () => {
 
     expect(calls).toHaveLength(1);
     expect(result.items.map(item => item.minimumRentLamports)).toEqual([2_039_280, 2_039_280]);
-    expect(result.newAtaRentLamports).toBe(4_078_560);
+    expect(result.newAtaRentReserveLamports).toBe(4_078_560);
     expect(result.allNewAtaRentKnown).toBe(true);
-    expect(result.paperRentCanBeChargedToPortfolio).toBe(true);
+    expect(result.paperRentCanBeReservedInPortfolio).toBe(true);
     expect(result.simulatedPayerBalanceChecked).toBe(false);
     expect(result.paperEntryAuthorized).toBe(false);
   });
@@ -71,9 +71,9 @@ describe("virtual trader ATA rent accounting", () => {
       prerequisites: prerequisites(TOKEN_PROGRAM_ID.toBase58(), "PRESENT_AND_VERIFIED"),
       config: { apiKey: "test-key", fetcher: async () => { throw new Error("RPC must not be called"); } }
     });
-    expect(result.newAtaRentLamports).toBe(0);
+    expect(result.newAtaRentReserveLamports).toBe(0);
     expect(result.items[0]?.status).toBe("ALREADY_PRESENT");
-    expect(result.paperRentCanBeChargedToPortfolio).toBe(true);
+    expect(result.paperRentCanBeReservedInPortfolio).toBe(true);
     expect(result.existingAtaRentExemptionVerified).toBe(false);
   });
 
@@ -83,9 +83,9 @@ describe("virtual trader ATA rent accounting", () => {
       config: { apiKey: "test-key", fetcher: async () => { throw new Error("RPC must not be called"); } }
     });
     expect(result.items[0]?.status).toBe("UNSUPPORTED_LAYOUT");
-    expect(result.newAtaRentLamports).toBeNull();
+    expect(result.newAtaRentReserveLamports).toBeNull();
     expect(result.allNewAtaRentKnown).toBe(false);
-    expect(result.paperRentCanBeChargedToPortfolio).toBe(false);
+    expect(result.paperRentCanBeReservedInPortfolio).toBe(false);
     expect(result.paperEntryAuthorized).toBe(false);
   });
 
