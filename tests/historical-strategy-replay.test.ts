@@ -91,7 +91,7 @@ describe("historical strategy replay", () => {
     const mixed = verifiedTransaction();
     mixed.tradeEvents.push({
       ...trade(50, 100, "non-sol-quote-trader"),
-      quoteMint: key
+      quoteMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     });
     const config = { solUsdPriceUsd: 100, minimumTradeUsd: 0.01 };
     const baseline = replayHistoricalCoin({
