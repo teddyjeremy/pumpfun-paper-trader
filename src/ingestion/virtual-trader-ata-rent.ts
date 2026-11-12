@@ -17,12 +17,12 @@ export interface VirtualTraderAtaRentEstimate {
   source: "helius-getMinimumBalanceForRentExemption";
   fetchedAt: string;
   items: AtaRentLineItem[];
-  newAtaRentLamports: number | null;
+  newAtaRentReserveLamports: number | null;
   allNewAtaRentKnown: boolean;
   existingAtaRentExemptionVerified: false;
   simulatedPayerBalanceChecked: false;
   /** Rent is an expense in the simulated portfolio, not a funded chain account. */
-  paperRentCanBeChargedToPortfolio: boolean;
+  paperRentCanBeReservedInPortfolio: boolean;
   paperEntryAuthorized: false;
 }
 
@@ -34,10 +34,11 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 /**
- * Calculates the current rent-exempt minimum for missing legacy SPL Token ATAs.
- * Token-2022 is deliberately fail-closed until its mint extensions have been
- * decoded to determine the exact required account length. This is a paper
- * accounting estimate only: it neither funds nor creates any on-chain account.
+ * Calculates refundable rent-exempt SOL that must be reserved for missing legacy
+ * SPL Token ATAs. Rent is locked collateral, not a trading fee or realized loss;
+ * the portfolio may release the reserve only after the ATA is verified closed.
+ * Token-2022 is fail-closed until mint extensions determine its exact account size.
+ * This is paper accounting only: it never funds or creates an on-chain account.
  */
 export async function estimateVirtualTraderAtaRent(input: {
   prerequisites: VirtualTraderAtaPrerequisites;
@@ -95,11 +96,11 @@ export async function estimateVirtualTraderAtaRent(input: {
       source: "helius-getMinimumBalanceForRentExemption",
       fetchedAt,
       items,
-      newAtaRentLamports: null,
+      newAtaRentReserveLamports: null,
       allNewAtaRentKnown: false,
       existingAtaRentExemptionVerified: false,
       simulatedPayerBalanceChecked: false,
-      paperRentCanBeChargedToPortfolio: false,
+      paperRentCanBeReservedInPortfolio: false,
       paperEntryAuthorized: false
     };
   }
@@ -154,11 +155,11 @@ export async function estimateVirtualTraderAtaRent(input: {
     source: "helius-getMinimumBalanceForRentExemption",
     fetchedAt,
     items,
-    newAtaRentLamports: total,
+    newAtaRentReserveLamports: total,
     allNewAtaRentKnown,
     existingAtaRentExemptionVerified: false,
     simulatedPayerBalanceChecked: false,
-    paperRentCanBeChargedToPortfolio: allNewAtaRentKnown,
+    paperRentCanBeReservedInPortfolio: allNewAtaRentKnown,
     paperEntryAuthorized: false
   };
 }
