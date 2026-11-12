@@ -191,7 +191,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     // Expire stale candidates even if the provider is quiet, then flush state.
     const beforeExpiry = this.discovery.candidates.length;
     this.discovery = pruneExpiredCandidates(this.discovery, new Date().toISOString());
-    if (this.discovery.candidates.length !== beforeExpiry) this.pendingWrites += 1;
+    if (this.discovery.candidates.length !== beforeExpiry) {
+      this.reconcileHelius();
+      this.pendingWrites += 1;
+    }
     await this.persist();
 
     if (!this.heliusSocket && this.status.enabled) this.connectHelius();
@@ -337,8 +340,29 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private reconcileHelius(): void {
-    this.heliusState = reconcileHeliusSubscriptions(this.heliusState, this.discovery.candidates);
-    if (this.heliusSocket?.readyState === WebSocket.OPEN) this.sendHeliusSubscriptions();
+    const previous = this.heliusState.subscriptions;
+    const next = reconcileHeliusSubscriptions(this.heliusState, this.discovery.candidates);
+    const retainedMints = new Set(next.subscriptions.map(item => item.mint));
+    const socket = this.heliusSocket;
+    if (socket?.readyState === WebSocket.OPEN) {
+      for (const removed of previous) {
+        if (removed.subscriptionId !== null && !retainedMints.has(removed.mint)) {
+          try {
+            socket.send(JSON.stringify({
+              jsonrpc: "2.0",
+              id: next.nextRequestId++,
+              method: "logsUnsubscribe",
+              params: [removed.subscriptionId]
+            }));
+          } catch {
+            this.status.lastError = "Helius unsubscribe failed; reconnect is required to clear stale subscriptions.";
+            socket.close(1011, "Helius unsubscribe failed");
+          }
+        }
+      }
+    }
+    this.heliusState = next;
+    if (socket?.readyState === WebSocket.OPEN) this.sendHeliusSubscriptions();
   }
 
   private connectHelius(): void {
@@ -364,6 +388,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const record = payload as Record<string, unknown>;
         if (Number.isSafeInteger(record.id) && Number.isSafeInteger(record.result)) {
           this.heliusState = confirmHeliusSubscription(this.heliusState, record.id as number, record.result as number);
+          void this.persist().catch(() => undefined);
+          return;
+        }
+        if (Number.isSafeInteger(record.id) && record.error) {
+          const failed = this.heliusState.subscriptions.find(item => item.requestId === record.id);
+          if (failed) {
+            this.heliusState = {
+              ...this.heliusState,
+              incompleteMints: [...new Set([...this.heliusState.incompleteMints, failed.mint])].slice(-10)
+            };
+            this.status.incompleteHeliusTransactions += 1;
+          }
           void this.persist().catch(() => undefined);
           return;
         }
