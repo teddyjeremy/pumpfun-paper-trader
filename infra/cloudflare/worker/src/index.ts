@@ -536,7 +536,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         discoveryPriceQuotePerToken: profile?.baselinePrice ?? null,
         quoteMint: profile?.quoteMint ?? null
       }, `decision:${triggerSignature}:${mint}`);
-      if (profile?.quoteMint && profile.baselinePrice !== null && profile.baselinePrice > 0) {
+      if (profile?.quoteMint && ((profile.baselinePrice !== null && profile.baselinePrice > 0) || evaluated.decision === "REJECT")) {
         const refKey = `candidate_price_refs:${this.activeSessionId}:${mint}:${profile.quoteMint}`;
         const previousRefs = await this.ctx.storage.get<{
           decisionPriceQuotePerToken: number | null; decisionAt: string | null;
