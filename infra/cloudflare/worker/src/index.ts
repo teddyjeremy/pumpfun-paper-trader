@@ -40,7 +40,7 @@ import {
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
 import { buildCandidateTradeFlows, isSolQuoteMint, SOL_QUOTE_MINT } from "../../../../src/ingestion/trade-flow.js";
-import { fetchHolderConcentration, type HolderConcentrationResult } from "../../../../src/ingestion/holder-risk.js";
+import { fetchCompleteHolderConcentration, type HolderConcentrationResult } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
 import { officialPumpSdkModulesAvailable } from "../../../../src/ingestion/pump-sdk-runtime.js";
@@ -1342,7 +1342,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async getHolderRisk(mint: string): Promise<unknown> {
     await this.hydrate();
-    const result = await fetchHolderConcentration(mint, {
+    const result = await fetchCompleteHolderConcentration(mint, {
       apiKey: this.env.HELIUS_API_KEY,
       fetcher: this.rateLimitedHeliusFetcher()
     });
