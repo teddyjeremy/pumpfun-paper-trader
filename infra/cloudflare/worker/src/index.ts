@@ -69,6 +69,8 @@ interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
   CONTROL_TOKEN: string;
   HELIUS_API_KEY: string;
+  PAPER_EVENT_INGEST_URL?: string;
+  PAPER_EVENT_INGEST_TOKEN?: string;
 }
 
 interface CoordinatorStatus {
@@ -166,11 +168,139 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private persistChain: Promise<void> = Promise.resolve();
   private auditChain: Promise<void> = Promise.resolve();
   private connectingSinceMs = 0;
+  private postgresFlushInFlight = false;
+  private postgresLeaseHeld = false;
+  private readonly postgresLeaseOwnerId: string;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.env = env;
+    this.postgresLeaseOwnerId = ctx.id.toString();
   }
   private readonly env: Env;
+
+
+  private get postgresIngestConfigured(): boolean {
+    return Boolean(this.env.PAPER_EVENT_INGEST_URL && this.env.PAPER_EVENT_INGEST_TOKEN);
+  }
+
+  private async postPostgresIngest(path: string, body: unknown): Promise<Response> {
+    if (!this.postgresIngestConfigured) throw new Error("PostgreSQL event ingestion is not configured.");
+    const url = new URL(path, this.env.PAPER_EVENT_INGEST_URL).toString();
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.env.PAPER_EVENT_INGEST_TOKEN}`
+      },
+      body: JSON.stringify(body)
+    });
+  }
+
+  private async acquirePostgresWorkerLease(): Promise<void> {
+    if (!this.env.PAPER_EVENT_INGEST_URL && !this.env.PAPER_EVENT_INGEST_TOKEN) return;
+    if (!this.postgresIngestConfigured) {
+      throw new Error("PAPER_EVENT_INGEST_URL and PAPER_EVENT_INGEST_TOKEN must both be configured.");
+    }
+    const response = await this.postPostgresIngest("/internal/worker-lease", {
+      action: "acquire", leaseName: "pumpfun-paper-trader-coordinator",
+      ownerId: this.postgresLeaseOwnerId, ttlSeconds: 45
+    });
+    if (!response.ok) throw new Error("PostgreSQL worker lease could not be acquired.");
+    const result = await response.json() as { acquired?: boolean };
+    if (result.acquired !== true) throw new Error("Another coordinator currently owns the PostgreSQL worker lease.");
+    this.postgresLeaseHeld = true;
+    await this.ctx.storage.setAlarm(Date.now() + 15_000);
+  }
+
+  private async heartbeatPostgresWorkerLease(): Promise<boolean> {
+    if (!this.postgresLeaseHeld) return true;
+    try {
+      const response = await this.postPostgresIngest("/internal/worker-lease", {
+        action: "heartbeat", leaseName: "pumpfun-paper-trader-coordinator",
+        ownerId: this.postgresLeaseOwnerId, ttlSeconds: 45
+      });
+      if (!response.ok) return false;
+      const result = await response.json() as { acquired?: boolean };
+      return result.acquired === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async releasePostgresWorkerLease(): Promise<void> {
+    if (!this.postgresLeaseHeld) return;
+    try {
+      await this.postPostgresIngest("/internal/worker-lease", {
+        action: "release", leaseName: "pumpfun-paper-trader-coordinator",
+        ownerId: this.postgresLeaseOwnerId
+      });
+    } finally {
+      this.postgresLeaseHeld = false;
+    }
+  }
+
+  private async flushAuditEventsToPostgres(sessionId: string): Promise<void> {
+    if (!this.postgresIngestConfigured || this.postgresFlushInFlight) return;
+    this.postgresFlushInFlight = true;
+    try {
+      const cursorKey = `postgres_sync_sequence:${sessionId}`;
+      const cursor = await this.ctx.storage.get<number>(cursorKey) ?? 0;
+      const events: StoredAuditEvent[] = [];
+      let pageNumber = Math.floor(cursor / AUDIT_PAGE_SIZE);
+      while (events.length < AUDIT_PAGE_SIZE) {
+        const pageKey = `audit_events:${sessionId}:${String(pageNumber).padStart(8, "0")}`;
+        const page = await this.ctx.storage.get<StoredAuditEvent[]>(pageKey) ?? [];
+        const remaining = page.filter(event => event.sequence > cursor)
+          .slice(0, AUDIT_PAGE_SIZE - events.length);
+        events.push(...remaining);
+        if (events.length >= AUDIT_PAGE_SIZE || page.length < AUDIT_PAGE_SIZE || remaining.length === 0) break;
+        pageNumber++;
+      }
+      if (events.length === 0) return;
+      const response = await this.postPostgresIngest("/internal/paper-events", { sessionId, events });
+      if (!response.ok) throw new Error("PostgreSQL rejected the paper audit batch.");
+      const result = await response.json() as { ok?: boolean; lastSequence?: number };
+      const lastEvent = events[events.length - 1];
+      if (!lastEvent || result.ok !== true || !Number.isSafeInteger(result.lastSequence) ||
+          (result.lastSequence as number) < lastEvent.sequence) {
+        throw new Error("PostgreSQL did not acknowledge the complete paper audit batch.");
+      }
+      await this.ctx.storage.put(cursorKey, lastEvent.sequence);
+      const meta = await this.ctx.storage.get<AuditSessionMeta>(`audit_session:${sessionId}`);
+      if (meta && meta.eventCount > lastEvent.sequence) {
+        await this.ctx.storage.setAlarm(Date.now() + 1_000);
+      }
+    } catch {
+      // The durable audit pages are the outbox. Do not advance the cursor on
+      // failure; a retry is safe because PostgreSQL deduplicates event ids.
+      await this.ctx.storage.setAlarm(Date.now() + 30_000).catch(() => undefined);
+    } finally {
+      this.postgresFlushInFlight = false;
+    }
+  }
+
+  private async flushAllAuditSessionsToPostgres(): Promise<void> {
+    if (!this.postgresIngestConfigured) return;
+    const sessions = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
+    for (const sessionId of sessions) await this.flushAuditEventsToPostgres(sessionId);
+  }
+
+  async alarm(): Promise<void> {
+    await this.hydrate();
+    if (this.status.enabled && this.postgresLeaseHeld) {
+      const leaseValid = await this.heartbeatPostgresWorkerLease();
+      if (!leaseValid) {
+        this.postgresLeaseHeld = false;
+        this.status.lastError = "PostgreSQL worker lease lost; coordinator stopped fail-closed.";
+        await this.stop();
+        return;
+      }
+    }
+    await this.flushAllAuditSessionsToPostgres();
+    if (this.status.enabled && this.postgresLeaseHeld) {
+      await this.ctx.storage.setAlarm(Date.now() + 15_000);
+    }
+  }
 
   private async hydrate(): Promise<void> {
     if (this.hydrated) return;
@@ -211,6 +341,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async start(): Promise<CoordinatorStatus> {
     await this.hydrate();
+    await this.acquirePostgresWorkerLease();
     if (!this.status.enabled || this.heliusSocket?.readyState !== WebSocket.OPEN) {
       this.markHeliusCoverageGap();
     }
@@ -253,6 +384,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put(`audit_event_id:${sessionId}:session-started:${sessionId}`, 1);
       });
       this.activeSessionId = sessionId;
+      this.ctx.waitUntil(this.flushAuditEventsToPostgres(sessionId));
     } else {
       await this.appendAudit("PROVIDER_STATUS", null, { action: "START_REQUESTED" });
     }
@@ -314,8 +446,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.delete("active_audit_session_id");
       });
       this.activeSessionId = null;
+      await this.flushAuditEventsToPostgres(completedSessionId);
     }
     await this.persist();
+    await this.releasePostgresWorkerLease();
     return this.getStatus();
   }
 
@@ -451,6 +585,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await txn.put(dedupeKey, sequence);
       await txn.put(metaKey, { ...meta, eventCount: sequence });
     });
+    this.ctx.waitUntil(this.flushAuditEventsToPostgres(sessionId));
   }
 
 
