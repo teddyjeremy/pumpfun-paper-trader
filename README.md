@@ -94,6 +94,32 @@ npm test
 npm run build
 ```
 
+### Safe production ingestion smoke test
+
+The smoke test verifies the deployed Worker health endpoint, authenticated Worker
+status endpoint, Vercel API health, and the shared ingestion token's ability to
+acquire and heartbeat a uniquely named short-lived PostgreSQL lease. It releases
+the lease in a `finally` block (the 30-second TTL is the fallback cleanup).
+
+It does **not** start or stop discovery, write synthetic paper events, create
+positions, submit transactions, or enable trading.
+
+Run it from a trusted terminal with the four existing deployment secrets
+available as environment variables (never commit them or paste them into chat):
+
+```bash
+PAPER_WORKER_URL=https://<worker-host> \
+PAPER_WORKER_CONTROL_TOKEN=<worker-control-secret> \
+PAPER_EVENT_INGEST_URL=https://<vercel-host> \
+PAPER_EVENT_INGEST_TOKEN=<shared-ingestion-secret> \
+npm run smoke:ingestion
+```
+
+A successful lease acquire and heartbeat prove that the shared token is accepted
+and the Vercel API can write to the migrated Neon lease table. This is not a
+paper-event round-trip test; event persistence still needs an actual journal
+event followed by database read-back before it can be marked verified.
+
 ## Readiness
 
 The service must remain not-ready for paper execution until historical risk evidence is hydrated from the audit journal, a complete holder census is available, strict entry and dynamic-exit rules are replayed, quote preflight is wired to the Worker scheduler, and durable recovery/position transitions are tested. CI and a multi-hour soak validate integration and operations, **not profitability**.
