@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PumpFunCoordinator } from "../infra/cloudflare/worker/src/index.js";
 
 type Stored = Map<string, unknown>;
@@ -7,6 +7,8 @@ class MemoryDurableStorage {
   private values: Stored = new Map();
   private transactionTail: Promise<unknown> = Promise.resolve();
   failNextPut = false;
+  lastAlarmAt: number | null = null;
+  async setAlarm(timestamp: number): Promise<void> { this.lastAlarmAt = timestamp; }
 
   seed(key: string, value: unknown): void {
     this.values.set(key, structuredClone(value));
@@ -34,13 +36,13 @@ class MemoryDurableStorage {
   }
 }
 
-function harness(storage = new MemoryDurableStorage()) {
+function harness(storage = new MemoryDurableStorage(), env: Record<string, string> = {}) {
   const ctx = {
     storage,
     waitUntil: (_promise: Promise<unknown>) => undefined,
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback()
   };
-  const coordinator = new PumpFunCoordinator(ctx as never, {} as never);
+  const coordinator = new PumpFunCoordinator(ctx as never, env as never);
   return { coordinator, storage };
 }
 function seedSession(storage: MemoryDurableStorage, enabled = false): void {

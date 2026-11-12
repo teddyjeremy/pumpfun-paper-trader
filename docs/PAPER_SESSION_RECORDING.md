@@ -121,3 +121,12 @@ The six-hour paper session remains blocked until the missing quote source, execu
 - A BUY quote's `outputUsd` is the gross USD value of the tokens received, not the stake spent. Entry equity is remaining cash plus that quoted output value, so execution price impact is reflected immediately rather than assuming the acquired tokens are worth the full stake.
 - Entry price is `buyQuote.outputUsd / wholeTokensReceived`; later marks and sell-quote implied prices use the same whole-token unit. SELL proceeds remain gross USD output less the complete recorded fee breakdown.
 - Decimal mismatch, unsupported decimals, invalid token amounts or non-representable amounts fail closed.
+
+
+## PostgreSQL paper execution projections (draft PR)
+- The Durable Object append-only journal remains the source of truth and outbox. New PAPER_ENTRY events include the full normalized buy quote and initial full-balance sell quote; PAPER_EXIT events include the full normalized sell quote; POSITION_MARK events include every open position snapshot and its exact-size sell quotes.
+- Migration `0005_paper_trade_projections` adds queryable session-scoped position, quote and trade projections. Projection writes happen in the same PostgreSQL transaction as the immutable `paper_session_events` insert.
+- Projection failures roll back the audit event transaction, so the Durable Object cursor does not advance and the outbox retries. Replays are protected by session event ID/sequence uniqueness; projected quote/trade IDs also reject conflicting payloads.
+- The new authenticated `GET /api/paper-ledger` endpoint exposes persisted sessions, position snapshots, quote evidence and simulated fills. Apply migration 0005 explicitly before using this endpoint.
+- Older journal events that contain quote IDs but not full quote payloads remain durable in `paper_session_events`; the projector does not invent missing quote or fill data for those legacy events.
+- This projection layer has unit tests for entry, exit, mark and identity mismatch behavior. It has not yet been exercised against a real PostgreSQL instance or restart/replay soak.
