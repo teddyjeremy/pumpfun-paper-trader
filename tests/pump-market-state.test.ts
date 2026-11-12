@@ -8,7 +8,7 @@ const now = Date.parse("2026-11-12T12:00:00.000Z");
 const iso = new Date(now).toISOString();
 const curve = (overrides: Partial<VerifiedCurveEvidence> = {}): VerifiedCurveEvidence => ({
   source: "verified-pump-curve-account", verified: true, mint: "mint",
-  curveAddress: "curve", complete: false, migrated: false,
+  curveAddress: "curve", quoteMint: "So11111111111111111111111111111111111111112", complete: false, migrated: false,
   tokenReserveBaseUnits: "1000", quoteReserveBaseUnits: "500",
   slot: 100, observedAt: iso, ...overrides
 });
