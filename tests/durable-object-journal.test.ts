@@ -10,6 +10,7 @@ import {
   takeHeliusWork,
   type HeliusMonitorState
 } from "../src/ingestion/helius-monitor.js";
+import { emptyDiscoveryStore } from "../src/ingestion/discovery-store.js";
 
 type Stored = Map<string, unknown>;
 
@@ -251,6 +252,74 @@ describe("Durable Object audit storage contract", () => {
       launchBlockTime: null,
       reason: "Verified launch block time is unavailable."
     });
+  });
+
+
+  it("automatically collects one holder snapshot for a monitored launched candidate per cron interval", async () => {
+    const storage = new MemoryDurableStorage();
+    seedSession(storage, true);
+    const mint = "So11111111111111111111111111111111111111112";
+    const monitor = emptyHeliusMonitorState();
+    monitor.subscriptions = [{
+      requestId: 1, subscriptionId: null, mint, bondingCurve: mint, subscribedAt: null
+    }];
+    const discovery = emptyDiscoveryStore();
+    discovery.candidates = [{
+      kind: "new_token", mint, bondingCurve: mint, signature: null, creator: null,
+      name: null, symbol: null, receivedAt: "2026-11-12T12:00:00.000Z",
+      firstSeenAt: "2026-11-12T12:00:00.000Z", lastSeenAt: "2026-11-12T12:00:00.000Z",
+      observations: 1, status: "DISCOVERED"
+    }];
+    storage.seed("helius_monitor_state", monitor);
+    storage.seed("discovery_state", discovery);
+    storage.seed("verified_transactions", [{ createEvents: [{ mint }], tradeEvents: [] }]);
+
+    const { coordinator } = harness(storage, { HELIUS_API_KEY: "test-key" });
+    const holder = vi.spyOn(coordinator, "getHolderRisk").mockResolvedValue({
+      status: "DATA_INCOMPLETE", mint, reason: "fixture"
+    });
+    const links = vi.spyOn(coordinator, "collectWalletLinks").mockResolvedValue({ status: "OBSERVED" });
+
+    const result = await coordinator.collectNextRiskEvidence();
+    expect(result).toMatchObject({ status: "COLLECTED", mint, evidenceType: "HOLDER_CONCENTRATION" });
+    expect(holder).toHaveBeenCalledTimes(1);
+    expect(links).not.toHaveBeenCalled();
+
+    const retry = await coordinator.collectNextRiskEvidence();
+    expect(retry).toMatchObject({ status: "IDLE" });
+    expect(holder).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for two distinct trade wallets before spending RPC budget on wallet-link evidence", async () => {
+    const storage = new MemoryDurableStorage();
+    seedSession(storage, true);
+    const mint = "So11111111111111111111111111111111111111112";
+    const monitor = emptyHeliusMonitorState();
+    monitor.subscriptions = [{
+      requestId: 1, subscriptionId: null, mint, bondingCurve: mint, subscribedAt: null
+    }];
+    const discovery = emptyDiscoveryStore();
+    discovery.candidates = [{
+      kind: "new_token", mint, bondingCurve: mint, signature: null, creator: null,
+      name: null, symbol: null, receivedAt: "2026-11-12T12:00:00.000Z",
+      firstSeenAt: "2026-11-12T12:00:00.000Z", lastSeenAt: "2026-11-12T12:00:00.000Z",
+      observations: 1, status: "DISCOVERED"
+    }];
+    storage.seed("helius_monitor_state", monitor);
+    storage.seed("discovery_state", discovery);
+    storage.seed("holder_risk_snapshots", {
+      [mint]: { status: "OBSERVED", snapshot: { observedAt: new Date().toISOString() } }
+    });
+    storage.seed("verified_transactions", [{
+      createEvents: [{ mint }],
+      tradeEvents: [{ mint, user: "11111111111111111111111111111111", quoteAmount: 1n }]
+    }]);
+
+    const { coordinator } = harness(storage, { HELIUS_API_KEY: "test-key" });
+    const links = vi.spyOn(coordinator, "collectWalletLinks").mockResolvedValue({ status: "OBSERVED" });
+    const result = await coordinator.collectNextRiskEvidence();
+    expect(result).toMatchObject({ status: "IDLE" });
+    expect(links).not.toHaveBeenCalled();
   });
 
   it("keeps session metadata and event count consistent", async () => {
