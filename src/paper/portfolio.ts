@@ -87,7 +87,9 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
       quote.taxPct > PAPER_PORTFOLIO_POLICY.maxTaxPerSidePct) {
     throw new Error("Quote exceeds the per-side impact or tax limit.");
   }
-  if (!validPositive(quote.requestedUsd) || !validPositive(quote.outputUsd) || !/^\d+$/.test(quote.inputAmountBaseUnits) ||
+  if (!validPositive(quote.requestedUsd) || !validPositive(quote.outputUsd) ||
+      !Number.isInteger(quote.tokenDecimals) || quote.tokenDecimals < 0 || quote.tokenDecimals > 18 ||
+      !/^\d+$/.test(quote.inputAmountBaseUnits) ||
       !/^\d+$/.test(quote.outputAmountBaseUnits) || BigInt(quote.inputAmountBaseUnits) <= 0n ||
       BigInt(quote.outputAmountBaseUnits) <= 0n || !Number.isFinite(quote.priceImpactPct) ||
       !Number.isFinite(quote.taxPct) || quote.priceImpactPct < 0 || quote.taxPct < 0 ||
