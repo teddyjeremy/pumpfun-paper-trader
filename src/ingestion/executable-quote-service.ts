@@ -35,6 +35,13 @@ export interface ExecutableRoundTripQuote {
     entryCashDebitUsd: number;
     exitNetProceedsUsd: number;
     roundTripNetReturnPct: number;
+    buyFeePct: number;
+    sellFeePct: number;
+    combinedPriceImpactPct: number;
+    combinedTransferTaxPct: number;
+    roundTripCostPct: number;
+    meetsRoundTripCostLimit: boolean;
+    maximumRoundTripCostPct: number;
     meetsMinimumNetReturn: boolean;
     minimumNetReturnPct: number;
   };
@@ -69,6 +76,7 @@ export async function fetchExecutableRoundTripQuote(input: {
   quoteTtlMs?: number;
   maxPriceImpactPct?: number;
   minimumRoundTripNetReturnPct?: number;
+  maximumRoundTripCostPct?: number;
   solUsd?: SolUsdReference;
   now?: () => number;
 }): Promise<ExecutableRoundTripQuote> {
@@ -77,6 +85,7 @@ export async function fetchExecutableRoundTripQuote(input: {
   const quoteTtlMs = input.quoteTtlMs ?? 2_000;
   const maxPriceImpactPct = input.maxPriceImpactPct ?? 2;
   const minimumNetReturnPct = input.minimumRoundTripNetReturnPct ?? 0;
+  const maximumRoundTripCostPct = input.maximumRoundTripCostPct ?? 4;
   const providerFeeUsd = input.providerFeeUsdPerTransaction ?? 0;
   const percentile = input.priorityFeePercentile ?? 75;
   if (!/^\d+$/.test(input.buyAmountBaseUnits) || BigInt(input.buyAmountBaseUnits) <= 0n ||
@@ -91,6 +100,9 @@ export async function fetchExecutableRoundTripQuote(input: {
   }
   if (!Number.isFinite(minimumNetReturnPct) || minimumNetReturnPct < -100 || minimumNetReturnPct > 10_000) {
     throw new Error("Minimum round-trip net return threshold is invalid.");
+  }
+  if (!Number.isFinite(maximumRoundTripCostPct) || maximumRoundTripCostPct < 0 || maximumRoundTripCostPct > 100) {
+    throw new Error("Maximum round-trip cost threshold is invalid.");
   }
   if (!Number.isFinite(providerFeeUsd) || providerFeeUsd < 0) {
     throw new Error("Provider fee must be finite and non-negative.");
@@ -196,6 +208,15 @@ export async function fetchExecutableRoundTripQuote(input: {
   if (!Number.isFinite(roundTripNetReturnPct)) {
     throw new Error("Round-trip net return calculation is not finite.");
   }
+  const buyFeePct = totalFees(buyQuote) / buyQuote.requestedUsd * 100;
+  const sellFeePct = totalFees(initialSellQuote) / initialSellQuote.outputUsd * 100;
+  const combinedPriceImpactPct = buyQuote.priceImpactPct + initialSellQuote.priceImpactPct;
+  const combinedTransferTaxPct = buyQuote.taxPct + initialSellQuote.taxPct;
+  const roundTripCostPct = buyFeePct + sellFeePct + combinedPriceImpactPct + combinedTransferTaxPct;
+  if (![buyFeePct, sellFeePct, combinedPriceImpactPct, combinedTransferTaxPct, roundTripCostPct]
+      .every(Number.isFinite) || roundTripCostPct < 0) {
+    throw new Error("Round-trip cost calculation is not finite or non-negative.");
+  }
   return {
     status: "QUOTES_VALIDATED",
     paperEntryAuthorized: false,
@@ -214,6 +235,9 @@ export async function fetchExecutableRoundTripQuote(input: {
     },
     economics: {
       entryCashDebitUsd, exitNetProceedsUsd, roundTripNetReturnPct,
+      buyFeePct, sellFeePct, combinedPriceImpactPct, combinedTransferTaxPct,
+      roundTripCostPct, meetsRoundTripCostLimit: roundTripCostPct <= maximumRoundTripCostPct,
+      maximumRoundTripCostPct,
       meetsMinimumNetReturn: roundTripNetReturnPct >= minimumNetReturnPct,
       minimumNetReturnPct
     },
