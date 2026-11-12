@@ -40,7 +40,7 @@ describe("strict strategy audit", () => {
  const base = {
   candidateAgeSeconds: 25,
   profile: {impulsePriceChangePct:25,pullbackPct:20,reclaimDetected:true,reclaimAbovePreviousFiveSecondHighPct:1.4,pullbackVolumeVsImpulsePct:35,reclaimVolumeVsPullbackPct:180,dataComplete:true},
-  flow: {dataComplete:true,latestThreeWindowFlowPass:true,windows:[1,2,3].map(()=>({buySellRatio:4,uniqueBuyers:4,uniqueSellers:1})),distinctBuyersAcrossLatestThree:7,largestBuyerShareAcrossLatestThreeBps:6500},
+  flow: {dataComplete:true,latestThreeWindowFlowPass:true,windows:[1,2,3].map(()=>({buySellRatio:4,flowWindowPass:true,uniqueBuyers:4,uniqueSellers:1})),distinctBuyersAcrossLatestThree:7,largestBuyerShareAcrossLatestThreeBps:6500},
   creatorRiskStatus:"PASS_COMPLETE",walletClusterRiskStatus:"WATCH",attributionConfidenceBps:7500,
   signalAgeSeconds:1.5,nextObservationConfirmed:true,executableQuoteAvailable:false
  };

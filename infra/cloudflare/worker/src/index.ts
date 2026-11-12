@@ -489,7 +489,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
     if (monitoredMints.length === 0) return;
     const report = await this.listTradeFlows() as {
-      flows: Array<{ mint: string; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
+      flows: Array<{ mint: string; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
       priceVolumeProfiles: Array<{ mint:string; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
       creatorSellRisk: Array<{mint:string;status:string}>;
       walletClusterRisk: Array<{mint:string;status:string}>;
@@ -518,7 +518,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           reclaimVolumeVsPullbackPct: profile.reclaimVolumeVsPullbackPct, dataComplete: profile.dataComplete
         } : null,
         flow: flow ? {
-          dataComplete: flow.dataComplete, latestThreeWindowFlowPass: flow.latestThreeWindowFlowPass, windows: flow.windows,
+          dataComplete: flow.dataComplete, latestThreeWindowFlowPass: flow.latestThreeWindowFlowPass, windows: flow.windows.map(window => ({...window, flowWindowPass: window.flowWindowPass})),
           distinctBuyersAcrossLatestThree: flow.distinctBuyersAcrossLatestThree,
           largestBuyerShareAcrossLatestThreeBps: flow.largestBuyerShareAcrossLatestThreeBps
         } : null,

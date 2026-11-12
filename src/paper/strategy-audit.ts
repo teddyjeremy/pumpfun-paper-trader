@@ -20,7 +20,7 @@ export interface StrictStrategyAuditInput {
   flow: {
     dataComplete: boolean;
     latestThreeWindowFlowPass: boolean;
-    windows: Array<{ buySellRatio: number | null; uniqueBuyers: number; uniqueSellers: number }>;
+    windows: Array<{ buySellRatio: number | null; flowWindowPass: boolean; uniqueBuyers: number; uniqueSellers: number }>;
     distinctBuyersAcrossLatestThree: number;
     largestBuyerShareAcrossLatestThreeBps: number | null;
   } | null;
