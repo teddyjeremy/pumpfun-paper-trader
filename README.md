@@ -1,66 +1,100 @@
 # Pump.fun Paper Trader
 
-A **paper-only** Pump.fun bonding-curve trading research and simulation system. It does not sign transactions, hold a wallet key, submit transactions, or execute real trades.
+A **paper-only** Pump.fun research, market-monitoring and trading-simulation system. It does not sign transactions, hold a wallet key, submit Solana transactions, or execute real trades.
 
-## Current status
+## Repository status
 
-This repository is the project foundation for a persistent paper-trading worker and operator dashboard. The Vercel project is already linked to this repository. Google Cloud deployment is scaffolded in `infra/gcp`; cloud resources have not yet been provisioned. Live discovery, official SDK quote integration, durable execution, and the full market-data loop remain implementation milestones. Until all required adapters and the ledger are verified, readiness must remain false and the system must not invent fills.
+The current `main` branch contains the discovery and monitoring foundation, verified Pump/PumpSwap account and transaction evidence, strict strategy audit, quote adapters, portfolio simulation primitives, and dashboard/API foundations.
 
-## Fixed initial paper portfolio
+**Main is not yet paper-trading ready.** The strict evaluator intentionally cannot authorize a BUY while the pullback/reclaim volume thresholds, executable quote economics, and quote-to-position lifecycle are incomplete.
 
-- Starting balance: **$2.70**
-- Initial position principal: **$1.00**
-- Initial maximum open positions: **1**
-- Capacity and stake grow only through the explicit portfolio-sizing policy.
-- A position slot is released only after a valid simulated exit and zero token balance confirmation.
-- No maximum holding duration.
-- No private key or real transaction capability.
+### Implemented on main
 
-## Strategy
+- PumpPortal launch/migration discovery with bounded candidate storage and reconnect/expiry handling.
+- Candidate-specific Helius monitoring, selective transaction verification, bounded queues/RPC budgeting and verified Pump create/trade decoding.
+- Creator, holder and wallet-cluster risk evidence modules and price/volume/trade-flow profiling.
+- Official Pump SDK offline curve and PumpSwap quote adapters using verified account snapshots.
+- Normalized executable-paper-quote validation, fresh SOL/USD normalization, explicit fee fields, quote TTL and latency-expiry checks.
+- Paper portfolio sizing, idempotent Durable Object session journal and position/exit primitives.
+- PostgreSQL base schema/migration runner, audit-event ingestion and worker-lease primitives.
+- Read-only dashboard/API and Cloudflare/GCP deployment blueprints.
+- Dynamic exit evidence-family evaluator: correlated metrics are grouped, with either two independent families across two windows or one family persisting across three complete windows.
 
-The strict original entry strategy is the only enabled entry path. The experimental concentrated-flow relaxation is excluded. See [docs/STRATEGY.md](docs/STRATEGY.md).
+Relevant mainline work: [PR #34](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/34), [PR #36](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/36), [PR #39](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/39).
 
-Entry is limited to non-migrated Pump.fun bonding-curve tokens. If a held token graduates, migration is a market-state transition, **not an automatic sell**. The position must be monitored on a verified migrated market and exited using the same protective/dynamic exit manager. See [docs/MIGRATION_AND_DYNAMIC_EXITS.md](docs/MIGRATION_AND_DYNAMIC_EXITS.md).
+### Integrated paper-trading stack (this branch)
+
+This branch promotes the previously feature-branch-only work into mainline as one tested integration:
+
+- PostgreSQL paper-ledger projections and idempotent event projection (PR #19 work).
+- Resumable Helius backfill queue and bounded transient retries (PR #22/#24 work).
+- Session-scoped Helius backfill checkpoints and verified transaction archive (PR #28 work).
+- Scheduled holder and wallet-link evidence collection with explicit incomplete/stale handling (PR #31 work).
+- One-second sampled overlapping flow windows and distinct buyer aggregation (PR #33 work).
+- Strict strategy-to-paper execution lifecycle and reusable quote-gated dynamic exit component.
+
+The integration is being promoted in [PR #40](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/40). Historical replay and decode-coverage completeness remain separate work; [PR #37](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/37) was closed because its stale branch base produced a large conflicting diff.
+
+## What remains
+
+1. **Historical replay:** port replay and decode-coverage migration onto this branch; replay the actual strict strategy chronologically using verified observations.
+2. **Calibrate volume rules:** use chronological training/holdout sets to evaluate pullback contraction and reclaim expansion; do not invent thresholds or promote a weak holdout result.
+3. **Complete quote economics:** add supported Token-2022 transfer-fee handling or fail-closed rejection, authoritative network/priority fee estimates, and validated impact/slippage policy.
+4. **Connect paper execution:** connect quote-gated entry/exit lifecycle to the actual Worker position scheduler and persist complete position/trade transitions.
+5. **Complete migration lifecycle:** verify graduation and canonical PumpSwap market state, monitor full-position sellability and keep positions open when quotes are unavailable.
+6. **Runtime acceptance:** test Durable Object eviction/restart, PostgreSQL outage/recovery, queue recovery, worker lease fencing, provider gaps and a bounded paper-forward soak.
+7. **Dashboard completion:** expose persisted decisions, evidence coverage, quotes, open/closed positions, costs, PnL and exit blockers.
+
+## Paper portfolio policy
+
+- Initial simulated equity: **$2.70**.
+- Initial stake: **$1.00**.
+- Initial maximum concurrent positions: **1**.
+- Add one concurrent slot at each portfolio doubling (for example, $5 → 2 slots; $10 → 3 slots).
+- Increase stake by 50% at each doubling, capped at **$100**.
+- Never reuse a slot until the prior position has a valid simulated exit and zero token balance confirmation.
+- Never buy the same mint more than once.
+- Do not exceed available simulated equity after committed principal and costs.
+- No maximum holding duration; migration is a market transition, not an automatic exit.
 
 ## Safety invariants
 
-1. Paper mode is enforced in code. No wallet signer or transaction submission exists.
-2. Only Pump.fun bonding-curve tokens may be entered; migration while holding does not force an immediate exit.
-3. Missing critical risk evidence, stale market data, unknown costs, missing quotes, or failed sellability checks block new entries.
-4. Never fabricate a fill from chart prices, reserve-delta proxies, or stale quotes.
-5. Net PnL includes protocol/creator fees, network/priority fees, impact, slippage, and simulated latency.
-6. Accounting uses integer raw units / decimal arithmetic, never binary floating-point.
-7. One active worker leader lease and idempotent entry/exit transitions prevent duplicate positions.
-8. A migration or temporary quote outage never silently closes a position or releases a slot.
-9. A global paper kill switch blocks new entries but continues monitoring open positions.
+1. Paper mode only. No wallet signer or transaction submission.
+2. Only verified, non-migrated Pump.fun bonding-curve tokens may be entered.
+3. A held token may migrate; keep the position open until its migrated market is verified and the exit policy produces a valid quote.
+4. Missing risk evidence, incomplete backfill, stale market data, unknown costs, unsupported token extensions or failed sellability checks block entry.
+5. Never fabricate a fill from chart prices, reserve-delta proxies or stale quotes.
+6. Account using raw integer base units and decimal-safe arithmetic.
+7. Idempotency and worker lease fencing prevent duplicate entries/exits.
+8. A migration or quote outage never silently closes a position or releases a slot.
+9. A global paper kill switch blocks new entries while preserving management of open positions.
 
 ## Deployment layout
 
-- **Google Cloud:** persistent Node.js 22 worker, PostgreSQL ledger, Secret Manager, Cloud Logging/Monitoring, and Cloud Storage checkpoints/archive.
-- **Vercel:** protected operator dashboard and read-only API surface. It does not host the always-on market listener.
-- Deployment blueprint: [infra/gcp/DEPLOYMENT.md](infra/gcp/DEPLOYMENT.md).
+- **Cloudflare Worker / Durable Object:** bounded discovery, candidate monitoring and resumable coordination primitives.
+- **Google Cloud:** persistent Node.js worker, PostgreSQL ledger, Secret Manager, logging/monitoring and archive/checkpoint blueprint. Resources are not provisioned by repository changes alone.
+- **Vercel:** protected operator dashboard and read-only API; not the always-on market listener.
 
 ## Development
 
 - Node.js 22
 - TypeScript strict mode
-- Fastify API
-- Zod configuration validation
-- Pino structured logs
+- Fastify, Zod and Pino
 - Vitest
-- PostgreSQL persistence
+- PostgreSQL
 
 ```bash
 npm install
 npm run dev
-npm test
 npm run typecheck
+npm test
+npm run build
 ```
 
 ## Readiness
 
-The service intentionally reports not-ready until live discovery, verified curve/pool quotes, risk evidence, and durable ledger adapters are connected. See [docs/OPERATIONS.md](docs/OPERATIONS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+The service must remain not-ready for paper execution until the verified quote path, strict entry evidence, risk gates, durable ledger and position/exit lifecycle are connected and tested. CI and a multi-hour soak validate integration and operations, **not profitability**.
 
 ## Disclaimer
 
-This is a research and simulation tool, not investment advice. Paper fills are estimates, not evidence of real-world profitability. A successful deployment or multi-hour run validates integration and operations, not strategy profitability.
+This is a research and simulation tool, not investment advice. Paper fills are estimates, not evidence of real-world profitability.
