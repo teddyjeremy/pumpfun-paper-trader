@@ -280,6 +280,9 @@ export function buildCandidatePriceVolumeProfiles(
           peakPrice = bucket.highPrice;
           peakIndex = i;
         }
+        // High/low ordering inside one five-second bucket is unknown. A
+        // pullback can only begin in a later completed bucket than the peak.
+        if (i <= peakIndex) continue;
         const drawdownPct = ((peakPrice - bucket.lowPrice) / peakPrice) * 100;
         if (drawdownPct >= 10) {
           if (drawdownPct > 40) {
@@ -313,7 +316,7 @@ export function buildCandidatePriceVolumeProfiles(
           }
           continue;
         }
-        if (i > pullbackLowIndex) {
+        if (i > pullbackLowIndex && buckets[i - 1]!.endTime === bucket.startTime) {
           const previousHigh = buckets[i - 1]!.highPrice;
           const reclaimPct = ((bucket.highPrice / previousHigh) - 1) * 100;
           if (reclaimPct >= 1) {
