@@ -207,7 +207,8 @@ function messageHasSafeFeeInstructions(messageBase64: string, expectedLimit: num
   }
 }
 
-function decodeBase58(value: string): Uint8Array {
+function decodeBase58(value: string | Uint8Array): Uint8Array {
+  if (value instanceof Uint8Array) return value;
   const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
   let number = 0n;
   for (const char of value) {
