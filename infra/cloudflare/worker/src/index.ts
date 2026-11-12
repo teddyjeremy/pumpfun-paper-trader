@@ -538,8 +538,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       );
       const launchEvent = this.verifiedTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
       const launchTimestamp = launchEvent ? Number(launchEvent.timestamp) : Number.NaN;
-      const ageSeconds = Number.isSafeInteger(launchTimestamp) && launchTimestamp >= 0
-        ? Math.max(0, Date.now() / 1000 - launchTimestamp) : null;
+      const nowSeconds = Date.now() / 1000;
+      const ageSeconds = Number.isSafeInteger(launchTimestamp) && launchTimestamp >= 0 && launchTimestamp <= nowSeconds
+        ? nowSeconds - launchTimestamp : null;
       const profile = report.priceVolumeProfiles.find(item => item.mint === mint && item.quoteMint === SOL_QUOTE_MINT) ?? null;
       const flow = report.flows.find(item => item.mint === mint && item.quoteMint === SOL_QUOTE_MINT) ?? null;
       const creatorRisk = report.creatorSellRisk.find(item => item.mint === mint);
