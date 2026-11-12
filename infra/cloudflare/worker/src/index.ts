@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
+  pruneExpiredCandidates,
   type DiscoveryStoreState
 } from "../../../../src/ingestion/discovery-store.js";
 import {
@@ -33,6 +34,9 @@ interface CoordinatorStatus {
   migrations: number;
   overflowEvents: number;
   incompleteEvents: number;
+  expiredCandidates: number;
+  reconnectAttempts: number;
+  nextReconnectAt: string | null;
   lastPersistedAt: string | null;
   lastError: string | null;
 }
@@ -55,6 +59,9 @@ const INITIAL_STATUS: CoordinatorStatus = {
   migrations: 0,
   overflowEvents: 0,
   incompleteEvents: 0,
+  expiredCandidates: 0,
+  reconnectAttempts: 0,
+  nextReconnectAt: null,
   lastPersistedAt: null,
   lastError: null
 };
@@ -79,7 +86,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.ctx.storage.get<boolean>("enabled")
     ]);
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
-    if (savedDiscovery) this.discovery = savedDiscovery;
+    if (savedDiscovery) this.discovery = { ...emptyDiscoveryStore(), ...savedDiscovery, expired: savedDiscovery.expired ?? 0 };
     this.status.enabled = enabled === true;
     // Outbound sockets cannot survive a Durable Object restart.
     this.status.connected = false;
@@ -92,6 +99,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     await this.hydrate();
     await this.ctx.storage.put("enabled", true);
     this.status.enabled = true;
+    this.status.nextReconnectAt = null;
+    this.status.reconnectAttempts = 0;
     this.connect();
     await this.persist();
     return this.getStatus();
@@ -108,6 +117,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     this.status.connected = false;
     this.status.subscriptionsSent = false;
+    this.status.nextReconnectAt = null;
     await this.persist();
     return this.getStatus();
   }
@@ -126,7 +136,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       return this.getStatus();
     }
 
-    // Flush the bounded in-memory batch at least once per cron interval.
+    // Expire stale candidates even if the provider is quiet, then flush state.
+    const beforeExpiry = this.discovery.candidates.length;
+    this.discovery = pruneExpiredCandidates(this.discovery, new Date().toISOString());
+    if (this.discovery.candidates.length !== beforeExpiry) this.pendingWrites += 1;
     await this.persist();
 
     if (this.socket?.readyState === WebSocket.OPEN) {
@@ -149,7 +162,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const oldSocket = this.socket;
       this.socket = null;
       oldSocket.close(4000, "Connection attempt timed out");
+      this.scheduleReconnect();
     }
+
+    const nextReconnectAt = this.status.nextReconnectAt ? Date.parse(this.status.nextReconnectAt) : 0;
+    if (nextReconnectAt > Date.now()) return this.getStatus();
 
     this.connect();
     await this.persist();
@@ -164,6 +181,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async listCandidates(): Promise<DiscoveryStoreState> {
     await this.hydrate();
+    const beforeExpiry = this.discovery.candidates.length;
+    this.discovery = pruneExpiredCandidates(this.discovery, new Date().toISOString());
+    if (this.discovery.candidates.length !== beforeExpiry) {
+      this.pendingWrites += 1;
+      await this.persist();
+    }
     return structuredClone(this.discovery);
   }
 
@@ -184,10 +207,17 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         this.status.connectedAt = new Date().toISOString();
         this.connectingSinceMs = 0;
         this.status.lastError = null;
-        for (const subscription of pumpPortalDiscoverySubscriptions()) {
-          socket.send(JSON.stringify(subscription));
+        this.status.reconnectAttempts = 0;
+        this.status.nextReconnectAt = null;
+        try {
+          for (const subscription of pumpPortalDiscoverySubscriptions()) {
+            socket.send(JSON.stringify(subscription));
+          }
+          this.status.subscriptionsSent = true;
+        } catch {
+          this.status.lastError = "PumpPortal subscription send failed.";
+          socket.close(1011, "Subscription send failed");
         }
-        this.status.subscriptionsSent = true;
       });
 
       socket.addEventListener("message", (message: MessageEvent) => {
@@ -221,7 +251,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         this.discovery = result.state;
         this.pendingWrites += 1;
         this.syncCounts();
-        if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist();
+        if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist().catch(() => undefined);
       });
 
       socket.addEventListener("close", () => {
@@ -231,13 +261,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         this.status.subscriptionsSent = false;
         this.status.connectedAt = null;
         this.connectingSinceMs = 0;
-        void this.persist();
+        if (this.status.enabled) this.scheduleReconnect();
+        void this.persist().catch(() => undefined);
       });
 
       socket.addEventListener("error", () => {
         if (this.socket !== socket || !this.status.enabled) return;
         this.status.lastError = "PumpPortal WebSocket transport error.";
-        void this.persist();
+        void this.persist().catch(() => undefined);
       });
     } catch {
       this.socket = null;
@@ -245,7 +276,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.status.subscriptionsSent = false;
       this.connectingSinceMs = 0;
       this.status.lastError = "Unable to create the PumpPortal WebSocket connection.";
+      if (this.status.enabled) this.scheduleReconnect();
     }
+  }
+
+  private scheduleReconnect(): void {
+    this.status.reconnectAttempts += 1;
+    const delayMs = Math.min(60_000, 1_000 * (2 ** Math.min(this.status.reconnectAttempts - 1, 6)));
+    this.status.nextReconnectAt = new Date(Date.now() + delayMs).toISOString();
   }
 
   private syncCounts(): void {
@@ -255,6 +293,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.status.migrations = this.discovery.migrations;
     this.status.overflowEvents = this.discovery.overflow;
     this.status.incompleteEvents = this.discovery.incomplete;
+    this.status.expiredCandidates = this.discovery.expired ?? 0;
     this.status.lastPersistedAt = this.discovery.lastPersistedAt;
   }
 
