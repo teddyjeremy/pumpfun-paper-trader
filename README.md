@@ -6,7 +6,7 @@ A **paper-only** Pump.fun research, market-monitoring and trading-simulation sys
 
 The current `main` branch contains the discovery and monitoring foundation, verified Pump/PumpSwap account and transaction evidence, strict strategy audit, quote adapters, portfolio simulation primitives, and dashboard/API foundations.
 
-**Main is not yet paper-trading ready.** The strict evaluator intentionally cannot authorize a BUY while the pullback/reclaim volume thresholds, executable quote economics, and quote-to-position lifecycle are incomplete.
+**Main is not yet paper-trading ready.** The merged ledger and reusable execution components are not yet connected to an automatic position scheduler, and strict entry remains fail-closed. The strict evaluator intentionally cannot authorize a BUY while the pullback/reclaim volume thresholds, executable quote economics, and quote-to-position lifecycle are incomplete.
 
 ### Implemented on main
 
@@ -22,7 +22,7 @@ The current `main` branch contains the discovery and monitoring foundation, veri
 
 Relevant mainline work: [PR #34](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/34), [PR #36](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/36), [PR #39](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/39).
 
-### Integrated paper-trading stack (this branch)
+### Integrated paper-trading stack (merged PR #40)
 
 This branch promotes the previously feature-branch-only work into mainline as one tested integration:
 
@@ -33,7 +33,7 @@ This branch promotes the previously feature-branch-only work into mainline as on
 - One-second sampled overlapping flow windows and distinct buyer aggregation (PR #33 work).
 - Strict strategy-to-paper execution lifecycle and reusable quote-gated dynamic exit component.
 
-The integration is being promoted in [PR #40](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/40). Historical replay and decode-coverage completeness remain separate work; [PR #37](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/37) was closed because its stale branch base produced a large conflicting diff.
+The integration was merged in [PR #40](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/40). Historical replay and decode-coverage completeness are being added separately in [PR #45](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/45).
 
 ## What remains
 
