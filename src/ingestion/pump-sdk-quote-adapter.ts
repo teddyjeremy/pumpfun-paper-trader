@@ -260,7 +260,7 @@ export function quotePumpSwapBuyFromSnapshot(
   snapshot: VerifiedPumpQuoteSnapshot,
   quoteBudgetBaseUnits: string
 ): PumpSdkSwapQuote {
-  if (!/^\d+$/.test(quoteBudgetBaseUnits) || BigInt(quoteBudgetBaseUnits) <= 0n) {
+  if (!isU64BaseUnits(quoteBudgetBaseUnits) || BigInt(quoteBudgetBaseUnits) <= 0n) {
     throw new Error("Buy quote budget must be a positive base-unit integer.");
   }
   const context = decodeContext(snapshot);
@@ -313,7 +313,7 @@ export function quotePumpSwapSellFromSnapshot(
   snapshot: VerifiedPumpQuoteSnapshot,
   tokenAmountBaseUnits: string
 ): PumpSdkSwapQuote {
-  if (!/^\d+$/.test(tokenAmountBaseUnits) || BigInt(tokenAmountBaseUnits) <= 0n) {
+  if (!isU64BaseUnits(tokenAmountBaseUnits) || BigInt(tokenAmountBaseUnits) <= 0n) {
     throw new Error("Sell token amount must be a positive base-unit integer.");
   }
   const context = decodeContext(snapshot);
@@ -370,6 +370,9 @@ export async function fetchPumpSwapSdkQuote(input: {
   amountBaseUnits: string;
   config: HeliusAccountReadConfig;
 }): Promise<PumpSdkSwapQuote> {
+  if (!isU64BaseUnits(input.amountBaseUnits) || BigInt(input.amountBaseUnits) <= 0n) {
+    throw new Error("PumpSwap quote amount must be a positive base-unit integer within u64.");
+  }
   const discovery = await fetchHeliusMultipleAccounts([input.poolAddress], input.config);
   const marketAccount = discovery.accounts[0];
   if (!marketAccount) throw new Error("Canonical PumpSwap pool account is not available.");
