@@ -655,10 +655,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     });
   }
 
-  async listCandidateOutcomes(requestedSessionId?: string): Promise<unknown> {
+  async listCandidateOutcomes(requestedSessionId?: string, after = 0, limit = 100): Promise<unknown> {
     await this.hydrate();
     const sessionId = requestedSessionId ?? this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
-    if (!sessionId) return [];
+    if (!sessionId) return { sessionId: null, outcomes: [], nextAfter: null };
+    const safeAfter = Number.isSafeInteger(after) && after >= 0 ? after : 0;
+    const safeLimit = Number.isSafeInteger(limit) ? Math.max(1, Math.min(100, limit)) : 100;
     const [trackers, candidates] = await Promise.all([
       this.ctx.storage.list<CandidatePriceTracker & { sessionId: string }>({ prefix: `candidate_price:${sessionId}:` }),
       this.ctx.storage.list<Record<string, unknown>>({ prefix: `candidate_seen:${sessionId}:` })
@@ -669,7 +671,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       items.push(tracker);
       byMint.set(tracker.mint, items);
     }
-    return Promise.all([...candidates.values()].map(async candidate => {
+    const sortedCandidates = [...candidates.values()].sort((a, b) =>
+      String(a.mint).localeCompare(String(b.mint))
+    );
+    const selected = sortedCandidates.slice(safeAfter, safeAfter + safeLimit);
+    const outcomes = await Promise.all(selected.map(async candidate => {
       const mint = String(candidate.mint);
       const observed = byMint.get(mint) ?? [];
       const refs = await this.ctx.storage.get<{
@@ -685,7 +691,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         followUpStatus: observed.length > 0 ? "PARTIAL" : "MISSING",
         priceTrackers: observed.sort((a, b) => a.quoteMint.localeCompare(b.quoteMint))
       };
-    })).then(items => items.sort((a, b) => String(a.mint).localeCompare(String(b.mint))));
+    }));
+    const next = safeAfter + outcomes.length;
+    return { sessionId, outcomes, nextAfter: next < sortedCandidates.length ? next : null,
+      total: sortedCandidates.length };
   }
 
   async listAuditEvents(after = 0, limit = 100, requestedSessionId?: string): Promise<unknown> {
@@ -1461,7 +1470,9 @@ export default {
     }
     if (url.pathname === "/candidate-outcomes" && request.method === "GET") {
       const sessionId = url.searchParams.get("sessionId") ?? undefined;
-      return Response.json(await coordinator.listCandidateOutcomes(sessionId));
+      const after = Number(url.searchParams.get("after") ?? "0");
+      const limit = Number(url.searchParams.get("limit") ?? "100");
+      return Response.json(await coordinator.listCandidateOutcomes(sessionId, after, limit));
     }
     if ((url.pathname === "/audit" || url.pathname === "/audit/export") && request.method === "GET") {
       const after = Number(url.searchParams.get("after") ?? "0");
