@@ -178,7 +178,7 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedCurveContext
   const curve = PUMP_SDK.decodeBondingCurve(accountInfo(marketRaw));
   const global = PUMP_SDK.decodeGlobal(accountInfo(globalRaw));
   const feeConfig = PUMP_SDK.decodeFeeConfig(accountInfo(feeRaw));
-  if (!curve.mint.equals(mint) || !curve.quoteMint.equals(quoteMint) ||
+  if (!curve.quoteMint.equals(quoteMint) ||
       curve.complete || curve.isCashbackCoin ||
       !curve.virtualTokenReserves.eq(new BN(decoded.virtualTokenReserves)) ||
       !curve.virtualQuoteReserves.eq(new BN(decoded.virtualQuoteReserves)) ||
