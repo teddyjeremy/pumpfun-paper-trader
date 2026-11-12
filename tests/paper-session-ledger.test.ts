@@ -19,3 +19,18 @@ describe("paper bankroll and missed-candidate outcomes", () => {
   expect(out.maxMultipleFromDecision).toBeNull(); expect(out.reached3x).toBe(false); expect(out.followUpStatus).toBe("MISSING");
  });
 });
+
+import { updateCandidatePriceTracker } from "../src/paper/candidate-price-ledger.js";
+describe("candidate price follow-up ledger", () => {
+ it("tracks peaks and milestones from the first observed trade in the same quote mint", () => {
+  const first = updateCandidatePriceTracker(null, {mint:"mint",quoteMint:"SOL",quoteAmount:"100",tokenAmount:"1000",timestamp:"2026-11-12T12:00:00Z",signature:"sig1",isBuy:true});
+  const peak = updateCandidatePriceTracker(first, {mint:"mint",quoteMint:"SOL",quoteAmount:"300",tokenAmount:"1000",timestamp:"2026-11-12T12:01:00Z",signature:"sig2",isBuy:false});
+  expect(peak.multipleFromFirstObserved).toBe(3);
+  expect(peak.reached15x).toBe(true); expect(peak.reached2x).toBe(true); expect(peak.reached3x).toBe(true);
+  expect(peak.followUpStatus).toBe("PARTIAL");
+ });
+ it("does not compare prices across quote mints", () => {
+  const first = updateCandidatePriceTracker(null, {mint:"mint",quoteMint:"SOL",quoteAmount:"100",tokenAmount:"1000",timestamp:"2026-11-12T12:00:00Z",signature:"sig1",isBuy:true});
+  expect(() => updateCandidatePriceTracker(first, {mint:"mint",quoteMint:"USDC",quoteAmount:"300",tokenAmount:"1000",timestamp:"2026-11-12T12:01:00Z",signature:"sig2",isBuy:false})).toThrow();
+ });
+});

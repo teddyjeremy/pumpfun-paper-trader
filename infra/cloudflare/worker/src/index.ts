@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "../../../../src/paper/session-ledger.js";
+import { updateCandidatePriceTracker, type CandidatePriceTracker } from "../../../../src/paper/candidate-price-ledger.js";
 
 type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "WORKER_RESTARTED" | "DISCOVERY" |
   "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "CANDIDATE_EXPIRED" | "OBSERVATION" |
@@ -943,6 +944,26 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction),
             retentionPolicy: "LATEST_2000_TRANSACTION_SNAPSHOT_PLUS_APPEND_ONLY_AUDIT"
           }, `helius:${work.signature}`);
+          for (let tradeIndex = 0; tradeIndex < result.transaction.tradeEvents.length; tradeIndex += 1) {
+            const trade = result.transaction.tradeEvents[tradeIndex]!;
+            const quoteAmount = trade.quoteAmount > 0n ? trade.quoteAmount : trade.solAmount;
+            if (quoteAmount <= 0n || trade.tokenAmount <= 0n) {
+              await this.appendAudit("DATA_GAP", work.mint, {
+                signature: work.signature, tradeIndex, reason: "TRADE_PRICE_UNAVAILABLE"
+              }, `trade-price-missing:${work.signature}:${tradeIndex}`);
+              continue;
+            }
+            const trackerKey = `candidate_price:${trade.mint}:${trade.quoteMint}`;
+            const previous = await this.ctx.storage.get<CandidatePriceTracker>(trackerKey) ?? null;
+            const tracker = updateCandidatePriceTracker(previous, {
+              mint: trade.mint, quoteMint: trade.quoteMint, quoteAmount: quoteAmount.toString(),
+              tokenAmount: trade.tokenAmount.toString(), timestamp: new Date(Number(trade.timestamp) * 1000).toISOString(),
+              signature: work.signature, isBuy: trade.isBuy
+            });
+            await this.ctx.storage.put(trackerKey, tracker);
+            await this.appendAudit("CANDIDATE_OUTCOME", trade.mint, tracker,
+              `candidate-price:${work.signature}:${tradeIndex}`);
+          }
           this.status.verifiedTransactions += 1;
           // Re-rank the six evidence-follow-up slots as verified events arrive.
           // Fresh launches remain protected by the four-slot first-minute reserve.
