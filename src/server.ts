@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import { authorizeDashboardRequest } from "./dashboard-auth.js";
 import { config } from "./config.js";
+import { isStrongServiceToken } from "./service-token.js";
 import { diagnose, increment, snapshot } from "./diagnostics/registry.js";
 import { trackingSnapshot } from "./diagnostics/tracker.js";
 import {
@@ -26,7 +27,7 @@ app.addHook("onRequest", async (request, reply) => {
   if (pathname === "/health" || pathname === "/ready") return;
   if (pathname === "/internal/paper-events" || pathname === "/internal/worker-lease" || pathname === "/internal/helius-backfill") {
     const expected = config.PAPER_EVENT_INGEST_TOKEN;
-    if (!expected) return reply.code(503).send({ error: "Internal ingestion authentication is not configured." });
+    if (!isStrongServiceToken(expected)) return reply.code(503).send({ error: "Internal ingestion is unavailable until PAPER_EVENT_INGEST_TOKEN is configured with at least 32 characters." });
     const authorization = request.headers.authorization ?? "";
     const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
     const a = Buffer.from(supplied);
@@ -144,7 +145,7 @@ app.get("/api/worker", async (_request, reply) => {
     return { configured: false, canControl: false, connected: false, enabled: false, tradingReady: false,
       blocker: "Configure PAPER_WORKER_URL on the server to connect the Cloudflare monitor." };
   }
-  const canControl = Boolean(config.PAPER_WORKER_CONTROL_TOKEN);
+  const canControl = isStrongServiceToken(config.PAPER_WORKER_CONTROL_TOKEN);
   try {
     const response = await fetch(new URL(canControl ? "/dashboard" : "/health", config.PAPER_WORKER_URL), {
       headers: canControl ? { authorization: `Bearer ${config.PAPER_WORKER_CONTROL_TOKEN}` } : {},
