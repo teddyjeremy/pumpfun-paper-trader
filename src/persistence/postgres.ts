@@ -796,6 +796,9 @@ export interface HeliusBackfillReplayDatasetRow {
   signatureCount: number;
   verifiedTransactionCount: number;
   transactions: unknown[];
+  riskEvidenceEvents: Array<{ occurredAt: string; payload: unknown }>;
+  riskEvidenceEventCount: number;
+  riskEvidenceTruncated: boolean;
 }
 
 /** Read only verified historical observations; live-monitor observations are excluded from replay. */
@@ -809,13 +812,30 @@ export async function getHeliusBackfillReplayDataset(sessionId: string): Promise
          json_agg(t.raw_observation ORDER BY t.slot ASC,t.signature ASC)
            FILTER (WHERE t.signature IS NOT NULL AND t.observation_source='HISTORICAL_BACKFILL'),
          '[]'::json
-       ) AS transactions
+       ) AS transactions,
+       risk.risk_evidence_events,
+       risk.risk_evidence_event_count
      FROM helius_backfill_jobs j
      LEFT JOIN helius_transaction_observations t
        ON t.session_id=j.session_id AND t.mint=j.mint
+     LEFT JOIN LATERAL (
+       SELECT
+         COALESCE(jsonb_agg(jsonb_build_object(
+           'occurredAt',risk_row.occurred_at,'payload',risk_row.payload
+         ) ORDER BY risk_row.occurred_at ASC),'[]'::jsonb) AS risk_evidence_events,
+         COALESCE(MAX(risk_row.total_count),0)::int AS risk_evidence_event_count
+       FROM (
+         SELECT e.occurred_at,e.payload,COUNT(*) OVER() AS total_count
+         FROM paper_session_events e
+         WHERE e.session_id=j.session_id AND e.mint=j.mint AND e.event_type='RISK_EVIDENCE'
+         ORDER BY e.occurred_at ASC
+         LIMIT 500
+       ) risk_row
+     ) risk ON TRUE
      WHERE j.session_id=$1
      GROUP BY j.session_id,j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
-       j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count
+       j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count,
+       risk.risk_evidence_events,risk.risk_evidence_event_count
      ORDER BY j.launch_block_time ASC NULLS LAST,j.mint ASC`,
     [sessionId]
   );
@@ -829,7 +849,11 @@ export async function getHeliusBackfillReplayDataset(sessionId: string): Promise
     decodedReason: row.decoded_reason === null ? null : String(row.decoded_reason),
     signatureCount: Number(row.signature_count),
     verifiedTransactionCount: Number(row.verified_transaction_count),
-    transactions: Array.isArray(row.transactions) ? row.transactions : []
+    transactions: Array.isArray(row.transactions) ? row.transactions : [],
+    riskEvidenceEvents: Array.isArray(row.risk_evidence_events)
+      ? row.risk_evidence_events as Array<{ occurredAt: string; payload: unknown }> : [],
+    riskEvidenceEventCount: Number(row.risk_evidence_event_count ?? 0),
+    riskEvidenceTruncated: Number(row.risk_evidence_event_count ?? 0) > 500
   }));
 }
 
