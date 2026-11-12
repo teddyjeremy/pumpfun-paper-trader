@@ -18,6 +18,8 @@ export interface PaperExitExecutionInput {
   quoteSell: (input: { mint: string; tokenAmountBaseUnits: string }) => Promise<{
     quote: OfflinePumpQuote; context: PaperExitQuoteContext;
   }>;
+  /** Must persist a complete portfolio mark, including every other open position. */
+  commitMark: (input: { positionId: string; sellQuote: ExecutablePaperQuoteWithLatency }) => Promise<unknown>;
   commitExit: (input: {
     positionId: string;
     sellQuote: ExecutablePaperQuoteWithLatency;
@@ -138,6 +140,9 @@ export async function executePaperExit(input: PaperExitExecutionInput): Promise<
 
     const selected = evaluations.find(evaluation => evaluation.action === "sell");
     if (!selected) {
+      // The callback must collect any other open-position quotes needed by the
+      // portfolio's complete-mark invariant before committing the mark.
+      await input.commitMark({ positionId: position.positionId, sellQuote });
       return {
         status: "HOLD", sellQuoteId: sellQuote.quoteId,
         currentNetReturnPct: currentReturn, evaluations
