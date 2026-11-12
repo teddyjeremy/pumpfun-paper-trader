@@ -341,9 +341,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (verified.size > 0) await this.ctx.storage.put(verifiedKey, [...verified].slice(-500));
     const failedKey = `helius_failed_historical_signatures:${sessionId}:${mint}`;
     const failed = new Set(await this.ctx.storage.get<string[]>(failedKey) ?? []);
-    const archivedKey = `helius_archived_transaction_signatures:${sessionId}`;
-    const archived = new Set((await this.ctx.storage.get<string[]>(archivedKey) ?? [])
-      .filter(signature => state.signatures.some(item => item.signature === signature)));
+    const archivedKey = `helius_archived_transaction_signatures:${sessionId}:${mint}`;
+    const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
+    const legacyArchived = new Set(await this.ctx.storage.get<string[]>(
+      `helius_archived_transaction_signatures:${sessionId}`
+    ) ?? []);
+    for (const signature of state.signatures) {
+      if (legacyArchived.has(signature.signature)) archived.add(signature.signature);
+    }
     const failure = await this.ctx.storage.get<{ reason?: string }>(
       `helius_backfill_decode_incomplete:${sessionId}:${mint}`
     );
@@ -402,6 +407,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         if (!response.ok) throw new Error("Transaction archive was not acknowledged.");
         archived.add(transaction.signature);
         await this.ctx.storage.put(archivedKey, [...archived].slice(-5_000));
+        if (historicalSignature) {
+          const mintArchiveKey = `helius_archived_transaction_signatures:${sessionId}:${transaction.mint}`;
+          const mintArchived = new Set(await this.ctx.storage.get<string[]>(mintArchiveKey) ?? []);
+          mintArchived.add(transaction.signature);
+          await this.ctx.storage.put(mintArchiveKey, [...mintArchived].slice(-500));
+        }
       } catch {
         this.status.lastError = "Verified Helius transactions are waiting for PostgreSQL persistence.";
         await this.ctx.storage.setAlarm(Date.now() + 30_000);
