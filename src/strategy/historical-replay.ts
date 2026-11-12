@@ -147,8 +147,8 @@ export function hasCompleteHistoricalExitEvidence(input: {
   simulatedExitPriceQuotePerToken?: number;
   simulatedNetFinalReturnPct?: number;
 }): boolean {
-  return Number.isSafeInteger(input.exitLifecycleCompleteAt) &&
-    Number.isSafeInteger(input.simulatedExitAt) &&
+  return Number.isSafeInteger(input.exitLifecycleCompleteAt) && input.exitLifecycleCompleteAt! >= 0 &&
+    Number.isSafeInteger(input.simulatedExitAt) && input.simulatedExitAt! >= 0 &&
     input.exitLifecycleCompleteAt! >= input.simulatedExitAt! &&
     input.exitLifecycleCompleteAt! <= input.replayEndAt &&
     input.simulatedExitAt! >= input.entryAt &&
@@ -163,6 +163,7 @@ export function hasCompleteHistoricalEntryEvidence(input: {
   entryEvidenceCompleteAt?: number;
 }): boolean {
   return Number.isSafeInteger(input.entryEvidenceCompleteAt) &&
+    input.entryEvidenceCompleteAt! >= 0 &&
     input.entryEvidenceCompleteAt! <= input.entryAt;
 }
 
@@ -176,8 +177,10 @@ export function classifyHistoricalWalletClusterRisk(input: {
   if (input.walletRisk?.status === "REJECT_OBSERVED") return "REJECT_OBSERVED";
   const walletCoverageComplete = input.walletClusterEvidenceCoverage === "FULL_WALLET_HISTORY" &&
     Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) &&
+    input.walletClusterEvidenceCompleteAt! >= 0 &&
     input.walletClusterEvidenceCompleteAt! <= input.evaluatedAt;
   const holderCoverageComplete = Number.isSafeInteger(input.holderCensusCompleteAt) &&
+    input.holderCensusCompleteAt! >= 0 &&
     input.holderCensusCompleteAt! <= input.evaluatedAt;
   if (walletCoverageComplete && holderCoverageComplete && input.walletRisk !== null &&
       input.walletRisk.attributionStatus !== "INVALID_EVIDENCE") return "PASS_COMPLETE";
