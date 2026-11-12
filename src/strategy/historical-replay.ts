@@ -1,7 +1,7 @@
 import type { VerifiedPumpTransaction } from "../ingestion/helius.js";
 import type { PumpTradeEvent } from "../ingestion/pump-events.js";
 import { buildCandidatePriceVolumeProfiles } from "../ingestion/price-volume-profile.js";
-import { buildCandidateTradeFlows } from "../ingestion/trade-flow.js";
+import { buildCandidateTradeFlows, isSolQuoteMint } from "../ingestion/trade-flow.js";
 
 export interface HistoricalReplayCoinInput {
   mint: string;
@@ -97,9 +97,10 @@ function eventTimestamp(event: PumpTradeEvent): number {
 }
 
 function eventPrice(event: PumpTradeEvent): number | null {
-  const quote = event.virtualSolReserves > 0n ? event.virtualSolReserves : event.virtualQuoteReserves;
+  const quote = isSolQuoteMint(event.quoteMint) ? event.virtualSolReserves : event.virtualQuoteReserves;
   if (quote <= 0n || event.virtualTokenReserves <= 0n) return null;
-  const value = Number(quote) / Number(event.virtualTokenReserves);
+  const scaled = (quote * 1_000_000_000_000n) / event.virtualTokenReserves;
+  const value = Number(scaled) / 1_000_000_000_000;
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
@@ -233,14 +234,14 @@ export function replayHistoricalCoin(
       };
       snapshots.push(snapshot);
       if (setupEligible && firstSetup === null && profile.reclaimTime !== null) {
+        firstSetup = snapshot;
         entryEvent = trades.find(event => {
           const at = eventTimestamp(event);
           return at >= profile.reclaimTime! && at <= profile.reclaimTime! + 2 &&
             eventPrice(event) !== null;
         }) ?? null;
-        if (entryEvent) firstSetup = snapshot;
+        break;
       }
-      if (firstSetup) break;
     }
   }
 
@@ -301,9 +302,10 @@ function scoreThreshold(
 export function calibrateVolumeThresholds(
   replays: readonly HistoricalCoinReplay[]
 ): VolumeThresholdCalibration {
-  const labeled = replays.filter(coin => coin.outcome?.label !== "UNKNOWN" &&
-    coin.firstSetup?.pullbackVolumeVsImpulsePct !== null &&
-    coin.firstSetup?.reclaimVolumeVsPullbackPct !== null);
+  const labeled = replays.filter(coin => coin.outcome !== null && coin.outcome.label !== "UNKNOWN" &&
+    coin.firstSetup !== null &&
+    coin.firstSetup.pullbackVolumeVsImpulsePct !== null &&
+    coin.firstSetup.reclaimVolumeVsPullbackPct !== null);
   const ordered = [...labeled].sort((a, b) => a.launchBlockTime - b.launchBlockTime);
   const split = Math.floor(ordered.length * 0.7);
   const training = ordered.slice(0, split);
