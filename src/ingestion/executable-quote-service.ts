@@ -227,8 +227,8 @@ export async function fetchExecutableRoundTripQuote(input: {
     quote.feeBreakdownUsd.provider;
   const entryCashDebitUsd = buyQuote.requestedUsd + totalFees(buyQuote);
   const exitNetProceedsUsd = initialSellQuote.outputUsd - totalFees(initialSellQuote);
-  if (!(entryCashDebitUsd > 0) || !Number.isFinite(exitNetProceedsUsd)) {
-    throw new Error("Round-trip quote economics are not finite or positive.");
+  if (!(entryCashDebitUsd > 0) || !(exitNetProceedsUsd > 0) || !Number.isFinite(exitNetProceedsUsd)) {
+    throw new Error("Round-trip quote economics are not finite and positive after all exit costs.");
   }
   const roundTripNetReturnPct = (exitNetProceedsUsd - entryCashDebitUsd) / entryCashDebitUsd * 100;
   if (!Number.isFinite(roundTripNetReturnPct)) {
