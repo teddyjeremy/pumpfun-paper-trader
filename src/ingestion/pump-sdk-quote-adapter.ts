@@ -1,7 +1,7 @@
 import BN from "bn.js";
 import { Buffer } from "node:buffer";
 import { PublicKey, type AccountInfo } from "@solana/web3.js";
-import { getTransferFeeConfig, unpackMint, type RawMint } from "@solana/spl-token";
+import { getTransferFeeConfig, getTransferHook, unpackMint, type RawMint } from "@solana/spl-token";
 import {
   PUMP_AMM_SDK,
   buyQuoteInput,
@@ -39,6 +39,11 @@ import {
 
 const PUMP_FEE_PROGRAM_ID = "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ";
 const BPS = new BN(10_000);
+const MAX_U64 = 18_446_744_073_709_551_615n;
+
+function isU64BaseUnits(value: string): boolean {
+  return /^\\d+$/.test(value) && value.length <= 20 && BigInt(value) <= MAX_U64;
+}
 
 export interface PumpSdkSwapQuote {
   provider: "pump-sdk-4.3.1";
@@ -95,6 +100,9 @@ function requiredAccount(snapshot: VerifiedPumpQuoteSnapshot, role: "market" | "
   "globalConfig" | "feeConfig" | "baseVault" | "quoteVault"): RawProgramAccount {
   const account = snapshot.accounts[role];
   if (!account) throw new Error(`Pump quote snapshot is missing ${role}.`);
+  if (account.slot !== snapshot.slot || account.observedAt !== snapshot.observedAt) {
+    throw new Error(`Pump quote ${role} account is not from the verified snapshot context.`);
+  }
   return account;
 }
 
@@ -138,7 +146,9 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedSwapContext 
 
   if (marketAccount.owner !== PUMP_AMM_PROGRAM_ID ||
       globalRaw.owner !== PUMP_AMM_PROGRAM_ID ||
-      feeRaw.owner !== PUMP_FEE_PROGRAM_ID) {
+      feeRaw.owner !== PUMP_FEE_PROGRAM_ID ||
+      globalRaw.address !== GLOBAL_CONFIG_PDA.toBase58() ||
+      feeRaw.address !== PUMP_AMM_FEE_CONFIG_PDA.toBase58()) {
     throw new Error("PumpSwap market or configuration account has an unexpected program owner.");
   }
   if (baseMintRaw.owner !== SPL_TOKEN_PROGRAM_ID && baseMintRaw.owner !== TOKEN_2022_PROGRAM_ID) {
@@ -190,8 +200,9 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedSwapContext 
     freezeAuthority: unpackedBaseMint.freezeAuthority ?? PublicKey.default,
     freezeAuthorityOption: unpackedBaseMint.freezeAuthority ? 1 : 0
   };
-  if (getTransferFeeConfig(unpackedBaseMint) || getTransferFeeConfig(quoteMintAccount)) {
-    throw new Error("Token-2022 transfer-fee mints are not supported by this quote adapter.");
+  if (getTransferFeeConfig(unpackedBaseMint) || getTransferFeeConfig(quoteMintAccount) ||
+      getTransferHook(unpackedBaseMint) || getTransferHook(quoteMintAccount)) {
+    throw new Error("Transfer-fee and transfer-hook mints are not supported by this quote adapter.");
   }
 
   const pool = PUMP_AMM_SDK.decodePool(accountInfo(marketAccount));
