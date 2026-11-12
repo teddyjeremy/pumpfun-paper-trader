@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PumpCreateEvent, PumpTradeEvent } from "../src/ingestion/pump-events.js";
 import type { VerifiedPumpTransaction } from "../src/ingestion/helius.js";
-import { calibrateVolumeThresholds, classifyHistoricalWalletClusterRisk, hasCompleteHistoricalEntryEvidence, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
+import { calibrateVolumeThresholds, classifyHistoricalWalletClusterRisk, hasCompleteHistoricalEntryEvidence, hasCompleteHistoricalExitEvidence, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
 
 const mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const quoteMint = "So11111111111111111111111111111111111111112";
@@ -78,6 +78,25 @@ describe("historical strategy replay", () => {
     expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 20 })).toBe(true);
     expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 19 })).toBe(true);
     expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 21 })).toBe(false);
+  });
+
+  it("requires a completed, timestamped full-size exit with a net return", () => {
+    expect(hasCompleteHistoricalExitEvidence({ entryAt: 20, replayEndAt: 100 })).toBe(false);
+    expect(hasCompleteHistoricalExitEvidence({
+      entryAt: 20, replayEndAt: 100, simulatedExitAt: 45,
+      exitLifecycleCompleteAt: 46, simulatedExitPriceQuotePerToken: 1.4,
+      simulatedNetFinalReturnPct: 12
+    })).toBe(true);
+    expect(hasCompleteHistoricalExitEvidence({
+      entryAt: 20, replayEndAt: 100, simulatedExitAt: 45,
+      exitLifecycleCompleteAt: 44, simulatedExitPriceQuotePerToken: 1.4,
+      simulatedNetFinalReturnPct: 12
+    })).toBe(false);
+    expect(hasCompleteHistoricalExitEvidence({
+      entryAt: 20, replayEndAt: 100, simulatedExitAt: 101,
+      exitLifecycleCompleteAt: 102, simulatedExitPriceQuotePerToken: 1.4,
+      simulatedNetFinalReturnPct: 12
+    })).toBe(false);
   });
 
   it("does not clear a top-20 holder snapshot without a full holder census", () => {
