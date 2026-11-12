@@ -14,14 +14,70 @@ const base: StrictStrategyAuditInput = {
 };
 
 describe("strict strategy audit timing", () => {
-  it("does not reject a valid candidate merely for being older than 60 seconds", () => {
-    for (const age of [61, 180, 600, 899]) {
+  it("allows a valid setup to develop after the first minute", () => {
+    for (const age of [61, 180, 300, 600, 899]) {
       const audit = evaluateStrictStrategyAudit({ ...base, candidateAgeSeconds: age });
-      const ageRule = audit.rules.find(rule => rule.rule === "CANDIDATE_AGE");
-      expect(ageRule?.status).toBe("PASS");
+      expect(audit.rules.find(rule => rule.rule === "CANDIDATE_AGE")?.status).toBe("PASS");
       expect(audit.rejectionReasons).not.toContain("CANDIDATE_AGE");
       expect(audit.buyAllowed).toBe(false);
     }
+  });
+
+
+
+  it("rejects non-overlapping flow windows as evidence for the one-second sampling rule", () => {
+    const audit = evaluateStrictStrategyAudit({
+      ...base,
+      candidateAgeSeconds: 30,
+      flow: {
+        dataComplete: true,
+        latestThreeWindowFlowPass: true,
+        sampleIntervalSeconds: 2,
+        windows: [0, 2, 4].map(start => ({
+          startTime: start, buySellRatio: 4, flowWindowPass: true, uniqueBuyers: 3, uniqueSellers: 1
+        })),
+        distinctBuyersAcrossLatestThree: 5,
+        largestBuyerShareAcrossLatestThreeBps: 5_000,
+        microTradeFilterStatus: "APPLIED"
+      }
+    });
+    expect(audit.rules.find(rule => rule.rule === "THREE_FLOW_WINDOWS")?.status).toBe("UNKNOWN");
+  });
+
+  it("keeps pullback and reclaim volume thresholds unscored until calibrated", () => {
+    const audit = evaluateStrictStrategyAudit({
+      ...base,
+      candidateAgeSeconds: 30,
+      profile: {
+        impulsePriceChangePct: 25,
+        pullbackPct: 16,
+        reclaimDetected: true,
+        reclaimAbovePreviousFiveSecondHighPct: 1.2,
+        pullbackVolumeVsImpulsePct: 95.56,
+        reclaimVolumeVsPullbackPct: 55.81,
+        dataComplete: true,
+        microTradeFilterStatus: "APPLIED"
+      },
+      flow: {
+        dataComplete: true,
+        latestThreeWindowFlowPass: true,
+        sampleIntervalSeconds: 1,
+        windows: [0, 1, 2].map(start => ({
+          startTime: start, buySellRatio: 4, flowWindowPass: true, uniqueBuyers: 3, uniqueSellers: 1
+        })),
+        distinctBuyersAcrossLatestThree: 5,
+        largestBuyerShareAcrossLatestThreeBps: 5_000,
+        microTradeFilterStatus: "APPLIED"
+      },
+      creatorRiskStatus: "PASS_COMPLETE",
+      walletClusterRiskStatus: "WATCH",
+      attributionConfidenceBps: 8_000,
+      signalAgeSeconds: 1,
+      nextObservationConfirmed: true
+    });
+    expect(audit.rules.find(rule => rule.rule === "PULLBACK_VOLUME_CONTRACTION")?.status).toBe("UNKNOWN");
+    expect(audit.rules.find(rule => rule.rule === "RECLAIM_VOLUME_EXPANSION")?.status).toBe("UNKNOWN");
+    expect(audit.buyAllowed).toBe(false);
   });
 
   it("keeps a missing or future launch age unknown rather than treating it as fresh", () => {
