@@ -71,6 +71,31 @@ describe("paper ledger projection", () => {
     expect(result.trades).toHaveLength(0);
   });
 
+
+  it("rejects a buy quote whose output differs from the recorded position balance", () => {
+    const buy = { ...quote("BUY", "buy-q"), outputAmountBaseUnits: "999999" };
+    expect(() => buildPaperLedgerProjection(event("PAPER_ENTRY", {
+      position, buyQuoteId: "buy-q", initialSellQuoteId: "initial-sell-q",
+      buyQuote: buy, initialSellQuote: quote("SELL", "initial-sell-q")
+    }))).toThrow(/do not reconcile/);
+  });
+
+  it("rejects a buy quote whose requested USD differs from the recorded stake", () => {
+    const buy = { ...quote("BUY", "buy-q"), requestedUsd: 0.95 };
+    expect(() => buildPaperLedgerProjection(event("PAPER_ENTRY", {
+      position, buyQuoteId: "buy-q", initialSellQuoteId: "initial-sell-q",
+      buyQuote: buy, initialSellQuote: quote("SELL", "initial-sell-q")
+    }))).toThrow(/do not reconcile/);
+  });
+
+  it("rejects entry quotes from inconsistent venues", () => {
+    const initialSell = { ...quote("SELL", "initial-sell-q"), venue: "RAYDIUM" };
+    expect(() => buildPaperLedgerProjection(event("PAPER_ENTRY", {
+      position, buyQuoteId: "buy-q", initialSellQuoteId: "initial-sell-q",
+      buyQuote: quote("BUY", "buy-q"), initialSellQuote: initialSell
+    }))).toThrow(/do not reconcile/);
+  });
+
   it("rejects mismatched quote and position identities", () => {
     expect(() => buildPaperLedgerProjection(event("PAPER_ENTRY", {
       position, buyQuoteId: "other", initialSellQuoteId: "initial-sell-q",
