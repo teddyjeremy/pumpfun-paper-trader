@@ -194,13 +194,13 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       tradeEvents: []
     };
     await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, decodeCoverage: { complete: true, reason: null, verifiedTransactionCount: 1 }, transaction });
-    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction });
+    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, decodeCoverage: { complete: true, reason: null, verifiedTransactionCount: 1 }, transaction });
 
     const archived = await inspector!.query(
       `SELECT j.status,j.pages_scanned,j.signature_count,j.launch_block_time,
         (SELECT COUNT(*)::int FROM helius_transaction_observations t
-          WHERE t.session_id=j.session_id AND t.mint=j.mint) AS transactions
-       j.decoded_complete,j.decoded_reason,j.verified_transaction_count
+          WHERE t.session_id=j.session_id AND t.mint=j.mint) AS transactions,
+        j.decoded_complete,j.decoded_reason,j.verified_transaction_count
        FROM helius_backfill_jobs j WHERE j.session_id=$1 AND j.mint=$2`,
       [sessionId, backfillMint]
     );
