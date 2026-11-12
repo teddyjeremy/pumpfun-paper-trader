@@ -13,7 +13,8 @@ function candidate(index: number, status: "DISCOVERED" | "MIGRATED" = "DISCOVERE
   return {
     kind: "new_token", mint: key(index), bondingCurve: key(index + 20),
     signature: null, creator: null, name: null, symbol: null,
-    receivedAt: "2026-11-12T00:00:00.000Z", firstSeenAt: "2026-11-12T00:00:00.000Z",
+    receivedAt: "2026-11-12T00:00:00.000Z",
+    firstSeenAt: new Date(Date.parse("2026-11-12T00:00:00.000Z") + index * 1_000).toISOString(),
     lastSeenAt: "2026-11-12T00:00:00.000Z", observations: 1, status
   };
 }
@@ -21,7 +22,10 @@ const sig = "3".repeat(64);
 
 describe("bounded Helius candidate monitor", () => {
   it("never selects more than ten active candidates", () => {
-    expect(selectHeliusCandidates(Array.from({ length: 20 }, (_, i) => candidate(i)))).toHaveLength(MAX_HELIUS_CANDIDATES);
+    const selected = selectHeliusCandidates(Array.from({ length: 20 }, (_, i) => candidate(i)));
+    expect(selected).toHaveLength(MAX_HELIUS_CANDIDATES);
+    expect(selected[0]?.mint).toBe(candidate(19).mint);
+    expect(selected.at(-1)?.mint).toBe(candidate(10).mint);
   });
   it("excludes migrated or invalid candidates", () => {
     const migrated = candidate(1, "MIGRATED");
