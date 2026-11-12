@@ -723,7 +723,7 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
          before_signature=EXCLUDED.before_signature,status=EXCLUDED.status,reason=EXCLUDED.reason,
          signature_count=EXCLUDED.signature_count,signature_state=EXCLUDED.signature_state,
          decoded_complete=helius_backfill_jobs.decoded_complete OR EXCLUDED.decoded_complete,
-         decoded_reason=CASE WHEN EXCLUDED.decoded_complete THEN NULL
+         decoded_reason=CASE WHEN helius_backfill_jobs.decoded_complete OR EXCLUDED.decoded_complete THEN NULL
            ELSE COALESCE(EXCLUDED.decoded_reason,helius_backfill_jobs.decoded_reason) END,
          verified_transaction_count=GREATEST(helius_backfill_jobs.verified_transaction_count,EXCLUDED.verified_transaction_count),
          decoded_at=CASE WHEN EXCLUDED.decoded_complete THEN COALESCE(helius_backfill_jobs.decoded_at,now()) ELSE helius_backfill_jobs.decoded_at END,
