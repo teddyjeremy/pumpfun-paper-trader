@@ -289,6 +289,17 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     await this.hydrate();
+    // The Durable Object's alarm survives eviction, but in-memory lease state
+    // does not. Reacquire the PostgreSQL fencing lease before resuming work.
+    if (this.status.enabled && this.postgresIngestConfigured && !this.postgresLeaseHeld) {
+      try {
+        await this.acquirePostgresWorkerLease();
+      } catch {
+        this.status.lastError = "PostgreSQL worker lease could not be reacquired after restart; coordinator stopped fail-closed.";
+        await this.stop();
+        return;
+      }
+    }
     if (this.status.enabled && this.postgresLeaseHeld) {
       const leaseValid = await this.heartbeatPostgresWorkerLease();
       if (!leaseValid) {
