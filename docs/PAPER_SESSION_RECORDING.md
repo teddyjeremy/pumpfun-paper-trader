@@ -92,3 +92,5 @@ The six-hour paper session remains blocked until the missing quote source, execu
 ## Durable Object journal contract tests
 - Added a mocked Durable Object storage contract harness covering concurrent append ordering, monotonic sequences, 100-event page boundaries, idempotent duplicate events, transaction rollback after simulated storage failure, restart markers and session metadata counts.
 - These are deterministic storage-contract tests, not a full Miniflare/Cloudflare runtime acceptance test. Real Durable Object restart/eviction/quota tests and the six-hour soak remain outstanding.
+
+- Paper quote accounting now requires explicit protocol, creator, pool/LP, transfer, network, priority and provider fee amounts. Gross output is stored before those costs; net sell proceeds and realized PnL subtract the complete fee breakdown. Every later exit quote is rechecked against the per-side 2% impact and 2% tax limits, and a sell quote with negative net proceeds is rejected.
