@@ -188,6 +188,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       slot: 123,
       provider: "helius" as const,
       commitment: "confirmed" as const,
+      source: "HISTORICAL_BACKFILL" as const,
       receivedAt: "2026-11-12T10:00:03.000Z",
       createEvents: [{ mint: backfillMint, bondingCurve: state.bondingCurve }],
       tradeEvents: []
