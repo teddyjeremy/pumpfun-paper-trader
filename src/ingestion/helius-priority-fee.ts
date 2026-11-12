@@ -15,6 +15,8 @@ export interface PaperNetworkFeeEstimate {
   microLamportsPerComputeUnit: string;
   sampleCount: number;
   nonZeroSampleCount: number;
+  writableAccountCount: number;
+  priorityFeeScope: "ACCOUNT_SPECIFIC" | "CLUSTER_WIDE";
   source: "helius-getRecentPrioritizationFees";
   baseFeeAssumption: string;
 }
@@ -76,6 +78,7 @@ export function buildPaperNetworkFeeEstimate(input: {
   priorityFeePercentile?: number;
   baseFeeLamportsPerSignature?: number;
   maxPriorityFeeLamports?: string;
+  writableAccountCount?: number;
 }): PaperNetworkFeeEstimate {
   const signatureCount = input.signatureCount ?? 1;
   const percentile = input.priorityFeePercentile ?? 75;
@@ -92,6 +95,10 @@ export function buildPaperNetworkFeeEstimate(input: {
   }
   if (!Number.isSafeInteger(baseFeePerSignature) || baseFeePerSignature < 1) {
     throw new Error("Base fee per signature must be a positive safe integer.");
+  }
+  const writableAccountCount = input.writableAccountCount ?? 0;
+  if (!Number.isSafeInteger(writableAccountCount) || writableAccountCount < 0 || writableAccountCount > 128) {
+    throw new Error("Priority-fee writable account count must be between 0 and 128.");
   }
   if (input.samples.length < 1 || input.samples.length > 150) {
     throw new Error("At least one and at most 150 recent priority-fee samples are required.");
@@ -124,6 +131,8 @@ export function buildPaperNetworkFeeEstimate(input: {
     microLamportsPerComputeUnit: selectedMicroLamports.toString(),
     sampleCount: input.samples.length,
     nonZeroSampleCount: nonZero.length,
+    writableAccountCount,
+    priorityFeeScope: writableAccountCount > 0 ? "ACCOUNT_SPECIFIC" : "CLUSTER_WIDE",
     source: "helius-getRecentPrioritizationFees",
     baseFeeAssumption: `${baseFeePerSignature}-lamports-per-signature`
   };
