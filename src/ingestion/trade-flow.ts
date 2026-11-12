@@ -4,7 +4,8 @@ import type { VerifiedPumpTransaction } from "./helius.js";
 export const TRADE_FLOW_WINDOW_SECONDS = 2;
 export const TRADE_FLOW_HORIZON_SECONDS = 10 * 60;
 export const MAX_FLOW_WINDOWS_PER_MINT = TRADE_FLOW_HORIZON_SECONDS / TRADE_FLOW_WINDOW_SECONDS;
-export const SOL_QUOTE_MINT = "11111111111111111111111111111111";
+// Pump.fun SOL-quoted markets use wrapped SOL as their quote mint.
+export const SOL_QUOTE_MINT = "So11111111111111111111111111111111111111112";
 
 export interface TradeFlowWindow {
   startTime: number;
