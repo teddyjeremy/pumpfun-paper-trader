@@ -37,6 +37,16 @@ export interface DecodedPumpCurveAccount {
   realQuoteReserves: string;
   tokenTotalSupply: string;
   creatorFeeBps: string;
+  creatorFeeBaseUnits: string;
+  protocolFeesBaseUnits: string;
+  isMayhemMode: boolean;
+  isCashbackCoin: boolean;
+  canEditCreatorFee: boolean;
+  isHolderReward: boolean;
+  depth: number;
+  initialVirtualQuoteReserves: string;
+  postCompleteBaseOut: string;
+  postCompleteQuoteIn: string;
   slot: number;
   observedAt: string;
 }
@@ -69,6 +79,12 @@ export interface DecodedPumpSwapPoolAccount {
   coinCreator: string;
   virtualQuoteReserves: string;
   creatorFeeBps: string;
+  protocolFeesBaseUnits: string;
+  creatorFeesBaseUnits: string;
+  isMayhemMode: boolean;
+  isCashbackCoin: boolean;
+  canEditCreatorFee: boolean;
+  isHolderReward: boolean;
   slot: number;
   observedAt: string;
 }
@@ -182,6 +198,16 @@ export function decodeVerifiedPumpCurveAccount(input: {
     realQuoteReserves: readUnsigned(data, 32, 8).toString(),
     tokenTotalSupply: readUnsigned(data, 40, 8).toString(),
     creatorFeeBps: data.length >= 123 ? readUnsigned(data, 115, 8).toString() : "0",
+    canEditCreatorFee: data.length >= 124 ? readBool(data, 123) : false,
+    isHolderReward: data.length >= 125 ? readBool(data, 124) : false,
+    creatorFeeBaseUnits: data.length >= 133 ? readUnsigned(data, 125, 8).toString() : "0",
+    protocolFeesBaseUnits: data.length >= 141 ? readUnsigned(data, 133, 8).toString() : "0",
+    isMayhemMode: data.length >= 82 ? readBool(data, 81) : false,
+    isCashbackCoin: data.length >= 83 ? readBool(data, 82) : false,
+    depth: data.length >= 142 ? readU8(data, 141) : 0,
+    initialVirtualQuoteReserves: data.length >= 150 ? readUnsigned(data, 142, 8).toString() : "0",
+    postCompleteBaseOut: data.length >= 158 ? readUnsigned(data, 150, 8).toString() : "0",
+    postCompleteQuoteIn: data.length >= 166 ? readUnsigned(data, 158, 8).toString() : "0",
     slot: account.slot, observedAt: account.observedAt
   };
 }
@@ -198,7 +224,7 @@ export function decodePumpSwapPoolAccount(account: RawProgramAccount): DecodedPu
   const data = account.data;
   // Base layout is 245 bytes; appended fields are virtual quote reserves,
   // creator fee bps, can_edit_creator_fee and is_holder_reward.
-  if (![245, 261, 269, 270, 271].includes(data.length)) {
+  if (![245, 261, 269, 270, 271, 279, 287].includes(data.length)) {
     throw new Error("Unsupported or partially written PumpSwap pool account length.");
   }
   return {
@@ -208,6 +234,12 @@ export function decodePumpSwapPoolAccount(account: RawProgramAccount): DecodedPu
     coinCreator: readPubkey(data, 211),
     virtualQuoteReserves: data.length >= 261 ? readSigned128(data, 245).toString() : "0",
     creatorFeeBps: data.length >= 269 ? readUnsigned(data, 261, 8).toString() : "0",
+    canEditCreatorFee: data.length >= 270 ? readBool(data, 269) : false,
+    isHolderReward: data.length >= 271 ? readBool(data, 270) : false,
+    protocolFeesBaseUnits: data.length >= 279 ? readUnsigned(data, 271, 8).toString() : "0",
+    creatorFeesBaseUnits: data.length >= 287 ? readUnsigned(data, 279, 8).toString() : "0",
+    isMayhemMode: readBool(data, 243),
+    isCashbackCoin: readBool(data, 244),
     slot: account.slot, observedAt: account.observedAt
   };
 }
