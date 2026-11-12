@@ -67,7 +67,7 @@ export function evaluateCreatorSellRisk(
       if (!launch || trade.isBuy) continue;
       const timestamp = validTimestamp(trade.timestamp);
       if (timestamp === null || timestamp < launch.timestamp ||
-          timestamp > launch.timestamp + CREATOR_SELL_WINDOW_SECONDS) continue;
+          timestamp >= launch.timestamp + CREATOR_SELL_WINDOW_SECONDS) continue;
       if (trade.user === launch.event.creator && trade.tokenAmount > 0n) {
         creatorSellAmounts.set(
           trade.mint,
