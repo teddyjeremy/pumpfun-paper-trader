@@ -172,8 +172,9 @@ function summarizeStage(buckets: readonly PriceVolumeBucket[]): StageVolume {
 }
 
 /**
- * Builds an observed-trade price/volume profile. Prices are ratios of executed
- * quote amount to token amount; they are not executable quotes or fill estimates.
+ * Builds an observed-trade price/volume profile. Price indices use virtual
+ * bonding-curve quote/token reserve ratios (and the CreateEvent launch reserves
+ * when available). They are not executable quotes or fill estimates.
  * No contraction/expansion threshold is applied to stage volumes because those
  * thresholds have not been agreed.
  */
