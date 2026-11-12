@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { Message, VersionedMessage } from "@solana/web3.js";
+import { Message, MessageV0, VersionedMessage } from "@solana/web3.js";
 import { buildHeliusRpcUrl } from "./helius.js";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -183,10 +183,10 @@ function messageHasSafeFeeInstructions(messageBase64: string, expectedLimit: num
     const versioned = (bytes[0]! & 0x80) !== 0;
     const message = versioned ? VersionedMessage.deserialize(bytes) : Message.from(bytes);
     const keys = versioned
-      ? (message as ReturnType<typeof VersionedMessage.deserialize>).staticAccountKeys
+      ? (message as MessageV0).staticAccountKeys
       : (message as Message).accountKeys;
     const instructions = versioned
-      ? (message as ReturnType<typeof VersionedMessage.deserialize>).compiledInstructions
+      ? (message as MessageV0).compiledInstructions
       : (message as Message).instructions;
     let limitCount = 0;
     for (const instruction of instructions) {
