@@ -20,6 +20,7 @@ import { derivePumpBondingCurvePda } from "./pump-pdas.js";
 import {
   fetchHeliusMultipleAccounts, type HeliusAccountReadConfig
 } from "./helius-accounts.js";
+import { calculateToken2022TransferFee } from "./token-2022-transfer-fee.js";
 import {
   fetchVerifiedPumpQuoteAccountSnapshot, type VerifiedPumpQuoteSnapshot
 } from "./pump-quote-snapshot.js";
@@ -100,6 +101,8 @@ interface DecodedCurveContext {
   baseMintAccount: RawMint;
   baseDecimals: number;
   quoteDecimals: number;
+  transferFeeConfig: ReturnType<typeof getTransferFeeConfig>;
+  epoch: number | null;
 }
 
 function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedCurveContext {
@@ -155,8 +158,13 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedCurveContext
     freezeAuthority: baseMintUnpacked.freezeAuthority ?? PublicKey.default,
     freezeAuthorityOption: baseMintUnpacked.freezeAuthority ? 1 : 0
   };
-  if (getTransferFeeConfig(baseMintUnpacked) || getTransferHook(baseMintUnpacked)) {
-    throw new Error("Transfer-fee and transfer-hook base mints are not supported by this quote adapter.");
+  const transferFeeConfig = getTransferFeeConfig(baseMintUnpacked);
+  if (getTransferHook(baseMintUnpacked)) {
+    throw new Error("Transfer-hook base mints are unsupported because hook extra-account execution is not simulated.");
+  }
+  const epoch = snapshot.epochInfo?.epoch ?? null;
+  if (transferFeeConfig && epoch === null) {
+    throw new Error("Token-2022 transfer-fee quote requires an epoch verified against the market snapshot slot.");
   }
   let quoteDecimals = 9;
   if (quoteMintRaw) {
@@ -197,7 +205,8 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedCurveContext
   return {
     mint, quoteMint, curve, global, feeConfig,
     curveBaseTokenBalance: new BN(curveBaseVault.amountBaseUnits),
-    baseMintAccount, baseDecimals: baseMintAccount.decimals, quoteDecimals
+    baseMintAccount, baseDecimals: baseMintAccount.decimals, quoteDecimals,
+    transferFeeConfig, epoch
   };
 }
 
@@ -217,7 +226,15 @@ export interface PumpSdkCurveQuote {
   priceImpactPct: number;
   baseDecimals: number;
   quoteDecimals: number;
-  transferTaxVerifiedZero: true;
+  grossTokenAmountBaseUnits: string;
+  netTokenAmountBaseUnits: string;
+  transferFeeBaseUnits: string;
+  transferFeeMint: string;
+  transferFeeEpoch: number | null;
+  transferFeeBasisPoints: number;
+  transferFeeMaximumBaseUnits: string;
+  transferFeeVerified: true;
+  transferTaxVerifiedZero: boolean;
   executionReady: false;
   blockers: string[];
 }
@@ -261,17 +278,28 @@ export function quotePumpCurveBuyFromSnapshot(
   if (grossQuote.lten(0) || fee.isNeg() || !isU64BaseUnits(grossQuote.toString())) {
     throw new Error("Pump SDK buy quote did not reconcile to a positive u64 gross debit.");
   }
+  const transfer = calculateToken2022TransferFee({
+    config: context.transferFeeConfig, epoch: context.epoch,
+    grossAmountBaseUnits: BigInt(tokenOut.toString())
+  });
   const impact = impactPct(netQuote, tokenOut,
     context.curve.virtualQuoteReserves, context.curve.virtualTokenReserves, "BUY");
   return {
     provider: "pump-sdk-4.3.1", venue: "PUMP_CURVE", side: "BUY",
     mint: context.mint.toBase58(), quoteMint: context.quoteMint.toBase58(),
     slot: snapshot.slot, observedAt: snapshot.observedAt,
-    inputAmountBaseUnits: grossQuote.toString(), outputAmountBaseUnits: tokenOut.toString(),
+    inputAmountBaseUnits: grossQuote.toString(), outputAmountBaseUnits: transfer.netAmountBaseUnits,
+    grossTokenAmountBaseUnits: transfer.grossAmountBaseUnits,
+    netTokenAmountBaseUnits: transfer.netAmountBaseUnits,
+    transferFeeBaseUnits: transfer.feeAmountBaseUnits,
+    transferFeeMint: context.mint.toBase58(), transferFeeEpoch: transfer.epoch,
+    transferFeeBasisPoints: transfer.feeBasisPoints,
+    transferFeeMaximumBaseUnits: transfer.maximumFeeBaseUnits,
+    transferFeeVerified: true, transferTaxVerifiedZero: transfer.feeAmountBaseUnits === "0",
     grossQuoteAmountBaseUnits: grossQuote.toString(), netQuoteAmountBaseUnits: netQuote.toString(),
     venueFeeBaseUnits: fee.toString(), priceImpactPct: impact,
     baseDecimals: context.baseDecimals, quoteDecimals: context.quoteDecimals,
-    transferTaxVerifiedZero: true, executionReady: false, blockers: quoteBlockers()
+    executionReady: false, blockers: quoteBlockers()
   };
 }
 
@@ -285,16 +313,21 @@ export function quotePumpCurveSellFromSnapshot(
   }
   const context = decodeContext(snapshot);
   const tokenAmount = new BN(tokenAmountBaseUnits);
+  const transfer = calculateToken2022TransferFee({
+    config: context.transferFeeConfig, epoch: context.epoch,
+    grossAmountBaseUnits: BigInt(tokenAmount.toString())
+  });
+  const poolTokenAmount = new BN(transfer.netAmountBaseUnits);
   const zeroGlobal = zeroFeeFields(context.global);
   const zeroFeeConfig = zeroFeeFields(context.feeConfig);
   const zeroCurve = zeroFeeFields(context.curve);
   const grossQuote = getSellSolAmountFromTokenAmount({
     global: zeroGlobal, feeConfig: zeroFeeConfig,
-    mintSupply: context.curve.tokenTotalSupply, bondingCurve: zeroCurve, amount: tokenAmount
+    mintSupply: context.curve.tokenTotalSupply, bondingCurve: zeroCurve, amount: poolTokenAmount
   });
   const netQuote = getSellSolAmountFromTokenAmount({
     global: context.global, feeConfig: context.feeConfig,
-    mintSupply: context.curve.tokenTotalSupply, bondingCurve: context.curve, amount: tokenAmount
+    mintSupply: context.curve.tokenTotalSupply, bondingCurve: context.curve, amount: poolTokenAmount
   });
   const fee = grossQuote.sub(netQuote);
   if (grossQuote.lten(0) || netQuote.lten(0) || fee.isNeg() ||
@@ -309,10 +342,17 @@ export function quotePumpCurveSellFromSnapshot(
     mint: context.mint.toBase58(), quoteMint: context.quoteMint.toBase58(),
     slot: snapshot.slot, observedAt: snapshot.observedAt,
     inputAmountBaseUnits: tokenAmount.toString(), outputAmountBaseUnits: netQuote.toString(),
+    grossTokenAmountBaseUnits: transfer.grossAmountBaseUnits,
+    netTokenAmountBaseUnits: transfer.netAmountBaseUnits,
+    transferFeeBaseUnits: transfer.feeAmountBaseUnits,
+    transferFeeMint: context.mint.toBase58(), transferFeeEpoch: transfer.epoch,
+    transferFeeBasisPoints: transfer.feeBasisPoints,
+    transferFeeMaximumBaseUnits: transfer.maximumFeeBaseUnits,
+    transferFeeVerified: true, transferTaxVerifiedZero: transfer.feeAmountBaseUnits === "0",
     grossQuoteAmountBaseUnits: grossQuote.toString(), netQuoteAmountBaseUnits: netQuote.toString(),
     venueFeeBaseUnits: fee.toString(), priceImpactPct: impact,
     baseDecimals: context.baseDecimals, quoteDecimals: context.quoteDecimals,
-    transferTaxVerifiedZero: true, executionReady: false, blockers: quoteBlockers()
+    executionReady: false, blockers: quoteBlockers()
   };
 }
 
@@ -353,7 +393,8 @@ export async function fetchPumpCurveSdkQuote(input: {
       feeConfig: PUMP_FEE_CONFIG_PDA.toBase58(),
       baseVault: curveTokenAccount
     },
-    config: input.config
+    config: input.config,
+    includeEpochInfo: true
   });
   return input.side === "BUY"
     ? quotePumpCurveBuyFromSnapshot(snapshot, input.amountBaseUnits)
