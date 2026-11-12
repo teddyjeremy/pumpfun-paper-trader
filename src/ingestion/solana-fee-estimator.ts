@@ -31,7 +31,7 @@ export interface SolanaFeeEstimatorConfig {
   /** Base64-encoded compiled message for the exact venue transaction, without a SetComputeUnitPrice instruction. */
   messageBase64: string;
   /** Account locks used by the transaction; these scope the prioritization-fee samples. */
-  accountKeys: readonly string[];
+  writableAccountKeys: readonly string[];
   /** The compute-unit limit that the transaction will actually request. */
   computeUnitLimit: number;
   fetcher?: typeof fetch;
@@ -63,11 +63,11 @@ export async function estimateSolanaTransactionFees(
       !BASE64.test(config.messageBase64)) {
     return unavailable("A valid base64 compiled transaction message is required.");
   }
-  if (!Array.isArray(config.accountKeys) || config.accountKeys.length < 1 ||
+  if (!Array.isArray(config.writableAccountKeys) || config.accountKeys.length < 1 ||
       config.accountKeys.length > 128 ||
       config.accountKeys.some(key => typeof key !== "string" || !ADDRESS.test(key)) ||
       new Set(config.accountKeys).size !== config.accountKeys.length) {
-    return unavailable("Transaction account locks are missing, duplicated or invalid.");
+    return unavailable("Writable transaction account locks are missing, duplicated or invalid.");
   }
   if (!Number.isSafeInteger(config.computeUnitLimit) ||
       config.computeUnitLimit < 1 || config.computeUnitLimit > MAX_COMPUTE_UNIT_LIMIT) {
