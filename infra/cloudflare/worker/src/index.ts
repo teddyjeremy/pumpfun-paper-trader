@@ -184,13 +184,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private async postPostgresIngest(path: string, body: unknown): Promise<Response> {
-    if (!this.postgresIngestConfigured) throw new Error("PostgreSQL event ingestion is not configured.");
-    const url = new URL(path, this.env.PAPER_EVENT_INGEST_URL).toString();
+    const baseUrl = this.env.PAPER_EVENT_INGEST_URL;
+    const token = this.env.PAPER_EVENT_INGEST_TOKEN;
+    if (!baseUrl || !token) throw new Error("PostgreSQL event ingestion is not configured.");
+    const url = new URL(path, baseUrl).toString();
     return fetch(url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${this.env.PAPER_EVENT_INGEST_TOKEN}`
+        authorization: `Bearer ${token}`
       },
       body: JSON.stringify(body)
     });
