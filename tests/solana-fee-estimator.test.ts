@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { ComputeBudgetProgram, Keypair, Message, SystemProgram, TransactionMessage } from "@solana/web3.js";
-import { compileUnsignedFeeMessage, estimateSolanaTransactionFees } from "../src/ingestion/solana-fee-estimator.js";
+import { compileUnsignedFeeMessage, estimateFeesForUnsignedInstructions, estimateSolanaTransactionFees } from "../src/ingestion/solana-fee-estimator.js";
 
 const account = "11111111111111111111111111111111";
 const now = Date.parse("2026-11-12T12:00:00.000Z");
@@ -268,3 +268,41 @@ function decodeBase58ForTest(value: string): Buffer {
   for (let index = 0; index < value.length && value[index] === "1"; index += 1) bytes.unshift(0);
   return Buffer.from(bytes);
 }
+
+
+describe("exact unsigned instruction fee composition", () => {
+  it("uses the same canonical serialized-message fingerprint for compilation and RPC fee evidence", async () => {
+    const result = await estimateFeesForUnsignedInstructions({
+      apiKey: "test-api-key",
+      payer: payer.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [SystemProgram.transfer({
+        fromPubkey: payer.publicKey, toPubkey: recipient, lamports: 1
+      })],
+      computeUnitLimit: 240_000,
+      fetcher: feeFetcher(),
+      nowMs: now
+    });
+    expect(result.status).toBe("AVAILABLE");
+    if (result.status !== "AVAILABLE") return;
+    expect(result.messageSha256).toBe(result.estimate.feeMessageSha256);
+    expect(result.writableAccountKeys).toContain(payer.publicKey.toBase58());
+    expect(result.writableAccountKeys).toContain(recipient.toBase58());
+    expect(result.estimate.networkFeeLamports).toBe("5000");
+  });
+
+  it("fails closed when exact-message RPC evidence is unavailable", async () => {
+    const result = await estimateFeesForUnsignedInstructions({
+      apiKey: "test-api-key",
+      payer: payer.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [SystemProgram.transfer({
+        fromPubkey: payer.publicKey, toPubkey: recipient, lamports: 1
+      })],
+      computeUnitLimit: 240_000,
+      fetcher: feeFetcher({ samples: [] }),
+      nowMs: now
+    });
+    expect(result.status).toBe("UNAVAILABLE");
+  });
+});
