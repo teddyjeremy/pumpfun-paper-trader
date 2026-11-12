@@ -184,7 +184,7 @@ export function buildPaperLedgerProjection(event: AuditEvent): PaperLedgerProjec
     result.quotes.push(buy, initialSell);
     result.trades.push(tradeFromQuote(event, position, buy));
   } else if (event.kind === "PAPER_EXIT") {
-    const position = projectPosition(data.position);
+    const position = projectPosition(data.position, event.occurredAt);
     const sell = projectQuote(data.sellQuote);
     if (position.status !== "CLOSED" || sell.side !== "SELL" ||
         sell.mint !== position.mint || sell.quoteId !== data.sellQuoteId) {
