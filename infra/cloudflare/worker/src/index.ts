@@ -1330,11 +1330,21 @@ export default {
       const sessionId = url.searchParams.get("sessionId") ?? undefined;
       return Response.json(await coordinator.listCandidateOutcomes(sessionId));
     }
-    if (url.pathname === "/audit" && request.method === "GET") {
+    if ((url.pathname === "/audit" || url.pathname === "/audit/export") && request.method === "GET") {
       const after = Number(url.searchParams.get("after") ?? "0");
       const limit = Number(url.searchParams.get("limit") ?? "100");
       const sessionId = url.searchParams.get("sessionId") ?? undefined;
-      return Response.json(await coordinator.listAuditEvents(after, limit, sessionId));
+      const page = await coordinator.listAuditEvents(after, limit, sessionId);
+      if (url.pathname === "/audit/export") {
+        const fileSession = sessionId ?? "latest";
+        return new Response(JSON.stringify(page, null, 2), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "content-disposition": `attachment; filename="paper-audit-${fileSession}-after-${after}.json"`
+          }
+        });
+      }
+      return Response.json(page);
     }
     if (url.pathname === "/observations" && request.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? "100");
