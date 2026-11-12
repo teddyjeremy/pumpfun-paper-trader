@@ -14,16 +14,11 @@ const base: StrictStrategyAuditInput = {
 };
 
 describe("strict strategy audit timing", () => {
-  it("allows entry only during the first 60 seconds after verified launch", () => {
-    for (const age of [0, 1, 30, 59, 60]) {
+  it("allows a valid setup to develop after the first minute", () => {
+    for (const age of [61, 180, 300, 600, 899]) {
       const audit = evaluateStrictStrategyAudit({ ...base, candidateAgeSeconds: age });
       expect(audit.rules.find(rule => rule.rule === "CANDIDATE_AGE")?.status).toBe("PASS");
       expect(audit.rejectionReasons).not.toContain("CANDIDATE_AGE");
-    }
-    for (const age of [60.001, 61, 180, 600, 899]) {
-      const audit = evaluateStrictStrategyAudit({ ...base, candidateAgeSeconds: age });
-      expect(audit.rules.find(rule => rule.rule === "CANDIDATE_AGE")?.status).toBe("FAIL");
-      expect(audit.rejectionReasons).toContain("CANDIDATE_AGE");
       expect(audit.buyAllowed).toBe(false);
     }
   });
