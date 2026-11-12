@@ -2,12 +2,9 @@ import {
   discoverCanonicalPumpSwapPoolForMint, fetchHeliusMultipleAccounts,
   type HeliusAccountReadConfig
 } from "./helius-accounts.js";
+import type { RawProgramAccount } from "./pump-account-decoder.js";
 import {
-  PUMP_AMM_PROGRAM_ID, PUMP_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID,
-  type RawProgramAccount
-} from "./pump-account-decoder.js";
-import {
-  deriveCanonicalPumpSwapPoolPda, derivePumpPoolCreatorAuthorityPda
+  deriveCanonicalPumpSwapPoolPda, derivePumpBondingCurvePda, derivePumpPoolCreatorAuthorityPda
 } from "./pump-pdas.js";
 import {
   applyVerifiedPumpCurveAccount, applyVerifiedPumpSwapPoolAccounts
@@ -31,9 +28,13 @@ export async function refreshPumpMarketStateFromHelius(input: {
   config: HeliusAccountReadConfig;
 }): Promise<PumpMarketState> {
   const nowMs = (input.config.now ?? Date.now)();
+  if (!Number.isFinite(nowMs)) {
+    return { ...input.state, status: "EXIT_BLOCKED", pool: null,
+      reason: "Helius account verifier received an invalid local timestamp." };
+  }
   let curveAccount: RawProgramAccount | null;
   try {
-    const curveAddress = (await import("./pump-pdas.js")).derivePumpBondingCurvePda(input.state.mint);
+    const curveAddress = derivePumpBondingCurvePda(input.state.mint);
     const snapshot = await fetchHeliusMultipleAccounts([curveAddress], input.config);
     curveAccount = snapshot.accounts[0] ?? null;
   } catch (error) {
@@ -63,9 +64,9 @@ export async function refreshPumpMarketStateFromHelius(input: {
   if (curveState.status !== "MIGRATION_PENDING" || !curveState.curve) return curveState;
 
   const quoteMint = curveState.curve.quoteMint;
-  const expectedPoolAddress = deriveCanonicalPumpSwapPoolPda(input.state.mint, quoteMint);
-  const expectedPoolCreatorAuthority = derivePumpPoolCreatorAuthorityPda(input.state.mint);
   try {
+    const expectedPoolAddress = deriveCanonicalPumpSwapPoolPda(input.state.mint, quoteMint);
+    const expectedPoolCreatorAuthority = derivePumpPoolCreatorAuthorityPda(input.state.mint);
     const candidate = await discoverCanonicalPumpSwapPoolForMint({
       mint: input.state.mint, expectedPoolAddress, expectedPoolCreatorAuthority, config: input.config
     });
