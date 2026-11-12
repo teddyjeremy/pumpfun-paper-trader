@@ -24,6 +24,7 @@ describe("bounded wallet funding evidence collector", () => {
         ? (calls.filter(call => call.method === "getSignaturesForAddress").length === 1 ? walletA : walletB)
         : walletA;
       return response({
+        blockTime: 1794484800,
         transaction: { message: { instructions: [{
           program: "system", parsed: { type: "transfer", info: {
             source: funder, destination: wallet, lamports: 1_000_000
@@ -60,6 +61,7 @@ describe("bounded wallet funding evidence collector", () => {
       }
       const destination = walletIndex === 1 ? walletA : walletB;
       return response({
+        blockTime: 1794484800,
         transaction: { message: { instructions: [{
           program: "system", parsed: { type: "transfer", info: {
             source: funder, destination, lamports: 1_000_000
