@@ -5,7 +5,10 @@ const EnvSchema = z.object({
   HOST: z.string().default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  DASHBOARD_USERNAME: z.string().optional().default(""),
+  DASHBOARD_PASSWORD: z.string().optional().default(""),
   DATABASE_URL: z.string().optional().default(""),
+  PAPER_EVENT_INGEST_TOKEN: z.string().optional().default(""),
   HELIUS_API_KEY: z.string().optional().default(""),
   PUMPFUN_MODE: z.literal("paper").default("paper"),
   PAPER_STARTING_BALANCE_USD: z.coerce.number().positive().default(2.7),
@@ -26,6 +29,15 @@ const EnvSchema = z.object({
 const parsed = EnvSchema.safeParse(process.env);
 if (!parsed.success) {
   throw new Error(`Invalid environment configuration: ${parsed.error.message}`);
+}
+if (Boolean(parsed.data.DASHBOARD_USERNAME) !== Boolean(parsed.data.DASHBOARD_PASSWORD)) {
+  throw new Error("DASHBOARD_USERNAME and DASHBOARD_PASSWORD must both be configured.");
+}
+if (parsed.data.PAPER_EVENT_INGEST_TOKEN && parsed.data.PAPER_EVENT_INGEST_TOKEN.length < 32) {
+  throw new Error("PAPER_EVENT_INGEST_TOKEN must be at least 32 characters when configured.");
+}
+if (parsed.data.DASHBOARD_USERNAME.includes(":")) {
+  throw new Error("DASHBOARD_USERNAME cannot contain a colon when using HTTP Basic authentication.");
 }
 if (parsed.data.PAPER_POSITION_SIZE_USD * parsed.data.PAPER_MAX_OPEN_POSITIONS > parsed.data.PAPER_STARTING_BALANCE_USD) {
   throw new Error("Maximum position allocation cannot exceed the paper starting balance.");
