@@ -54,7 +54,7 @@ export async function getPersistenceStatus(): Promise<PersistenceStatus> {
 
   try {
     const result = await pool.query<{ version: string }>(
-      "SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1"
+      "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
     );
     return {
       configured: true,
