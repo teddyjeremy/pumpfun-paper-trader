@@ -42,6 +42,16 @@ describe("Pump market migration state", () => {
     expect(state.reason).toMatch(/Do not auto-sell/);
   });
 
+  it("accepts a migrated curve with zeroed reserves as migration pending", () => {
+    const initial = createUnverifiedMarketState("mint", iso);
+    const state = updatePumpMarketState(initial, {
+      curve: curve({ migrated: true, tokenReserveBaseUnits: "0", quoteReserveBaseUnits: "0" }),
+      nowMs: now
+    });
+    expect(state.status).toBe("MIGRATION_PENDING");
+    expect(canRequestPaperExitQuote(state)).toBe(false);
+  });
+
   it("accepts only a verified canonical pool with fresh non-zero reserves", () => {
     const initial = createUnverifiedMarketState("mint", iso);
     const state = updatePumpMarketState(initial, { pool: pool(), nowMs: now });
