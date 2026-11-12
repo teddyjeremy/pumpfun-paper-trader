@@ -2,33 +2,33 @@ import { describe, expect, it } from "vitest";
 import type { PumpCreateEvent, PumpTradeEvent } from "../src/ingestion/pump-events.js";
 import type { VerifiedPumpTransaction } from "../src/ingestion/helius.js";
 import { buildCandidatePriceVolumeProfiles } from "../src/ingestion/price-volume-profile.js";
-import { SOL_QUOTE_MINT } from "../src/ingestion/trade-flow.js";
+import { isSolQuoteMint, LEGACY_SOL_QUOTE_MINT, SOL_QUOTE_MINT } from "../src/ingestion/trade-flow.js";
 
 const mint = "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi";
 
-function trade(timestamp: bigint, price: bigint, isBuy = true, quoteAmountOverride?: bigint): PumpTradeEvent {
+function trade(timestamp: bigint, price: bigint, isBuy = true, quoteAmountOverride?: bigint, quoteMint = SOL_QUOTE_MINT): PumpTradeEvent {
   const tokenAmount = 1_000n;
   return {
-    mint, solAmount: price, tokenAmount, isBuy, user: `wallet-${timestamp}`, timestamp,
+    mint, solAmount: isSolQuoteMint(quoteMint) ? price : 9_999n, tokenAmount, isBuy, user: `wallet-${timestamp}`, timestamp,
     virtualSolReserves: price, virtualTokenReserves: tokenAmount, realSolReserves: 1n, realTokenReserves: 1n,
     feeRecipient: "fee", feeBasisPoints: 0n, fee: 0n, creator: "creator",
     creatorFeeBasisPoints: 0n, creatorFee: 0n, trackVolume: false,
     totalUnclaimedTokens: 0n, totalClaimedTokens: 0n, currentSolVolume: 0n,
     lastUpdateTimestamp: timestamp, ixName: isBuy ? "buy" : "sell", mayhemMode: false,
     cashbackFeeBasisPoints: 0n, cashback: 0n, buybackFeeBasisPoints: 0n,
-    buybackFee: 0n, shareholders: [], quoteMint: SOL_QUOTE_MINT,
+    buybackFee: 0n, shareholders: [], quoteMint,
     quoteAmount: quoteAmountOverride ?? price, virtualQuoteReserves: 0n, realQuoteReserves: 0n,
     holderRewardsBps: 0n, holderRewards: 0n, creatorFeeUnclaimed: 0n
   };
 }
 
-function createEvent(): PumpCreateEvent {
+function createEvent(quoteMint = SOL_QUOTE_MINT): PumpCreateEvent {
   return {
     name: "Test", symbol: "TST", uri: "https://example.invalid/metadata.json",
     mint, bondingCurve: "curve", user: "creator", creator: "creator", timestamp: 100n,
     virtualTokenReserves: 1_000n, virtualSolReserves: 1_000n, realTokenReserves: 1n,
     tokenTotalSupply: 1_000_000n, tokenProgram: "token-program",
-    isMayhemMode: false, isCashbackEnabled: false, quoteMint: SOL_QUOTE_MINT,
+    isMayhemMode: false, isCashbackEnabled: false, quoteMint,
     virtualQuoteReserves: 0n, creatorFeeBps: 0n, isHolderReward: false, depth: 0
   };
 }
@@ -41,6 +41,26 @@ function transaction(tradeEvents: PumpTradeEvent[]): VerifiedPumpTransaction {
 }
 
 describe("observed price and stage-volume profile", () => {
+  it("treats legacy default-key SOL quote reserves and volumes as SOL", () => {
+    const tx = transaction([
+      trade(100n, 1_000_000n, true, 1_000_000n, LEGACY_SOL_QUOTE_MINT),
+      trade(105n, 1_250_000n, true, 1_250_000n, LEGACY_SOL_QUOTE_MINT),
+      trade(110n, 1_100_000n, true, 1_100_000n, LEGACY_SOL_QUOTE_MINT),
+      trade(115n, 1_050_000n, true, 1_050_000n, LEGACY_SOL_QUOTE_MINT),
+      trade(120n, 1_200_000n, true, 1_200_000n, LEGACY_SOL_QUOTE_MINT)
+    ]);
+    tx.createEvents = [createEvent(LEGACY_SOL_QUOTE_MINT)];
+    const [profile] = buildCandidatePriceVolumeProfiles([tx], {
+      solUsdPriceUsd: 100, minimumTradeUsd: 0.01, nowSeconds: 125,
+      horizonSeconds: 60, coverageStartByMint: { [mint]: 100 }
+    });
+    expect(profile).toMatchObject({
+      quoteUnit: "SOL", microTradeFilterStatus: "APPLIED",
+      coverageStatus: "COMPLETE_FROM_LAUNCH"
+    });
+    expect(profile?.pullbackVolumeVsImpulsePct).not.toBeNull();
+  });
+
   it("reports impulse, pullback, reclaim and quote volume for each stage", () => {
     const [profile] = buildCandidatePriceVolumeProfiles([
       transaction([
