@@ -677,12 +677,23 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
       throw new Error("Historical backfill archive contains an invalid signature record.");
     }
   }
-  if (transaction && (transaction.mint !== mint || !signaturePattern.test(transaction.signature) ||
-      !Number.isSafeInteger(transaction.slot) || transaction.slot < 0 ||
-      transaction.provider !== "helius" || !["confirmed","finalized"].includes(transaction.commitment) ||
-      !Number.isFinite(Date.parse(transaction.receivedAt)) ||
-      !Array.isArray(transaction.createEvents) || !Array.isArray(transaction.tradeEvents))) {
-    throw new Error("Historical transaction observation contains invalid fields.");
+  if (state.status === "COMPLETE" &&
+      (state.launchBlockTime === null || state.signatures.some(item => item.blockTime === null))) {
+    throw new Error("Complete historical coverage requires verified block times for every archived signature.");
+  }
+  if (state.scannedCount < state.signatures.length) {
+    throw new Error("Historical signature count exceeds the verified scan count.");
+  }
+  if (transaction) {
+    const signatureEvidence = state.signatures.find(item => item.signature === transaction.signature);
+    if (transaction.mint !== mint || !signaturePattern.test(transaction.signature) ||
+        !Number.isSafeInteger(transaction.slot) || transaction.slot < 0 ||
+        !signatureEvidence || signatureEvidence.slot !== transaction.slot ||
+        transaction.provider !== "helius" || !["confirmed","finalized"].includes(transaction.commitment) ||
+        !Number.isFinite(Date.parse(transaction.receivedAt)) ||
+        !Array.isArray(transaction.createEvents) || !Array.isArray(transaction.tradeEvents)) {
+      throw new Error("Historical transaction observation does not match verified signature evidence.");
+    }
   }
   const client = await pool.connect();
   try {
