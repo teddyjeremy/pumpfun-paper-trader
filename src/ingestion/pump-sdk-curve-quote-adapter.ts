@@ -335,7 +335,7 @@ export function quotePumpCurveSellFromSnapshot(
       !isU64BaseUnits(grossQuote.toString()) || !isU64BaseUnits(netQuote.toString())) {
     throw new Error("Pump SDK sell quote did not reconcile to positive u64 proceeds.");
   }
-  const impact = impactPct(grossQuote, tokenAmount,
+  const impact = impactPct(grossQuote, poolTokenAmount,
     context.curve.virtualQuoteReserves, context.curve.virtualTokenReserves, "SELL");
   return {
     provider: "pump-sdk-4.3.1", venue: "PUMP_CURVE", side: "SELL",
