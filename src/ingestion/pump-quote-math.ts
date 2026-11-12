@@ -230,7 +230,10 @@ export function quotePumpSwapSell(input: {
   const feeBucketsTotal = protocolFeeBuckets + creatorFeeBuckets;
   const effectiveQuote = quoteVault + virtualQuote;
   const spendableQuoteVault = quoteVault - feeBucketsTotal;
-  if (tokenIn <= 0n || base <= 0n || effectiveQuote <= 0n || spendableQuoteVault <= 0n) {
+  if (feeBucketsTotal >= quoteVault) {
+    throw new Error("PumpSwap quote vault has no spendable liquidity after reserved fee buckets.");
+  }
+  if (tokenIn <= 0n || base <= 0n || effectiveQuote <= 0n) {
     throw new Error("PumpSwap quote state or input is empty.");
   }
   const grossQuoteOut = effectiveQuote * tokenIn / (base + tokenIn);
