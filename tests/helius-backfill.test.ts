@@ -100,7 +100,7 @@ describe("bounded Helius historical backfill", () => {
     });
     const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
     const firstPage = Array.from({ length: 100 }, (_, i) => ({
-      signature: "8".repeat(63) + alphabet[i % alphabet.length],
+      signature: "8".repeat(62) + alphabet[Math.floor(i / alphabet.length)] + alphabet[i % alphabet.length],
       slot: 200 - i, blockTime: 1100 - i, err: null
     }));
     const first = applyAddressSignaturesPage(initial, firstPage);
