@@ -14,7 +14,12 @@ export interface ExecutablePaperQuote {
   priceImpactPct: number;
   taxPct: number;
   networkFeeUsd: number;
+  priorityFeeUsd: number;
   providerFeeUsd: number;
+  protocolFeeUsd: number;
+  creatorFeeUsd: number;
+  poolFeeUsd: number;
+  transferFeeUsd: number;
   routeId: string;
   executable: boolean;
 }
@@ -55,6 +60,10 @@ export const PAPER_PORTFOLIO_POLICY = Object.freeze({
   maxQuoteAgeMs: 2_000
 });
 const round = (value: number) => Math.round((value + Number.EPSILON) * 1e8) / 1e8;
+function quoteFeesUsd(quote: ExecutablePaperQuote): number {
+  return quote.networkFeeUsd + quote.priorityFeeUsd + quote.providerFeeUsd +
+    quote.protocolFeeUsd + quote.creatorFeeUsd + quote.poolFeeUsd + quote.transferFeeUsd;
+}
 function validPositive(value: number): boolean { return Number.isFinite(value) && value > 0; }
 function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL", mint: string): void {
   if (!quote.executable || quote.side !== side || quote.mint !== mint ||
@@ -69,7 +78,12 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
       BigInt(quote.outputAmountBaseUnits) <= 0n || !Number.isFinite(quote.priceImpactPct) ||
       !Number.isFinite(quote.taxPct) || quote.priceImpactPct < 0 || quote.taxPct < 0 ||
       !Number.isFinite(quote.networkFeeUsd) || quote.networkFeeUsd < 0 ||
-      !Number.isFinite(quote.providerFeeUsd) || quote.providerFeeUsd < 0) {
+      !Number.isFinite(quote.priorityFeeUsd) || quote.priorityFeeUsd < 0 ||
+      !Number.isFinite(quote.providerFeeUsd) || quote.providerFeeUsd < 0 ||
+      !Number.isFinite(quote.protocolFeeUsd) || quote.protocolFeeUsd < 0 ||
+      !Number.isFinite(quote.creatorFeeUsd) || quote.creatorFeeUsd < 0 ||
+      !Number.isFinite(quote.poolFeeUsd) || quote.poolFeeUsd < 0 ||
+      !Number.isFinite(quote.transferFeeUsd) || quote.transferFeeUsd < 0) {
     throw new Error("Quote contains invalid amount or cost evidence.");
   }
 }
@@ -114,8 +128,7 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   }
   const roundTripPct = input.buyQuote.priceImpactPct + input.sellQuote.priceImpactPct +
     input.buyQuote.taxPct + input.sellQuote.taxPct +
-    ((input.buyQuote.networkFeeUsd + input.buyQuote.providerFeeUsd +
-      input.sellQuote.networkFeeUsd + input.sellQuote.providerFeeUsd) / stake) * 100;
+    ((quoteFeesUsd(input.buyQuote) + quoteFeesUsd(input.sellQuote)) / stake) * 100;
   if (input.buyQuote.priceImpactPct > PAPER_PORTFOLIO_POLICY.maxImpactPerSidePct ||
       input.sellQuote.priceImpactPct > PAPER_PORTFOLIO_POLICY.maxImpactPerSidePct ||
       input.buyQuote.taxPct > PAPER_PORTFOLIO_POLICY.maxTaxPerSidePct ||
@@ -123,7 +136,7 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
       roundTripPct > PAPER_PORTFOLIO_POLICY.maxRoundTripCostPct) {
     throw new Error("Round-trip execution cost exceeds the paper entry limits.");
   }
-  const buyCosts = input.buyQuote.networkFeeUsd + input.buyQuote.providerFeeUsd;
+  const buyCosts = quoteFeesUsd(input.buyQuote);
   const tokens = BigInt(input.buyQuote.outputAmountBaseUnits);
   const entryPrice = stake / Number(tokens);
   if (!validPositive(entryPrice)) throw new Error("Buy quote produced an invalid entry price.");
@@ -188,8 +201,11 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
   if (BigInt(input.sellQuote.inputAmountBaseUnits) !== BigInt(previous.tokenAmountBaseUnits)) {
     throw new Error("Exit quote must consume the entire remaining token balance.");
   }
-  const sellCosts = input.sellQuote.networkFeeUsd + input.sellQuote.providerFeeUsd;
+  const sellCosts = quoteFeesUsd(input.sellQuote);
   const netProceeds = input.sellQuote.outputUsd - sellCosts;
+  if (!Number.isFinite(netProceeds) || netProceeds < 0) {
+    throw new Error("Sell quote has negative net proceeds after all execution fees.");
+  }
   const pnl = round(netProceeds - previous.stakeUsd - previous.buyCostsUsd);
   const position: PaperPosition = { ...previous, latestPriceUsdPerToken: input.sellQuote.outputUsd /
       Number(BigInt(previous.tokenAmountBaseUnits)), realizedPnlUsd: pnl, status: "CLOSED", exitReason: input.exitReason };
