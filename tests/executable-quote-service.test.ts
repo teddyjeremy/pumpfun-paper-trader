@@ -15,7 +15,7 @@ function quote(side:"BUY"|"SELL",slot:number,amount:string):OfflinePumpQuote {
     executionReady:false as const,blockers:[],priceImpactPct:0.5
   };
   if(side==="BUY") return {...common,venue:"PUMP_CURVE" as const,venueFeeBaseUnits:"0"};
-  return {...common,venue:"PUMP_CURVE" as const,venueFeeBaseUnits:"10000000"};
+  return {...common,venue:"PUMP_CURVE" as const,venueFeeBaseUnits:"1000000"};
 }
 describe("executable quote service",()=>{
   it("requires an exact-size fresh sell quote on the same venue and quote mint",async()=>{
