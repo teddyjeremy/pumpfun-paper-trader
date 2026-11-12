@@ -106,7 +106,9 @@ describe("bounded durable Helius monitor state", () => {
     let state = acked;
     let outcome = "";
     for (let index = 0; index < MAX_HELIUS_PENDING_SIGNATURES + 1; index += 1) {
-      const sig = (index + 1).toString().padStart(88, "5");
+      const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+      const value = index + 1;
+      const sig = "5".repeat(86) + alphabet[Math.floor(value / alphabet.length)] + alphabet[value % alphabet.length];
       const result = enqueueHeliusNotification(state, notification(77, sig));
       state = result.state;
       outcome = result.outcome;
