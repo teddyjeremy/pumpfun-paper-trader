@@ -69,21 +69,35 @@ export function buildCandidateTradeFlows(
     windows: Map<number, PumpTradeEvent[]>;
   }>();
 
+  const ensureGroup = (mint: string, quoteMint: string) => {
+    const key = `${mint}:${quoteMint}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { mint, quoteMint, windows: new Map() };
+      groups.set(key, group);
+    }
+    return group;
+  };
+
   for (const transaction of transactions) {
+    for (const created of transaction.createEvents) {
+      ensureGroup(created.mint, created.quoteMint);
+    }
     for (const trade of transaction.tradeEvents) {
       const timestamp = Number(trade.timestamp);
       if (!Number.isSafeInteger(timestamp) || timestamp < lowerBound || timestamp > nowSeconds) continue;
-      const key = `${trade.mint}:${trade.quoteMint}`;
-      let group = groups.get(key);
-      if (!group) {
-        group = { mint: trade.mint, quoteMint: trade.quoteMint, windows: new Map() };
-        groups.set(key, group);
-      }
+      const group = ensureGroup(trade.mint, trade.quoteMint);
       const windowStart = Math.floor(timestamp / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
       if (windowStart + TRADE_FLOW_WINDOW_SECONDS > nowSeconds) continue;
       const events = group.windows.get(windowStart) ?? [];
       events.push(trade);
       group.windows.set(windowStart, events);
+    }
+  }
+
+  for (const mint of options.candidateMints ?? []) {
+    if (![...groups.values()].some(group => group.mint === mint)) {
+      ensureGroup(mint, SOL_QUOTE_MINT);
     }
   }
 
