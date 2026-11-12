@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createPaperPortfolio, openPaperPosition } from "../src/paper/portfolio.js";
-import { executePaperEntry } from "../src/paper/execution-lifecycle.js";
+import { executePaperEntry, type PaperEntryStrategyDecision } from "../src/paper/execution-lifecycle.js";
 import type { PumpSdkCurveQuote } from "../src/ingestion/pump-sdk-curve-quote-adapter.js";
 
 const now = Date.parse("2026-11-12T10:00:00.000Z");
@@ -28,9 +28,15 @@ function quote(side: "BUY" | "SELL"): PumpSdkCurveQuote {
   };
 }
 
-const approved = {
-  decision: "BUY" as const, buyAllowed: true,
-  rules: [{ rule: "ALL", status: "PASS" as const }]
+const approvedRules: PaperEntryStrategyDecision["rules"] = [
+  "CANDIDATE_AGE", "IMPULSE", "PULLBACK", "RECLAIM", "THREE_FLOW_WINDOWS",
+  "DISTINCT_BUYERS", "BUYER_CONCENTRATION", "CREATOR_SELL_RISK", "WALLET_CLUSTER_RISK",
+  "ATTRIBUTION_CONFIDENCE", "PULLBACK_VOLUME_CONTRACTION", "RECLAIM_VOLUME_EXPANSION",
+  "SIGNAL_FRESHNESS", "EXECUTABLE_QUOTE", "ROUND_TRIP_COST"
+].map(rule => ({ rule, status: "PASS" }));
+
+const approved: PaperEntryStrategyDecision = {
+  decision: "BUY", buyAllowed: true, rules: approvedRules
 };
 
 describe("paper execution lifecycle", () => {
@@ -53,7 +59,9 @@ describe("paper execution lifecycle", () => {
     const commitEntry = vi.fn();
     const result = await executePaperEntry({
       mint, positionId: "p1", occurredAt: new Date(now).toISOString(), nowMs: now,
-      strategy: { ...approved, rules: [...approved.rules, { rule: "volume", status: "UNKNOWN" }] },
+      strategy: { ...approved, rules: approvedRules.map(rule =>
+        rule.rule === "WALLET_CLUSTER_RISK" ? { ...rule, status: "UNKNOWN" as const } : rule
+      ) },
       portfolio: createPaperPortfolio(),
       quoteBuy: vi.fn(), quoteSell: vi.fn(), commitEntry
     });
