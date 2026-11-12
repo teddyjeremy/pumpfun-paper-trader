@@ -68,13 +68,18 @@ describe("historical strategy replay", () => {
   it("replays impulse, pullback and reclaim volume before measuring the forward path", () => {
     const result = replayHistoricalCoin({
       mint, transactions: [verifiedTransaction()], launchBlockTime: 0,
-      horizonSeconds: 600, decodeComplete: true
+      horizonSeconds: 600, decodeComplete: true,
+      walletClusterEvidenceCompleteAt: 20,
+      walletHoldings: [{
+        mint, wallet: "sampled-holder", amount: "1000000",
+        observedAt: "1970-01-01T00:00:20.000Z"
+      }]
     }, {
       solUsdPriceUsd: 100, minimumTradeUsd: 0.01,
       label: { minFavorableExcursionPct: 20, maxAdverseExcursionPct: 15, roundTripCostPct: 4 }
     });
 
-    expect(result.status).toBe("COMPLETE");
+    expect(result.status).toBe("RISK_NOT_CLEARED");
     expect(result.firstSetup).toMatchObject({
       setupEligible: true, riskClearedSetupEligible: false,
       creatorSellRiskStatus: "PENDING", walletClusterRiskStatus: "UNKNOWN",
@@ -84,8 +89,9 @@ describe("historical strategy replay", () => {
     expect(result.firstSetup!.pullbackVolumeVsImpulsePct).toBeGreaterThan(0);
     expect(result.firstSetup!.pullbackVolumeVsImpulsePct).toBeLessThan(100);
     expect(result.firstSetup!.reclaimVolumeVsPullbackPct).toBeGreaterThan(100);
-    expect(result.outcome).toMatchObject({ label: "SUCCESS", roundTripCostPct: 4 });
+    expect(result.outcome).toMatchObject({ label: "UNKNOWN", roundTripCostPct: 4 });
     expect(result.outcome!.netFinalReturnPct).toBeCloseTo(11.3846, 1);
+    expect(result.outcome!.labelReason).toContain("complete holder/cluster evidence were not cleared");
   });
 
   it("does not mix non-SOL quote trades into the SOL-denominated forward price path", () => {
