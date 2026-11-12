@@ -56,7 +56,7 @@ describe("dynamic paper exit lifecycle", () => {
     const quoteSell = vi.fn();
     const result = await executePaperExit({
       position, marketState: createUnverifiedMarketState(mint, new Date(now).toISOString()),
-      windows: [], nowMs: now, quoteSell, commitExit: vi.fn()
+      windows: [], nowMs: now, quoteSell, commitMark: vi.fn(), commitExit: vi.fn()
     });
     expect(result.status).toBe("BLOCKED");
     expect(quoteSell).not.toHaveBeenCalled();
@@ -110,7 +110,7 @@ describe("dynamic paper exit lifecycle", () => {
     const quoteSell = vi.fn();
     const result = await executePaperExit({
       position, marketState: staleState, windows: bearishWindows, nowMs: now,
-      quoteSell, commitExit: vi.fn()
+      quoteSell, commitMark: vi.fn(), commitExit: vi.fn()
     });
     expect(result.status).toBe("BLOCKED");
     expect(quoteSell).not.toHaveBeenCalled();
