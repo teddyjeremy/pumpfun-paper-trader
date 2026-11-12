@@ -53,10 +53,10 @@ describe("executable quote service",()=>{
       buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,solUsd,now:()=>Date.parse(observedAt)
     })).rejects.toThrow(/exact net token output/);
   });
-  it("blocks when buy and sell quotes use different venues",async()=>{
+  it("blocks when buy and sell quotes describe different markets",async()=>{
     await expect(fetchExecutableRoundTripQuote({
       fetchQuote:async({side,amountBaseUnits})=>side==="BUY"?quote("BUY",100,amountBaseUnits):{
-        ...quote("SELL",101,amountBaseUnits),venue:"PUMPSWAP" as const
+        ...quote("SELL",101,amountBaseUnits),mint:"different-mint"
       },
       helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
         result:[{slot:99,prioritizationFee:0}]
