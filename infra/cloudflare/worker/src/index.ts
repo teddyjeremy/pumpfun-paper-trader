@@ -281,16 +281,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
-  private async flushHeliusBackfillArchivesToPostgres(): Promise<void> {
-    if (!this.postgresIngestConfigured || !this.activeSessionId) return;
-    const listKey = `helius_backfill_mints:${this.activeSessionId}`;
+  private async flushHeliusBackfillArchivesToPostgres(sessionId: string | null = sessionId): Promise<void> {
+    if (!this.postgresIngestConfigured || !sessionId) return;
+    const listKey = `helius_backfill_mints:${sessionId}`;
     const mints = await this.ctx.storage.get<string[]>(listKey) ?? [];
     for (const mint of mints) {
-      const state = await this.ctx.storage.get<HistoricalBackfillState>(`helius_backfill:${this.activeSessionId}:${mint}`);
+      const state = await this.ctx.storage.get<HistoricalBackfillState>(`helius_backfill:${sessionId}:${mint}`);
       if (!state) continue;
       try {
         const response = await this.postPostgresIngest("/internal/helius-backfill", {
-          sessionId: this.activeSessionId, mint, state
+          sessionId: sessionId, mint, state
         });
         if (!response.ok) throw new Error("Archive checkpoint was not acknowledged.");
       } catch {
@@ -299,17 +299,17 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         return;
       }
     }
-    const archivedKey = `helius_archived_transaction_signatures:${this.activeSessionId}`;
+    const archivedKey = `helius_archived_transaction_signatures:${sessionId}`;
     const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
     for (const transaction of this.verifiedTransactions) {
       if (archived.has(transaction.signature)) continue;
       try {
         const state = await this.ctx.storage.get<HistoricalBackfillState>(
-          `helius_backfill:${this.activeSessionId}:${transaction.mint}`
+          `helius_backfill:${sessionId}:${transaction.mint}`
         );
         if (!state) continue;
         const response = await this.postPostgresIngest("/internal/helius-backfill", {
-          sessionId: this.activeSessionId,
+          sessionId: sessionId,
           mint: transaction.mint,
           state,
           transaction: jsonSafe(transaction)
@@ -511,8 +511,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put("latest_audit_session_id", completedSessionId);
         await txn.delete("active_audit_session_id");
       });
-      this.activeSessionId = null;
       await this.flushAuditEventsToPostgres(completedSessionId);
+      await this.flushHeliusBackfillArchivesToPostgres(completedSessionId);
+      this.activeSessionId = null;
     }
     await this.persist();
     await this.releasePostgresWorkerLease();
