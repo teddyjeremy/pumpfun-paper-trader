@@ -372,6 +372,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.heliusState = emptyHeliusMonitorState();
       this.walletLinkSnapshots = {};
       this.walletHoldingsByMint = {};
+      this.holderRiskSnapshots = {};
+      this.riskEvidenceAttemptedAtByMint = {};
       this.status = { ...INITIAL_STATUS };
       const sessionId = crypto.randomUUID();
       const meta: AuditSessionMeta = {
