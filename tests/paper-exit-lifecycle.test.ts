@@ -90,6 +90,23 @@ describe("dynamic paper exit lifecycle", () => {
     expect(commitExit).toHaveBeenCalledOnce();
   });
 
+  it("blocks a paper exit quote above the 2% per-side impact limit", async () => {
+    const commitExit = vi.fn();
+    const commitMark = vi.fn();
+    const result = await executePaperExit({
+      position, marketState, windows: bearishWindows, nowMs: now,
+      quoteSell: async () => ({
+        quote: { ...sellQuote(), priceImpactPct: 2.01 },
+        context: { solUsd, costs }
+      }),
+      commitMark, commitExit
+    });
+    expect(result.status).toBe("BLOCKED");
+    expect(result.reason).toMatch(/2% per-side/);
+    expect(commitMark).not.toHaveBeenCalled();
+    expect(commitExit).not.toHaveBeenCalled();
+  });
+
   it("rejects a sell quote that does not consume the entire remaining balance", async () => {
     const commitExit = vi.fn();
     const result = await executePaperExit({
