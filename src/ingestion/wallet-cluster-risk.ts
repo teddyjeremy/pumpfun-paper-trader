@@ -19,6 +19,8 @@ export interface WalletHoldingEvidence {
   mint: string;
   wallet: string;
   amount: string;
+  /** Snapshot observation time; required by historical replay to prevent future-data leakage. */
+  observedAt?: string;
 }
 
 export interface WalletClusterRisk {

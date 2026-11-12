@@ -2,6 +2,8 @@ import type { VerifiedPumpTransaction } from "../ingestion/helius.js";
 import type { PumpTradeEvent } from "../ingestion/pump-events.js";
 import { buildCandidatePriceVolumeProfiles } from "../ingestion/price-volume-profile.js";
 import { buildCandidateTradeFlows, isSolQuoteMint } from "../ingestion/trade-flow.js";
+import { evaluateCreatorSellRisk } from "../ingestion/creator-risk.js";
+import { evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../ingestion/wallet-cluster-risk.js";
 
 export interface HistoricalReplayCoinInput {
   mint: string;
@@ -10,6 +12,10 @@ export interface HistoricalReplayCoinInput {
   horizonSeconds?: number;
   decodeComplete: boolean;
   decodeReason?: string | null;
+  /** Historical second at which independently sourced wallet-link and holder coverage became complete. */
+  walletClusterEvidenceCompleteAt?: number;
+  walletLinks?: readonly WalletLinkEvidence[];
+  walletHoldings?: readonly WalletHoldingEvidence[];
 }
 
 export interface HistoricalReplayConfig {
@@ -37,6 +43,12 @@ export interface HistoricalSetupSnapshot {
   flowDataComplete: boolean;
   distinctBuyersAcrossLatestThree: number;
   largestBuyerShareAcrossLatestThreeBps: number | null;
+  creatorSellRiskStatus: "REJECT_OBSERVED" | "PASS_COMPLETE" | "PENDING" | "UNKNOWN";
+  walletClusterRiskStatus: "REJECT_OBSERVED" | "PASS_COMPLETE" | "UNKNOWN";
+  walletClusterAttributionStatus: "CONFIRMED_LINKS" | "NO_HIGH_CONFIDENCE_LINKS" | "INVALID_EVIDENCE" | "UNKNOWN";
+  /** Risk-cleared market candidate only; remaining strategy and executable-quote rules are not implied. */
+  riskClearedSetupEligible: boolean;
+  /** Market-pattern candidate only; does not imply creator/cluster or execution clearance. */
   setupEligible: boolean;
 }
 
@@ -217,6 +229,34 @@ export function replayHistoricalCoin(
       const flow = buildCandidateTradeFlows(input.transactions, sharedOptions)
         .find(item => item.mint === input.mint && item.quoteUnit === "SOL");
       if (!profile || !flow) continue;
+      // Risk evaluators must see only evidence available at this historical instant.
+      const evidenceTransactions = input.transactions.filter(tx => typeof tx.blockTime === "number" && Number.isSafeInteger(tx.blockTime) && tx.blockTime <= evaluatedAt);
+      const creatorRisk = evaluateCreatorSellRisk(evidenceTransactions, {
+        nowSeconds: evaluatedAt,
+        candidateMints: [input.mint],
+        incompleteMints: input.decodeComplete ? [] : [input.mint],
+        coverageStartByMint: { [input.mint]: input.launchBlockTime }
+      }).find(item => item.mint === input.mint);
+      const createEvent = evidenceTransactions.flatMap(tx => tx.createEvents)
+        .filter(event => event.mint === input.mint)
+        .sort((a, b) => Number(a.timestamp - b.timestamp))[0];
+      const walletRisk = createEvent ? evaluateWalletClusterRisk(evidenceTransactions, {
+        mint: input.mint,
+        creator: createEvent.creator,
+        totalSupply: createEvent.tokenTotalSupply.toString(),
+        links: (input.walletLinks ?? []).filter(link => {
+          const observedAt = Date.parse(link.observedAt);
+          return Number.isFinite(observedAt) && observedAt <= evaluatedAt * 1_000;
+        }),
+        holdings: (input.walletHoldings ?? []).filter(holding => {
+          const observedAt = Date.parse(holding.observedAt ?? "");
+          return Number.isFinite(observedAt) && observedAt <= evaluatedAt * 1_000;
+        })
+      }) : null;
+      const creatorRiskStatus = creatorRisk?.status ?? "UNKNOWN";
+      const walletClusterRiskStatus = walletRisk?.status === "REJECT_OBSERVED"
+        ? "REJECT_OBSERVED"
+        : Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) && input.walletClusterEvidenceCompleteAt! <= evaluatedAt && walletRisk !== null ? "PASS_COMPLETE" : "UNKNOWN";
       const setupEligible = input.decodeComplete && profile.dataComplete &&
         profile.microTradeFilterStatus === "APPLIED" &&
         profile.reclaimDetected && profile.pullbackVolumeVsImpulsePct !== null &&
@@ -236,6 +276,10 @@ export function replayHistoricalCoin(
         flowDataComplete: flow.dataComplete,
         distinctBuyersAcrossLatestThree: flow.distinctBuyersAcrossLatestThree,
         largestBuyerShareAcrossLatestThreeBps: flow.largestBuyerShareAcrossLatestThreeBps,
+        creatorSellRiskStatus: creatorRiskStatus,
+        walletClusterRiskStatus,
+        walletClusterAttributionStatus: walletRisk?.attributionStatus ?? "UNKNOWN",
+        riskClearedSetupEligible: setupEligible && creatorRiskStatus === "PASS_COMPLETE" && walletClusterRiskStatus === "PASS_COMPLETE",
         setupEligible
       };
       snapshots.push(snapshot);

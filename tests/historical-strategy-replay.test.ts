@@ -76,7 +76,9 @@ describe("historical strategy replay", () => {
 
     expect(result.status).toBe("COMPLETE");
     expect(result.firstSetup).toMatchObject({
-      setupEligible: true, reclaimDetected: true, dataComplete: true,
+      setupEligible: true, riskClearedSetupEligible: false,
+      creatorSellRiskStatus: "PENDING", walletClusterRiskStatus: "UNKNOWN",
+      reclaimDetected: true, dataComplete: true,
       flowConfirmationPass: true, distinctBuyersAcrossLatestThree: 9
     });
     expect(result.firstSetup!.pullbackVolumeVsImpulsePct).toBeGreaterThan(0);
