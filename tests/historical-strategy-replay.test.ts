@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PumpCreateEvent, PumpTradeEvent } from "../src/ingestion/pump-events.js";
 import type { VerifiedPumpTransaction } from "../src/ingestion/helius.js";
-import { calibrateVolumeThresholds, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
+import { calibrateVolumeThresholds, classifyHistoricalWalletClusterRisk, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
 
 const mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const quoteMint = "So11111111111111111111111111111111111111112";
@@ -169,7 +169,7 @@ describe("historical strategy replay", () => {
     expect(result.snapshots.every(snapshot => !snapshot.setupEligible)).toBe(true);
   });
 
-  it("labels a setup as a failure when the supplied round-trip cost makes its final return negative", () => {
+  it("keeps a negative reserve-price result unlabelled when risk evidence is incomplete", () => {
     const result = replayHistoricalCoin({
       mint, transactions: [verifiedTransaction()], launchBlockTime: 0, decodeComplete: true
     }, {
@@ -178,7 +178,8 @@ describe("historical strategy replay", () => {
     });
     expect(result.outcome?.grossFinalReturnPct).toBeGreaterThan(0);
     expect(result.outcome?.netFinalReturnPct).toBeLessThan(0);
-    expect(result.outcome?.label).toBe("FAILURE");
+    expect(result.outcome?.label).toBe("UNKNOWN");
+    expect(result.outcome?.labelReason).toContain("complete holder/cluster evidence were not cleared");
   });
 
   it("does not assign a profitability label without an explicit round-trip cost", () => {
