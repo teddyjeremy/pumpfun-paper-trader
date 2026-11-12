@@ -33,7 +33,6 @@ import {
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork, resetHeliusSubscriptionIds,
-  enqueueHeliusSignatureWork,
   type HeliusMonitorState,
   type HeliusSignatureWork,
   type CandidateMonitoringEvidence
@@ -50,6 +49,7 @@ import {
   createHistoricalBackfillState, fetchHeliusAddressSignaturesPage,
   type HistoricalBackfillState
 } from "../../../../src/ingestion/helius-backfill.js";
+import { enqueueHistoricalBackfillSignatures } from "../../../../src/ingestion/helius-backfill-queue.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import { evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
 import { collectWalletFundingEvidence, type WalletFundingEvidenceResult } from "../../../../src/ingestion/wallet-link-collector.js";
@@ -1647,6 +1647,79 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }, `backfill-start:${transaction.signature}`);
   }
 
+  /** Queue a completed launch-window scan from a durable cursor. */
+  private async queueCompletedHistoricalBackfill(
+    sessionId: string,
+    mint: string,
+    key: string,
+    state: HistoricalBackfillState
+  ): Promise<boolean> {
+    const cursorKey = `helius_backfill_queue_cursor:${sessionId}:${mint}`;
+    const cursor = await this.ctx.storage.get<number>(cursorKey) ?? 0;
+    const progress = enqueueHistoricalBackfillSignatures(
+      this.heliusState, state, cursor, new Date().toISOString()
+    );
+    this.heliusState = progress.state;
+
+    // Persist the queue before its cursor. If eviction happens between these
+    // writes, replay starts at the old cursor and the queue deduplicates safely.
+    await this.ctx.storage.put("helius_monitor_state", this.heliusState);
+    await this.ctx.storage.put(cursorKey, progress.cursor);
+
+    if (progress.invalid) {
+      const failedState: HistoricalBackfillState = {
+        ...state, status: "INCOMPLETE",
+        reason: "A validated historical signature could not be added to the work queue."
+      };
+      await this.ctx.storage.put(key, failedState);
+      this.heliusState = {
+        ...this.heliusState,
+        incompleteMints: [...new Set([...this.heliusState.incompleteMints, mint])].slice(-10)
+      };
+      await this.ctx.storage.put("helius_monitor_state", this.heliusState);
+      await this.appendAudit("DATA_GAP", mint, {
+        reason: "HISTORICAL_BACKFILL_QUEUE_INVALID",
+        queueCursor: progress.cursor,
+        signaturesReturned: state.signatures.length
+      }, `backfill-queue-invalid:${sessionId}:${mint}`);
+      return this.heliusState.queue.length > 0;
+    }
+
+    if (progress.overflow) {
+      await this.appendAudit("OBSERVATION", mint, {
+        historicalBackfill: "QUEUE_PAUSED",
+        pagesScanned: state.pagesScanned,
+        signaturesScanned: state.scannedCount,
+        signaturesReturned: state.signatures.length,
+        queueCursor: progress.cursor,
+        queued: progress.queued,
+        duplicates: progress.duplicates,
+        droppedSignatures: this.heliusState.droppedSignatures
+      }, `backfill-queue-paused:${sessionId}:${mint}:${progress.cursor}`);
+      return this.heliusState.queue.length > 0;
+    }
+
+    if (progress.cursor >= state.signatures.length) {
+      await this.appendAudit("OBSERVATION", mint, {
+        historicalBackfill: "COMPLETE",
+        pagesScanned: state.pagesScanned,
+        signaturesScanned: state.scannedCount,
+        signaturesReturned: state.signatures.length,
+        queued: progress.queued,
+        duplicates: progress.duplicates
+      }, `backfill-complete:${sessionId}:${mint}`);
+    } else {
+      await this.appendAudit("OBSERVATION", mint, {
+        historicalBackfill: "QUEUE_PROGRESS",
+        queueCursor: progress.cursor,
+        signaturesReturned: state.signatures.length,
+        queued: progress.queued,
+        duplicates: progress.duplicates
+      }, `backfill-queue-progress:${sessionId}:${mint}:${progress.cursor}`);
+    }
+    return this.heliusState.queue.length > 0;
+  }
+
   /** Advance one resumable address-history page and enqueue its verified launch-window signatures. */
   private async advanceHistoricalBackfill(): Promise<boolean> {
     const sessionId = this.activeSessionId;
@@ -1656,7 +1729,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     for (const mint of mints) {
       const key = `helius_backfill:${sessionId}:${mint}`;
       const state = await this.ctx.storage.get<HistoricalBackfillState>(key);
-      if (!state || state.status === "COMPLETE" || state.status === "INCOMPLETE") continue;
+      if (!state || state.status === "INCOMPLETE") continue;
+      if (state.status === "COMPLETE") {
+        const cursorKey = `helius_backfill_queue_cursor:${sessionId}:${mint}`;
+        const cursor = await this.ctx.storage.get<number>(cursorKey) ?? 0;
+        if (cursor < state.signatures.length) {
+          return this.queueCompletedHistoricalBackfill(sessionId, mint, key, state);
+        }
+        continue;
+      }
       while (!this.heliusBucket.tryTake()) {
         await new Promise(resolve => setTimeout(resolve, this.heliusBucket.retryAfterMs));
         if (!this.status.enabled || this.activeSessionId !== sessionId) return false;
@@ -1687,23 +1768,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         }, `backfill-page:${sessionId}:${mint}:${page.state.pagesScanned}`);
         return true;
       }
-      let queued = 0;
-      let duplicates = 0;
-      for (const signature of page.signaturesToFetch) {
-        const result = enqueueHeliusSignatureWork(this.heliusState, {
-          signature: signature.signature, mint, slot: signature.slot
-        }, new Date().toISOString());
-        this.heliusState = result.state;
-        if (result.outcome === "QUEUED") queued += 1;
-        if (result.outcome === "DUPLICATE") duplicates += 1;
-      }
-      await this.ctx.storage.put("helius_monitor_state", this.heliusState);
-      await this.appendAudit("OBSERVATION", mint, {
-        historicalBackfill: "COMPLETE", pagesScanned: page.state.pagesScanned,
-        signaturesScanned: page.state.scannedCount,
-        signaturesReturned: page.signaturesToFetch.length, queued, duplicates
-      }, `backfill-complete:${sessionId}:${mint}`);
-      return this.heliusState.queue.length > 0;
+      return this.queueCompletedHistoricalBackfill(sessionId, mint, key, page.state);
     }
     return false;
   }
