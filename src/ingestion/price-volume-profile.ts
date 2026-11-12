@@ -238,6 +238,10 @@ export function buildCandidatePriceVolumeProfiles(
       const price = priceOf(event);
       const amount = quoteAmount(event);
       if (price === null || amount <= 0n) continue;
+      if (event.quoteMint === SOL_QUOTE_MINT && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0) {
+        const notionalUsd = Number(amount) / 1_000_000_000 * options.solUsdPriceUsd!;
+        if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) continue;
+      }
       group.trades.push({
         event, timestamp, price, quoteAmount: amount,
         slot: transaction.slot, signature: transaction.signature
@@ -382,15 +386,21 @@ export function buildCandidatePriceVolumeProfiles(
       impulseVolume,
       pullbackVolume,
       reclaimVolume,
-      pullbackVolumeVsImpulsePct: volumeRatioPct(pullbackVolume, impulseVolume),
-      reclaimVolumeVsPullbackPct: volumeRatioPct(reclaimVolume, pullbackVolume),
+      pullbackVolumeVsImpulsePct: group.quoteMint === SOL_QUOTE_MINT && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
+        ? volumeRatioPct(pullbackVolume, impulseVolume) : null,
+      reclaimVolumeVsPullbackPct: group.quoteMint === SOL_QUOTE_MINT && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
+        ? volumeRatioPct(reclaimVolume, pullbackVolume) : null,
       buckets,
       profileStatus,
       coverageStatus,
       dataComplete: coverageStatus === "COMPLETE_FROM_LAUNCH" &&
         buckets.at(-1)?.endTime === Math.floor(now / PRICE_VOLUME_BUCKET_SECONDS) * PRICE_VOLUME_BUCKET_SECONDS,
       coverage: "OBSERVED_EVENTS_ONLY",
-      entryEligible: false
+      entryEligible: false,
+      microTradeFilterStatus: group.quoteMint !== SOL_QUOTE_MINT
+        ? "UNSUPPORTED_QUOTE"
+        : Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
+          ? "APPLIED" : "UNAVAILABLE"
     });
   }
   return output.sort((a, b) => a.mint.localeCompare(b.mint) ||
