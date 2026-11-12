@@ -379,12 +379,18 @@ function hydrateEventBigInts(value: unknown, fields: readonly string[]): Record<
   for (const field of fields) {
     const raw = event[field];
     if (typeof raw === "bigint") continue;
-    if (typeof raw === "string" && /^\d+$/.test(raw)) {
+    // Pump event timestamps are signed i64 values; amount/reserve/fee fields
+    // are unsigned u64 values. Validate them separately.
+    const signed = field === "timestamp" || field === "lastUpdateTimestamp";
+    const integerPattern = signed ? /^-?\d+$/ : /^\d+$/;
+    if (typeof raw === "string" && integerPattern.test(raw)) {
       event[field] = BigInt(raw);
-    } else if (typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0) {
+    } else if (typeof raw === "number" && Number.isSafeInteger(raw) &&
+        (signed || raw >= 0)) {
       event[field] = BigInt(raw);
     } else {
-      throw new Error(`Archived Pump event field ${field} is not a valid base-unit integer.`);
+      const received = raw === undefined ? "missing" : `${typeof raw}: ${String(raw)}`;
+      throw new Error(`Archived Pump event field ${field} is not a valid ${signed ? "signed" : "unsigned"} integer (${received}).`);
     }
   }
   return event;
