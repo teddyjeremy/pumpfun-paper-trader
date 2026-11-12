@@ -11,6 +11,7 @@ import {
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
 import { buildCandidateTradeFlows } from "../../../../src/ingestion/trade-flow.js";
+import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import {
   applyDiscoveryEvent,
@@ -341,6 +342,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       (a.largestBuyerShareAcrossLatestThreeBps ?? Number.MAX_SAFE_INTEGER) -
         (b.largestBuyerShareAcrossLatestThreeBps ?? Number.MAX_SAFE_INTEGER)
     );
+    const priceVolumeProfiles = buildCandidatePriceVolumeProfiles(this.verifiedTransactions, {
+      incompleteMints,
+      coverageStartByMint,
+      candidateMints: this.discovery.candidates
+        .filter(candidate => candidate.status === "DISCOVERED")
+        .map(candidate => candidate.mint)
+    });
     return {
       provider: "helius",
       mode: "paper",
@@ -360,7 +368,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             : subscription ? "SUBSCRIPTION_PENDING" : "NOT_MONITORED"
         };
       }),
-      flows: rankedFlows.map((flow, index) => ({ rank: index + 1, ...flow }))
+      flows: rankedFlows.map((flow, index) => ({ rank: index + 1, ...flow })),
+      priceVolumeProfiles
     };
   }
 
