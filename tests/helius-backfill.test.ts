@@ -80,4 +80,48 @@ describe("bounded Helius historical backfill", () => {
     });
     expect(state.status).toBe("INCOMPLETE");
   });
+  it("does not mark coverage complete when the create signature has no or mismatched block time", () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const missing = applyAddressSignaturesPage(initial, [
+      { signature: create, slot: 10, blockTime: null, err: null }
+    ]);
+    const mismatched = applyAddressSignaturesPage(initial, [
+      { signature: create, slot: 10, blockTime: 1001, err: null }
+    ]);
+    expect(missing.status).toBe("INCOMPLETE");
+    expect(mismatched.status).toBe("INCOMPLETE");
+  });
+
+  it("counts only records through the create signature when a provider page continues past the cap", () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000, maxSignatures: 120
+    });
+    const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    const firstPage = Array.from({ length: 100 }, (_, i) => ({
+      signature: "8".repeat(63) + alphabet[i % alphabet.length],
+      slot: 200 - i, blockTime: 1100 - i, err: null
+    }));
+    const first = applyAddressSignaturesPage(initial, firstPage);
+    expect(first.status).toBe("CONTINUE");
+    const secondPage = [
+      ...Array.from({ length: 19 }, (_, i) => ({
+        signature: "9".repeat(63) + alphabet[i % alphabet.length],
+        slot: 100 - i, blockTime: 1000, err: null
+      })),
+      { signature: create, slot: 10, blockTime: 1000, err: null }
+    ];
+    const second = applyAddressSignaturesPage(first.state, secondPage);
+    expect(second.status).toBe("COMPLETE");
+    expect(second.state.scannedCount).toBe(120);
+    expect(second.signaturesToFetch).toHaveLength(120);
+  });
+
+  it("rejects invalid verified launch timestamps", () => {
+    expect(() => createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: Number.NaN
+    })).toThrow(/launch block time/);
+  });
+
 });
