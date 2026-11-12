@@ -48,12 +48,12 @@ const DEFAULT_QUOTE_TTL_MS = 2_000;
 const MAX_QUOTE_TTL_MS = 2_000;
 const MAX_SOL_USD_AGE_MS = 10_000;
 
-function assertBaseUnits(value: string, label: string): bigint {
+function assertBaseUnits(value: string, label: string, allowZero = false): bigint {
   if (!/^\\d+$/.test(value) || value.length > 20) {
     throw new Error(`${label} must be an unsigned base-unit integer.`);
   }
   const amount = BigInt(value);
-  if (amount <= 0n || amount > 18_446_744_073_709_551_615n) {
+  if ((allowZero ? amount < 0n : amount <= 0n) || amount > 18_446_744_073_709_551_615n) {
     throw new Error(`${label} must be a positive u64 amount.`);
   }
   return amount;
@@ -78,7 +78,7 @@ function baseUnitsToNumber(amount: string, decimals: number): number {
 }
 
 function solLamportsToUsd(lamports: string, solUsd: number): number {
-  const amount = assertBaseUnits(lamports, "SOL fee");
+  const amount = assertBaseUnits(lamports, "SOL fee", true);
   return Number(amount) / Number(LAMPORTS_PER_SOL) * solUsd;
 }
 
