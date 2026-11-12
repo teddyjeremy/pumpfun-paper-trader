@@ -71,6 +71,33 @@ describe("verified Pump.fun trade-flow windows", () => {
     expect(flow?.dataComplete).toBe(false);
   });
 
+  it("never confirms flow when the candidate has a known data gap", () => {
+    const events = [
+      trade(100n, trader(1), true, 10n), trade(100n, trader(2), true, 10n), trade(100n, trader(3), true, 10n),
+      trade(102n, trader(2), true, 10n), trade(102n, trader(3), true, 10n), trade(102n, trader(4), true, 10n),
+      trade(104n, trader(3), true, 10n), trade(104n, trader(4), true, 10n), trade(104n, trader(5), true, 10n)
+    ];
+    const [flow] = buildCandidateTradeFlows([tx(events)], {
+      nowSeconds: 106, horizonSeconds: 60, incompleteMints: [mint]
+    });
+    expect(flow?.latestThreeWindowFlowPass).toBe(true);
+    expect(flow?.dataComplete).toBe(false);
+    expect(flow?.flowConfirmationPass).toBe(false);
+  });
+
+  it("requires three complete windows to start after subscription confirmation", () => {
+    const events = [
+      trade(100n, trader(1), true, 10n), trade(100n, trader(2), true, 10n), trade(100n, trader(3), true, 10n),
+      trade(102n, trader(2), true, 10n), trade(102n, trader(3), true, 10n), trade(102n, trader(4), true, 10n),
+      trade(104n, trader(3), true, 10n), trade(104n, trader(4), true, 10n), trade(104n, trader(5), true, 10n)
+    ];
+    const [flow] = buildCandidateTradeFlows([tx(events)], {
+      nowSeconds: 106, horizonSeconds: 60, coverageStartByMint: { [mint]: 101 }
+    });
+    expect(flow?.dataComplete).toBe(false);
+    expect(flow?.flowConfirmationPass).toBe(false);
+  });
+
   it("keeps non-SOL quote mint amounts separate and raw", () => {
     const quoteMint = "TokenQuoteMint111111111111111111111111111";
     const events = [
