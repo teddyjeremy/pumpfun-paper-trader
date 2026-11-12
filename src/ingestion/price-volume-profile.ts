@@ -302,20 +302,23 @@ export function buildCandidatePriceVolumeProfiles(
     if (pullbackIndex >= 0 && pullbackLowIndex >= 0 && !tooDeep) {
       for (let i = pullbackIndex; i < buckets.length; i += 1) {
         const bucket = buckets[i]!;
+        // A bucket that makes a new pullback low cannot also confirm reclaim:
+        // its intrabucket high/low ordering is not precise enough at 5s resolution.
+        if (bucket.lowPrice < lowPrice) {
+          lowPrice = bucket.lowPrice;
+          pullbackLowIndex = i;
+          if (((peakPrice - lowPrice) / peakPrice) * 100 > 40) {
+            tooDeep = true;
+            break;
+          }
+          continue;
+        }
         if (i > pullbackLowIndex) {
           const previousHigh = buckets[i - 1]!.highPrice;
           const reclaimPct = ((bucket.highPrice / previousHigh) - 1) * 100;
           if (reclaimPct >= 1) {
             reclaimIndex = i;
             reclaimAbovePct = reclaimPct;
-            break;
-          }
-        }
-        if (bucket.lowPrice < lowPrice) {
-          lowPrice = bucket.lowPrice;
-          pullbackLowIndex = i;
-          if (((peakPrice - lowPrice) / peakPrice) * 100 > 40) {
-            tooDeep = true;
             break;
           }
         }
