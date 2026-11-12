@@ -139,8 +139,11 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
   // A known failure of any mandatory entry rule rejects the candidate.
   // Missing evidence remains UNKNOWN/WATCH and is never silently treated as a pass.
   const rejectionReasons = rules.filter(rule => rule.status === "FAIL").map(rule => rule.rule);
-  const watchReasons: string[] = [];
-  const blockingUnknownRules = rules.filter(rule => rule.status === "UNKNOWN").map(rule => rule.rule);
+  // Surface every missing-evidence blocker in the WATCH explanation so the
+  // operator can distinguish an ineligible setup from an eligible-but-unproven one.
+  const unknownRules = rules.filter(rule => rule.status === "UNKNOWN");
+  const watchReasons = unknownRules.map(rule => `${rule.rule}: ${rule.reason}`);
+  const blockingUnknownRules = unknownRules.map(rule => rule.rule);
   return {
     decision: rejectionReasons.length > 0 ? "REJECT" : "WATCH",
     buyAllowed: false, evaluatedAt, rules, rejectionReasons, watchReasons, blockingUnknownRules
