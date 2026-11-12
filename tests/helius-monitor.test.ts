@@ -32,6 +32,15 @@ describe("bounded Helius candidate monitor", () => {
     const invalid = { ...candidate(2), bondingCurve: null };
     expect(selectHeliusCandidates([migrated, invalid])).toEqual([]);
   });
+  it("prioritizes identity completeness and repeated evidence without rejecting unknown creators", () => {
+    const newest = candidate(9);
+    const observed = { ...candidate(1), creator: key(90), observations: 4 };
+    const unknown = candidate(2);
+    const selected = selectHeliusCandidates([newest, unknown, observed], 3);
+    expect(selected.map(item => item.mint)).toEqual([
+      observed.mint, newest.mint, unknown.mint
+    ]);
+  });
   it("reconciles subscription intent and clears old socket IDs on reconnect", () => {
     let state = reconcileHeliusSubscriptions(emptyHeliusMonitorState(), [candidate(0)]);
     const requestId = state.subscriptions[0]!.requestId;
