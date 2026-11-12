@@ -72,9 +72,12 @@ export const PAPER_PORTFOLIO_POLICY = Object.freeze({
 });
 const round = (value: number) => Math.round((value + Number.EPSILON) * 1e8) / 1e8;
 function quoteFeesUsd(quote: ExecutablePaperQuote): number {
+  // The aggregate SDK fee replaces protocol+creator components when the
+  // SDK cannot safely split them. Pool fees remain separately accounted.
+  const pumpVenueFee = quote.pumpFeeUsd ??
+    (quote.protocolFeeUsd + quote.creatorFeeUsd);
   return quote.networkFeeUsd + quote.priorityFeeUsd + quote.providerFeeUsd +
-    quote.protocolFeeUsd + quote.creatorFeeUsd + quote.poolFeeUsd +
-    (quote.pumpFeeUsd ?? 0) + quote.transferFeeUsd;
+    pumpVenueFee + quote.poolFeeUsd + quote.transferFeeUsd;
 }
 function validPositive(value: number): boolean { return Number.isFinite(value) && value > 0; }
 function humanTokenAmount(amountBaseUnits: string, decimals: number): number {
@@ -83,6 +86,10 @@ function humanTokenAmount(amountBaseUnits: string, decimals: number): number {
   return amount;
 }
 function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL", mint: string): void {
+  if (quote.pumpFeeUsd !== undefined &&
+      (!Number.isFinite(quote.pumpFeeUsd) || quote.pumpFeeUsd < 0)) {
+    throw new Error("Aggregate Pump SDK fee is invalid.");
+  }
   if (!Number.isFinite(now)) throw new Error("Quote validation clock is invalid.");
   if (!quote.executable || quote.side !== side || quote.mint !== mint ||
       !quote.quoteId || !quote.provider || !quote.routeId) throw new Error("Executable quote identity or status is invalid.");
