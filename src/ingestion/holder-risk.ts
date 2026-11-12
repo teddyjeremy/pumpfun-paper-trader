@@ -55,7 +55,7 @@ export async function fetchHolderConcentration(
   const fetcher = config.fetcher ?? fetch;
   const url = buildHeliusRpcUrl(config.apiKey);
 
-  const supplyResponse = await rpcCall(fetcher, url, "getTokenSupply", [mint]);
+  const supplyResponse = await rpcCall(fetcher, url, "getTokenSupply", [mint, { commitment: "confirmed" }]);
   if (!supplyResponse.ok) {
     return { status: "DATA_INCOMPLETE", mint, reason: supplyResponse.reason };
   }
@@ -70,7 +70,7 @@ export async function fetchHolderConcentration(
   if (!largestResponse.ok) {
     return { status: "DATA_INCOMPLETE", mint, reason: largestResponse.reason };
   }
-  const largestValue = record(record(largestResponse.result)?.value);
+  const largestValue = record(largestResponse.result)?.value;
   if (!Array.isArray(largestValue) || largestValue.length === 0 || largestValue.length > HOLDER_ACCOUNT_LIMIT) {
     return { status: "DATA_INCOMPLETE", mint, reason: "Helius returned an empty or malformed largest-account list." };
   }
@@ -96,7 +96,7 @@ export async function fetchHolderConcentration(
   if (!accountsResponse.ok) {
     return { status: "DATA_INCOMPLETE", mint, reason: accountsResponse.reason };
   }
-  const accountValues = record(record(accountsResponse.result)?.value);
+  const accountValues = record(accountsResponse.result)?.value;
   if (!Array.isArray(accountValues) || accountValues.length !== addresses.length) {
     return { status: "DATA_INCOMPLETE", mint, reason: "Token-account owner lookup returned an incomplete result." };
   }
