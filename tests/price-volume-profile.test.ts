@@ -79,6 +79,31 @@ describe("observed price and stage-volume profile", () => {
     expect(profile?.dataComplete).toBe(true);
   });
 
+  it("does not infer a pullback from high and low prices inside the same five-second bucket", () => {
+    const tx = transaction([trade(105n, 1_250n), trade(105n, 700n)]);
+    tx.createEvents = [createEvent()];
+    const [profile] = buildCandidatePriceVolumeProfiles([tx], {
+      nowSeconds: 110, horizonSeconds: 60, coverageStartByMint: { [mint]: 100 }
+    });
+    expect(profile?.profileStatus).toBe("IMPULSE_ONLY");
+    expect(profile?.pullbackPct).toBeNull();
+    expect(profile?.reclaimDetected).toBe(false);
+  });
+
+  it("does not compare reclaim against a non-adjacent five-second bucket", () => {
+    const tx = transaction([
+      trade(105n, 1_250n),
+      trade(110n, 1_050n),
+      trade(120n, 1_200n)
+    ]);
+    tx.createEvents = [createEvent()];
+    const [profile] = buildCandidatePriceVolumeProfiles([tx], {
+      nowSeconds: 125, horizonSeconds: 60, coverageStartByMint: { [mint]: 100 }
+    });
+    expect(profile?.profileStatus).toBe("PULLBACK_IN_PROGRESS");
+    expect(profile?.reclaimDetected).toBe(false);
+  });
+
   it("does not call a greater-than-40% drawdown a valid pullback", () => {
     const [profile] = buildCandidatePriceVolumeProfiles([
       transaction([
