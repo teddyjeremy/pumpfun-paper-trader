@@ -128,14 +128,20 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
     highWaterPriceUsdPerToken: entryPrice, latestPriceUsdPerToken: entryPrice,
     realizedPnlUsd: null, status: "OPEN", exitReason: null
   };
-  const availableCashUsd = round(state.availableCashUsd - stake);
+  const availableCashUsd = round(state.availableCashUsd - stake - buyCosts);
+  if (availableCashUsd < 0) throw new Error("Buy fees exceed available paper cash.");
   const positions = [...state.positions, position];
   const equity = round(availableCashUsd + positions.reduce((sum, p) =>
     sum + (p.status === "OPEN" ? p.stakeUsd : 0), 0));
-  const limits = capacityForEquity(Math.max(state.highWaterEquityUsd, equity), state.bankroll.initialBankrollUsd);
+  const bankroll = markPaperEquity(state.bankroll, equity);
+  const topped = replenishPaperBankroll(bankroll, input.occurredAt,
+    PAPER_PORTFOLIO_POLICY.topUpUsd, PAPER_PORTFOLIO_POLICY.topUpBelowUsd);
+  const cashAfterTopUp = round(availableCashUsd + (topped.event ? PAPER_PORTFOLIO_POLICY.topUpUsd : 0));
+  const limits = capacityForEquity(Math.max(state.highWaterEquityUsd, topped.state.currentEquityUsd), state.bankroll.initialBankrollUsd);
   return {
-    state: { ...state, availableCashUsd, positions, enteredMints: [...state.enteredMints, input.mint],
-      highWaterEquityUsd: Math.max(state.highWaterEquityUsd, equity),
+    state: { ...state, bankroll: topped.state, availableCashUsd: cashAfterTopUp,
+      positions, enteredMints: [...state.enteredMints, input.mint],
+      highWaterEquityUsd: Math.max(state.highWaterEquityUsd, topped.state.currentEquityUsd),
       positionSizeUsd: limits.stake, maxConcurrentPositions: limits.slots },
     position
   };
@@ -150,7 +156,18 @@ export function markPaperPosition(state: PaperPortfolioState, input: {
   const previous = positions[index]!;
   positions[index] = { ...previous, latestPriceUsdPerToken: input.priceUsdPerToken,
     highWaterPriceUsdPerToken: Math.max(previous.highWaterPriceUsdPerToken, input.priceUsdPerToken) };
-  return { ...state, positions, lastMarkedAt: input.markedAt };
+  const markedValue = (position: PaperPosition) => position.status === "OPEN"
+    ? Number(BigInt(position.tokenAmountBaseUnits)) * position.latestPriceUsdPerToken : 0;
+  const equity = round(state.availableCashUsd + positions.reduce((sum, position) => sum + markedValue(position), 0));
+  const bankroll = markPaperEquity(state.bankroll, equity);
+  const topped = replenishPaperBankroll(bankroll, input.markedAt,
+    PAPER_PORTFOLIO_POLICY.topUpUsd, PAPER_PORTFOLIO_POLICY.topUpBelowUsd);
+  const limits = capacityForEquity(Math.max(state.highWaterEquityUsd, topped.state.currentEquityUsd), state.bankroll.initialBankrollUsd);
+  return { ...state, bankroll: topped.state,
+    availableCashUsd: round(state.availableCashUsd + (topped.event ? PAPER_PORTFOLIO_POLICY.topUpUsd : 0)),
+    positions, lastMarkedAt: input.markedAt,
+    highWaterEquityUsd: Math.max(state.highWaterEquityUsd, topped.state.currentEquityUsd),
+    positionSizeUsd: limits.stake, maxConcurrentPositions: limits.slots };
 }
 export function closePaperPosition(state: PaperPortfolioState, input: {
   positionId: string; sellQuote: ExecutablePaperQuote; exitReason: string; closedAt: string; nowMs?: number;
@@ -170,7 +187,7 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
   const positions = [...state.positions]; positions[index] = position;
   const availableCashUsd = round(state.availableCashUsd + netProceeds);
   const equity = round(availableCashUsd + positions.filter(p => p.status === "OPEN")
-    .reduce((sum, p) => sum + p.stakeUsd, 0));
+    .reduce((sum, p) => sum + Number(BigInt(p.tokenAmountBaseUnits)) * p.latestPriceUsdPerToken, 0));
   const bankroll = markPaperEquity(state.bankroll, equity);
   const topped = replenishPaperBankroll(bankroll, input.closedAt,
     PAPER_PORTFOLIO_POLICY.topUpUsd, PAPER_PORTFOLIO_POLICY.topUpBelowUsd);

@@ -32,12 +32,16 @@ describe("paper portfolio accounting",()=>{
   expect(closed.position.status).toBe("CLOSED");
   expect(closed.position.realizedPnlUsd).toBeCloseTo(0.496);
  });
- it("records an automatic top-up only below $1",()=>{
-  const p=createPaperPortfolio();
-  const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
-  const lossQuote=quote("mint","SELL","1000000",0.25);
-  const closed=closePaperPosition(opened.state,{positionId:"p1",sellQuote:lossQuote,exitReason:"STOP",closedAt:now,nowMs:Date.parse(now)});
-  expect(closed.state.bankroll.topUpCount).toBe(1);
-  expect(closed.state.bankroll.totalTopUpsUsd).toBe(2.7);
+ it("records an automatic top-up only after cumulative losses take equity below $1",()=>{
+  let state=createPaperPortfolio();
+  for (let i=1;i<=3;i++) {
+   const mint="mint"+i;
+   const opened=openPaperPosition(state,{mint,positionId:"p"+i,occurredAt:now,buyQuote:quote(mint,"BUY"),sellQuote:quote(mint,"SELL"),nowMs:Date.parse(now)});
+   const lossQuote=quote(mint,"SELL","1000000",0.25);
+   const closed=closePaperPosition(opened.state,{positionId:"p"+i,sellQuote:lossQuote,exitReason:"STOP",closedAt:now,nowMs:Date.parse(now)});
+   state=closed.state;
+  }
+  expect(state.bankroll.topUpCount).toBe(1);
+  expect(state.bankroll.totalTopUpsUsd).toBe(2.7);
  });
 });
