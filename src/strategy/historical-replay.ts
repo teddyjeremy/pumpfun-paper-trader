@@ -402,7 +402,8 @@ export function hydrateArchivedVerifiedTransaction(value: unknown): VerifiedPump
   if (typeof raw.mint !== "string" || !address.test(raw.mint) ||
       typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(signature) ||
       typeof slot !== "number" || !Number.isSafeInteger(slot) || slot < 0 ||
-      raw.provider !== "helius" || !["confirmed","finalized"].includes(String(raw.commitment)) ||
+      raw.provider !== "helius" || raw.source !== "HISTORICAL_BACKFILL" ||
+      !["confirmed","finalized"].includes(String(raw.commitment)) ||
       typeof raw.receivedAt !== "string" || !Number.isFinite(Date.parse(raw.receivedAt)) ||
       !Array.isArray(raw.createEvents) || !Array.isArray(raw.tradeEvents)) {
     throw new Error("Archived Helius transaction failed identity or provenance validation.");
