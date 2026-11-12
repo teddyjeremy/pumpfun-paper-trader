@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm test",
+    "check": "npm run typecheck && npm test && npm run build",
     "db:migrate": "npm run build && node dist/src/db/migrate.js"
   },
   "dependencies": {
