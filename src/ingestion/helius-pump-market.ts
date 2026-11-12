@@ -32,9 +32,10 @@ export async function refreshPumpMarketStateFromHelius(input: {
     return { ...input.state, status: "EXIT_BLOCKED", pool: null,
       reason: "Helius account verifier received an invalid local timestamp." };
   }
+  let curveAddress: string;
   let curveAccount: RawProgramAccount | null;
   try {
-    const curveAddress = derivePumpBondingCurvePda(input.state.mint);
+    curveAddress = derivePumpBondingCurvePda(input.state.mint);
     const snapshot = await fetchHeliusMultipleAccounts([curveAddress], input.config);
     curveAccount = snapshot.accounts[0] ?? null;
   } catch (error) {
@@ -76,17 +77,23 @@ export async function refreshPumpMarketStateFromHelius(input: {
       return { ...curveState, reason: "Curve is complete; canonical PumpSwap pool has not been discovered yet." };
     }
 
-    const poolSnapshot = await fetchHeliusMultipleAccounts(
-      [candidate.pool.address, candidate.pool.baseVault, candidate.pool.quoteVault], input.config
+    // Re-fetch curve + pool + both vaults together so the final decision uses
+    // one fresh RPC context slot rather than mixing observations across slots.
+    const marketSnapshot = await fetchHeliusMultipleAccounts(
+      [curveAddress, candidate.pool.address, candidate.pool.baseVault, candidate.pool.quoteVault], input.config
     );
-    const [poolAccount, baseVaultAccount, quoteVaultAccount] = poolSnapshot.accounts;
-    if (!poolAccount || !baseVaultAccount || !quoteVaultAccount) {
-      return { ...curveState, reason: "Curve is complete; canonical pool or one of its vault accounts is not yet available." };
+    const [freshCurveAccount, poolAccount, baseVaultAccount, quoteVaultAccount] = marketSnapshot.accounts;
+    if (!freshCurveAccount || !poolAccount || !baseVaultAccount || !quoteVaultAccount) {
+      return { ...curveState, reason: "Curve is complete; canonical curve, pool or vault account is not yet available in the same snapshot." };
     }
     nowMs = (input.config.now ?? Date.now)();
     if (!Number.isFinite(nowMs)) throw new Error("Invalid pool verification timestamp.");
+    const freshCurveState = applyVerifiedPumpCurveAccount({
+      state: curveState, account: freshCurveAccount, nowMs
+    });
+    if (freshCurveState.status !== "MIGRATION_PENDING") return freshCurveState;
     return applyVerifiedPumpSwapPoolAccounts({
-      state: curveState, poolAccount, baseVaultAccount, quoteVaultAccount, nowMs
+      state: freshCurveState, poolAccount, baseVaultAccount, quoteVaultAccount, nowMs
     });
   } catch (error) {
     return {
