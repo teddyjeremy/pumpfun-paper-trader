@@ -46,6 +46,9 @@ export interface HistoricalSetupSnapshot {
   creatorSellRiskStatus: "REJECT_OBSERVED" | "PASS_COMPLETE" | "PENDING" | "UNKNOWN";
   walletClusterRiskStatus: "REJECT_OBSERVED" | "PASS_COMPLETE" | "UNKNOWN";
   walletClusterAttributionStatus: "CONFIRMED_LINKS" | "NO_HIGH_CONFIDENCE_LINKS" | "INVALID_EVIDENCE" | "UNKNOWN";
+  /** Full strict-strategy gate; false whenever creator or linked-wallet clearance is missing. */
+  strictStrategyEligible: boolean;
+  /** Market-pattern candidate only; does not imply creator/cluster or execution clearance. */
   setupEligible: boolean;
 }
 
@@ -246,8 +249,7 @@ export function replayHistoricalCoin(
       const walletClusterRiskStatus = walletRisk?.status === "REJECT_OBSERVED"
         ? "REJECT_OBSERVED"
         : input.walletClusterEvidenceComplete && walletRisk !== null ? "PASS_COMPLETE" : "UNKNOWN";
-      const setupEligible = input.decodeComplete && creatorRiskStatus === "PASS_COMPLETE" &&
-        walletClusterRiskStatus === "PASS_COMPLETE" && profile.dataComplete &&
+      const setupEligible = input.decodeComplete && profile.dataComplete &&
         profile.microTradeFilterStatus === "APPLIED" &&
         profile.reclaimDetected && profile.pullbackVolumeVsImpulsePct !== null &&
         profile.reclaimVolumeVsPullbackPct !== null &&
@@ -269,6 +271,7 @@ export function replayHistoricalCoin(
         creatorSellRiskStatus: creatorRiskStatus,
         walletClusterRiskStatus,
         walletClusterAttributionStatus: walletRisk?.attributionStatus ?? "UNKNOWN",
+        strictStrategyEligible: setupEligible && creatorRiskStatus === "PASS_COMPLETE" && walletClusterRiskStatus === "PASS_COMPLETE",
         setupEligible
       };
       snapshots.push(snapshot);
