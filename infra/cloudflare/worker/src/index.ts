@@ -5,7 +5,7 @@ import {
 } from "../../../../src/ingestion/helius.js";
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
-  reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork,
+  reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork, resetHeliusSubscriptionIds,
   type HeliusMonitorState
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
@@ -123,6 +123,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
     this.heliusState = normalizeHeliusMonitorState(await this.ctx.storage.get<HeliusMonitorState>("helius_monitor_state"));
     this.verifiedTransactions = (await this.ctx.storage.get<VerifiedPumpTransaction[]>("verified_transactions")) ?? [];
+    this.heliusState = resetHeliusSubscriptionIds(this.heliusState);
     if (savedDiscovery) this.discovery = { ...emptyDiscoveryStore(), ...savedDiscovery, expired: savedDiscovery.expired ?? 0 };
     this.status.enabled = enabled === true;
     // Outbound sockets cannot survive a Durable Object restart.
@@ -351,8 +352,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           return;
         }
         this.status.heliusConnected = true;
+        this.heliusState = resetHeliusSubscriptionIds(this.heliusState);
         this.sendHeliusSubscriptions();
-        void this.persist().catch(() => undefined);
+        void this.persist().then(() => this.drainHeliusQueue()).catch(() => undefined);
       });
       socket.addEventListener("message", (message: MessageEvent) => {
         if (this.heliusSocket !== socket || !this.status.enabled || typeof message.data !== "string") return;
