@@ -7,7 +7,8 @@ import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork, resetHeliusSubscriptionIds,
   type HeliusMonitorState,
-  type HeliusSignatureWork
+  type HeliusSignatureWork,
+  type CandidateMonitoringEvidence
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
 import { buildCandidateTradeFlows } from "../../../../src/ingestion/trade-flow.js";
@@ -504,9 +505,59 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
+  private monitoringEvidenceByMint(): Record<string, CandidateMonitoringEvidence> {
+    const candidateMints = this.discovery.candidates
+      .filter(candidate => candidate.status === "DISCOVERED")
+      .map(candidate => candidate.mint);
+    const confirmed = this.heliusState.subscriptions.filter(item =>
+      item.subscriptionId !== null && item.subscribedAt !== null
+    );
+    const coverageStartByMint = Object.fromEntries(confirmed.flatMap(item => {
+      const timestamp = Date.parse(item.subscribedAt ?? "");
+      return Number.isFinite(timestamp) ? [[item.mint, Math.ceil(timestamp / 2_000) * 2]] : [];
+    }));
+    const flows = buildCandidateTradeFlows(this.verifiedTransactions, {
+      incompleteMints: this.heliusState.incompleteMints,
+      coverageStartByMint,
+      candidateMints
+    });
+    const creatorRisk = evaluateCreatorSellRisk(this.verifiedTransactions, {
+      nowSeconds: Math.floor(Date.now() / 1_000),
+      candidateMints,
+      incompleteMints: this.heliusState.incompleteMints,
+      coverageStartByMint
+    });
+    const flowByMint = new Map(flows.map(item => [item.mint, item]));
+    const creatorByMint = new Map(creatorRisk.map(item => [item.mint, item]));
+    return Object.fromEntries(candidateMints.map(mint => {
+      const flow = flowByMint.get(mint);
+      const creator = creatorByMint.get(mint);
+      const dataComplete = Boolean(flow?.dataComplete);
+      const flowConfirmed = Boolean(flow?.flowConfirmationPass);
+      const creatorClearanceComplete = creator?.status === "PASS_COMPLETE";
+      const score =
+        (creatorClearanceComplete ? 1_000 : 0) +
+        (flowConfirmed ? 500 : 0) +
+        (dataComplete ? 250 : 0) +
+        (flow?.latestThreeWindowFlowPass ? 100 : 0) +
+        Math.min(flow?.distinctBuyersAcrossLatestThree ?? 0, 20) * 2 -
+        Math.floor((flow?.largestBuyerShareAcrossLatestThreeBps ?? 10_000) / 100);
+      return [mint, {
+        score,
+        hardRejected: creator?.status === "REJECT_OBSERVED",
+        creatorClearanceComplete,
+        flowConfirmed,
+        dataComplete
+      }];
+    }));
+  }
+
   private reconcileHelius(): void {
     const previous = this.heliusState.subscriptions;
-    const next = reconcileHeliusSubscriptions(this.heliusState, this.discovery.candidates);
+    const evidenceByMint = this.monitoringEvidenceByMint();
+    const next = reconcileHeliusSubscriptions(
+      this.heliusState, this.discovery.candidates, new Date().toISOString(), evidenceByMint
+    );
     const retainedMints = new Set(next.subscriptions.map(item => item.mint));
     const socket = this.heliusSocket;
     if (socket?.readyState === WebSocket.OPEN) {
@@ -613,7 +664,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private sendHeliusSubscriptions(): void {
     const socket = this.heliusSocket;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    this.heliusState = reconcileHeliusSubscriptions(this.heliusState, this.discovery.candidates);
+    this.heliusState = reconcileHeliusSubscriptions(
+      this.heliusState, this.discovery.candidates, new Date().toISOString(), this.monitoringEvidenceByMint()
+    );
     try {
       for (const subscription of this.heliusState.subscriptions) {
         if (subscription.subscriptionId !== null) continue;
