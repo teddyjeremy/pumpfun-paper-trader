@@ -155,7 +155,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private heliusState: HeliusMonitorState = emptyHeliusMonitorState();
   private heliusBucket = new TokenBucket(2, 2);
   private drainingHelius = false;
-  private verifiedTransactions: VerifiedPumpTransaction[] = [];
+  private verifiedTransactions: Array<VerifiedPumpTransaction & { receivedAt?: string }> = [];
   private walletLinkSnapshots: Record<string, WalletFundingEvidenceResult> = {};
   private walletHoldingsByMint: Record<string, WalletHoldingEvidence[]> = {};
   private status: CoordinatorStatus = { ...INITIAL_STATUS };
@@ -309,11 +309,21 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           `helius_backfill:${sessionId}:${transaction.mint}`
         );
         if (!state) continue;
+        const historicalSignature = state.signatures.find(item => item.signature === transaction.signature);
+        if (historicalSignature && historicalSignature.slot !== transaction.slot) {
+          throw new Error("Verified transaction slot conflicts with historical signature evidence.");
+        }
         const response = await this.postPostgresIngest("/internal/helius-backfill", {
           sessionId: sessionId,
           mint: transaction.mint,
           state,
-          transaction: jsonSafe(transaction)
+          transaction: {
+            ...jsonSafe(transaction) as Record<string, unknown>,
+            provider: "helius",
+            commitment: "confirmed",
+            receivedAt: transaction.receivedAt ?? new Date().toISOString(),
+            source: historicalSignature ? "HISTORICAL_BACKFILL" : "LIVE_MONITOR"
+          }
         });
         if (!response.ok) throw new Error("Transaction archive was not acknowledged.");
         archived.add(transaction.signature);
@@ -392,7 +402,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.walletLinkSnapshots = savedWalletLinks ?? {};
     this.walletHoldingsByMint = savedWalletHoldings ?? {};
     this.heliusState = normalizeHeliusMonitorState(await this.ctx.storage.get<HeliusMonitorState>("helius_monitor_state"));
-    this.verifiedTransactions = (await this.ctx.storage.get<VerifiedPumpTransaction[]>("verified_transactions")) ?? [];
+    this.verifiedTransactions = (await this.ctx.storage.get<Array<VerifiedPumpTransaction & { receivedAt?: string }>>("verified_transactions")) ?? [];
     // A Durable Object restart destroys outbound WebSockets. Without historical
     // backfill, the interrupted interval must be represented as a data gap.
     this.markHeliusCoverageGap();
@@ -1898,7 +1908,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           commitment: "confirmed"
         });
         if (result.status === "VERIFIED") {
-          this.verifiedTransactions = [...this.verifiedTransactions, result.transaction].slice(-2_000);
+          this.verifiedTransactions = [...this.verifiedTransactions, { ...result.transaction, receivedAt: new Date().toISOString() }].slice(-2_000);
           await this.beginHistoricalBackfill(result.transaction);
           await this.appendAudit("OBSERVATION", work.mint, {
             signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction),
