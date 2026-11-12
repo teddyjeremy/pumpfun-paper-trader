@@ -178,6 +178,7 @@ export function buildExecutablePaperQuote(input: {
       transferFeeAmount > transferFeeMaximum ||
       !Number.isInteger(quote.transferFeeBasisPoints) ||
       quote.transferFeeBasisPoints < 0 || quote.transferFeeBasisPoints > 10_000 ||
+      (quote.transferFeeEpoch !== null && (!Number.isSafeInteger(quote.transferFeeEpoch) || quote.transferFeeEpoch < 0)) ||
       (transferFeeAmount > 0n && quote.transferFeeEpoch === null) ||
       quote.transferFeeMint !== quote.mint) {
     throw new Error("Token transfer fee evidence does not reconcile with the quoted mint and amounts.");
