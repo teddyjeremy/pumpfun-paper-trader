@@ -86,6 +86,35 @@ describe("paper execution lifecycle", () => {
     expect(committed!.position.tokenAmountBaseUnits).toBe("1000000");
   });
 
+  it("blocks paper entry when either side exceeds the 2% price-impact limit", async () => {
+    const commitEntry = vi.fn();
+    const result = await executePaperEntry({
+      mint, positionId: "p-impact", occurredAt: new Date(now).toISOString(), nowMs: now,
+      strategy: approved, portfolio: createPaperPortfolio(),
+      quoteBuy: async () => ({ quote: { ...quote("BUY"), priceImpactPct: 2.01 }, context: { solUsd, costs } }),
+      quoteSell: async () => ({ quote: quote("SELL"), context: { solUsd, costs } }),
+      commitEntry
+    });
+    expect(result.status).toBe("BLOCKED");
+    expect(result.reason).toMatch(/2% per-side/);
+    expect(commitEntry).not.toHaveBeenCalled();
+  });
+
+  it("blocks paper entry when combined buy and sell fees exceed 4% of stake", async () => {
+    const commitEntry = vi.fn();
+    const expensiveCosts = { ...costs, providerFeeUsd: 0.03 };
+    const result = await executePaperEntry({
+      mint, positionId: "p-fees", occurredAt: new Date(now).toISOString(), nowMs: now,
+      strategy: approved, portfolio: createPaperPortfolio(),
+      quoteBuy: async () => ({ quote: quote("BUY"), context: { solUsd, costs: expensiveCosts } }),
+      quoteSell: async () => ({ quote: quote("SELL"), context: { solUsd, costs: expensiveCosts } }),
+      commitEntry
+    });
+    expect(result.status).toBe("BLOCKED");
+    expect(result.reason).toMatch(/4% round-trip/);
+    expect(commitEntry).not.toHaveBeenCalled();
+  });
+
   it("blocks before commit when the exact-size sell quote is unavailable", async () => {
     const commitEntry = vi.fn();
     const result = await executePaperEntry({
