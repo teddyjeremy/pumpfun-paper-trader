@@ -225,17 +225,17 @@ export function enqueueHeliusNotification(
   if (state.seenSignatures.includes(input.signature) || state.queue.some(item => item.signature === input.signature)) {
     return { state: { ...state, duplicateSignatures: state.duplicateSignatures + 1 }, outcome: "DUPLICATE" };
   }
-  const seenSignatures = [...state.seenSignatures, input.signature].slice(-MAX_HELIUS_SEEN_SIGNATURES);
   if (state.queue.length >= MAX_HELIUS_SIGNATURE_QUEUE) {
     return {
       state: {
-        ...state, seenSignatures,
+        ...state,
         droppedSignatures: state.droppedSignatures + 1,
         incompleteMints: [...new Set([...state.incompleteMints, subscription.mint])].slice(-MAX_HELIUS_CANDIDATES)
       },
       outcome: "OVERFLOW"
     };
   }
+  const seenSignatures = [...state.seenSignatures, input.signature].slice(-MAX_HELIUS_SEEN_SIGNATURES);
   return {
     state: {
       ...state, seenSignatures,
