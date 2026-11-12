@@ -36,13 +36,14 @@ These RPC primitives are not yet wired into the Worker. The new candidate store 
 - `src/ingestion/pump-events.ts` decodes Pump.fun `CreateEvent` and `TradeEvent` log payloads using the official IDL discriminators and field order.
 - Amounts and reserve values remain raw integers (`bigint`); the decoder does not convert units or treat non-SOL quote amounts as SOL.
 - `decodeSuccessfulPumpTransaction` gates event decoding on a successful Solana transaction (`meta.err === null`) and carries signature and slot. Failed transactions return `FAILED_TRANSACTION`; missing metadata/logs or malformed event bytes return `DATA_INCOMPLETE`.
-- The decoder is not yet wired to a Helius transaction-fetch adapter or observation-window builder. Provider provenance and RPC commitment must be attached by that adapter.
+- `src/ingestion/helius.ts` builds standard Helius HTTPS/WSS URLs, candidate-specific `logsSubscribe` requests (one bonding-curve address per subscription), parses complete `logsNotification` signatures/slots, and fetches individual transactions through standard `getTransaction` at `confirmed` by default. It checks the returned signature, successful transaction metadata, Pump.fun program invocation, and decoded event mint before returning `VERIFIED`. Provider provenance, commitment, slot, signature, and local receipt time are carried with the verified result. HTTP/RPC/network errors, unavailable transactions, and malformed metadata return `DATA_INCOMPLETE`; failed transactions and unrelated mints are not observations.
+- The Helius adapter is a tested primitive, not yet wired to the Durable Object's subscription lifecycle, shared token bucket, or durable work queue. No automatic candidate fan-out or transaction polling is enabled yet.
 
 ## Not yet enabled / incomplete
 
 - Deployed no-key PumpPortal handshake and real connection verification.
 - Provider-gap reconciliation and health checks that prove subscription delivery rather than only socket-open state.
-- Helius transaction verification and selective bonding-curve account monitoring.
+- Durable Object wiring for Helius candidate-specific subscriptions, shared rate-budget scheduling, and transaction-fetch queue.
 - Verified bonding-curve PDA derivation and account decoder.
 - Candidate admission limits selected from measured launch volume and Cloudflare budget.
 - Helius backfill/reconciliation for reconnect gaps.
