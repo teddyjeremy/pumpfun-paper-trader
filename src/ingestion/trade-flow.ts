@@ -207,7 +207,7 @@ export function buildCandidateTradeFlows(
       sampleIntervalSeconds: TRADE_FLOW_SAMPLE_INTERVAL_SECONDS,
       horizonSeconds,
       windows: windows.map(({ buyers: _buyers, buyerVolumes: _buyerVolumes, buyVolume: _buyVolume, sellVolume: _sellVolume, ...window }) => window),
-      observedTradeEvents: windows.reduce((sum, window) => sum + window.tradeCount, 0),
+      observedTradeEvents: group.events.length,
       latestThreeWindowFlowPass,
       distinctBuyersAcrossLatestThree: distinctBuyers,
       largestBuyerShareAcrossLatestThreeBps: largestBuyerShareBps,
