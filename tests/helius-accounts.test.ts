@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { discoverCanonicalPumpSwapPoolForMint, discoverPumpSwapPoolsForMint, fetchHeliusMultipleAccounts } from "../src/ingestion/helius-accounts.js";\nimport { PUMP_AMM_PROGRAM_ID } from "../src/ingestion/pump-account-decoder.js";
+import { discoverCanonicalPumpSwapPoolForMint, discoverPumpSwapPoolsForMint, fetchHeliusMultipleAccounts } from "../src/ingestion/helius-accounts.js";
+import { PUMP_AMM_PROGRAM_ID } from "../src/ingestion/pump-account-decoder.js";
 
 function response(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
