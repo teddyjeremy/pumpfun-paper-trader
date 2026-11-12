@@ -67,6 +67,41 @@ describe("observed price and stage-volume profile", () => {
     expect(profile?.reclaimVolumeVsPullbackPct).toBe(55.81);
   });
 
+  it("measures pullback and reclaim volume using meaningful buy notional only", () => {
+    const tx = transaction([
+      trade(100n, 1_000_000n),
+      trade(105n, 1_250_000n),
+      trade(110n, 1_100_000n),
+      trade(115n, 1_050_000n),
+      trade(120n, 1_200_000n),
+      trade(110n, 1_000_000n, false),
+      trade(115n, 1_000_000n, false),
+      trade(110n, 1n, true),
+      trade(115n, 1n, true)
+    ]);
+    tx.createEvents = [createEvent()];
+    const [profile] = buildCandidatePriceVolumeProfiles([tx], {
+      nowSeconds: 125, horizonSeconds: 60, coverageStartByMint: { [mint]: 100 },
+      solUsdPriceUsd: 100, minimumTradeUsd: 0.01
+    });
+    expect(profile?.microTradeFilterStatus).toBe("APPLIED");
+    expect(profile?.pullbackVolumeVsImpulsePct).toBeCloseTo(95.56, 2);
+    expect(profile?.reclaimVolumeVsPullbackPct).toBeCloseTo(55.81, 2);
+    expect(profile?.pullbackVolume.sellQuoteVolume).toBe("0");
+  });
+
+  it("does not publish buy-volume ratios when SOL/USD is unavailable", () => {
+    const tx = transaction([trade(100n, 1_000_000n), trade(105n, 1_250_000n),
+      trade(110n, 1_100_000n), trade(115n, 1_050_000n), trade(120n, 1_200_000n)]);
+    tx.createEvents = [createEvent()];
+    const [profile] = buildCandidatePriceVolumeProfiles([tx], {
+      nowSeconds: 125, horizonSeconds: 60, coverageStartByMint: { [mint]: 100 }
+    });
+    expect(profile?.microTradeFilterStatus).toBe("UNAVAILABLE");
+    expect(profile?.pullbackVolumeVsImpulsePct).toBeNull();
+    expect(profile?.reclaimVolumeVsPullbackPct).toBeNull();
+  });
+
   it("uses the verified launch reserve price as the impulse baseline", () => {
     const base = transaction([trade(105n, 1_250n), trade(110n, 1_300n)]);
     base.createEvents = [createEvent()];
