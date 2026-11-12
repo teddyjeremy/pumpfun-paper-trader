@@ -99,6 +99,18 @@ describe("verified Pump.fun trade-flow windows", () => {
     expect(flow?.flowConfirmationPass).toBe(false);
   });
 
+  it("reports discovered candidates with no verified trades as unobserved, not zero-flow", () => {
+    const [flow] = buildCandidateTradeFlows([], {
+      nowSeconds: 108, horizonSeconds: 60, candidateMints: [mint]
+    });
+    expect(flow).toMatchObject({
+      mint, observedTradeEvents: 0, dataComplete: false,
+      latestThreeWindowFlowPass: false, flowConfirmationPass: false,
+      entryEligible: false
+    });
+    expect(flow?.windows).toEqual([]);
+  });
+
   it("keeps non-SOL quote mint amounts separate and raw", () => {
     const quoteMint = "TokenQuoteMint111111111111111111111111111";
     const events = [
