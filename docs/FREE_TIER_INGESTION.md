@@ -25,12 +25,12 @@ Provider receipt time is local receipt time, not a chain timestamp. PumpPortal m
 ## Queue and budget behavior
 
 The Worker now wires a deliberately smaller Helius path:
-- It selects at most 10 non-migrated candidates with valid bonding-curve addresses.
+- It selects at most 10 non-migrated candidates with valid mint and bonding-curve addresses. The bounded selection is prioritized by available identity completeness (valid creator present), repeated discovery observations, then most recent activity/launch. This is only a monitoring-priority order: the discovery feed does not contain trade flow, wallet concentration, creator sells, liquidity, or executable quotes, so it cannot honestly rank trading quality yet. Missing creator data does not cause rejection; the candidate remains eligible for WATCH/monitoring, never an automatic BUY.
 - Each candidate receives one standard `logsSubscribe` using a single-address `mentions` filter. No program-wide logs subscription or Enhanced WebSocket method is used.
 - Only notifications with `err === null` enter the durable signature queue. Failed transactions are counted and never fetched as observations.
 - The durable queue is capped at 100 signatures; signature deduplication retains the most recent 5,000 signatures. Queue overflow and malformed notifications mark the affected mint incomplete.
 - The Worker drains one signature at a time through a 2 requests/second token bucket, below the Helius Free 10 RPS ceiling. The generic priority queue remains available for future open-position prioritization but is not yet used by this candidate-only worker.
-- Individual transactions are fetched with standard `getTransaction`, decoded only after the successful-transaction gate, and retained with provider, commitment, slot, signature, mint and receipt timestamp. Verified retention is capped at 2,000 transactions.
+- Individual transactions are fetched with standard `getTransaction`, decoded only after the successful-transaction gate, and retained with provider, commitment, slot, signature, mint and receipt timestamp. Verified retention is capped at 2,000 transactions. A fetch/processing exception marks the affected mint incomplete and removes that failed queue head so one bad signature cannot block every later candidate.
 - Candidate expiry/migration removes its Helius subscription; socket reconnect clears socket-scoped subscription IDs and resubscribes the bounded active set. A persisted queue is drained after reconnection.
 - Authenticated `GET /observations?limit=100` exposes up to 500 most recent verified transactions for paper analysis. BigInt event amounts/reserves are serialized as decimal strings; this endpoint does not provide quotes or trading decisions.
 
@@ -52,6 +52,7 @@ The token bucket is process-local and resets on Durable Object restart; it is co
 - Reconnect-gap backfill and reconciliation; an open socket alone does not prove complete event delivery.
 - Durable/global RPC quota accounting across Worker restarts.
 - Candidate admission limits selected from measured launch volume and Cloudflare budget.
+- Evidence-based trading-quality ranking. The current monitor priority deliberately uses only identity completeness, repeated discovery observations, and recency; it must not pretend these are buyer-flow, liquidity, creator-risk, or executable-exit measurements.
 - Helius backfill/reconciliation for reconnect gaps.
 - Observation windows and strict strategy evaluation.
 - Creator/linked-wallet/cluster risk evidence.
