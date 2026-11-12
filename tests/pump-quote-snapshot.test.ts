@@ -55,6 +55,21 @@ describe("coherent Pump quote account snapshots", () => {
       .toThrow(/same Helius context slot/);
   });
 
+  it("treats the legacy default-key quote mint as the native SOL sentinel, not an account", () => {
+    const legacyAddresses = { ...addresses, quoteMint: "11111111111111111111111111111111" };
+    const accounts = Object.values(addresses).map(address => account(address));
+    accounts[2] = null as never;
+    const result = verifyPumpQuoteAccountSnapshot({
+      addresses: legacyAddresses, snapshot: snapshot({ accounts }), nowMs
+    });
+    expect(result.accounts.quoteMint).toBeNull();
+    expect(result.accountCount).toBe(7);
+    expect(() => verifyPumpQuoteAccountSnapshot({
+      addresses, snapshot: snapshot({ accounts: [account("market"), account("base-mint"), null,
+        account("global"), account("fee-config"), account("base-vault"), account("quote-vault")] }), nowMs
+    })).toThrow(/quoteMint account/);
+  });
+
   it("rejects stale snapshots, invalid addresses and duplicate account roles", () => {
     expect(() => verifyPumpQuoteAccountSnapshot({
       addresses, snapshot: snapshot({ observedAt: "2026-11-12T11:59:00.000Z" }), nowMs
