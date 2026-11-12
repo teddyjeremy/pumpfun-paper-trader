@@ -645,6 +645,7 @@ export interface HeliusBackfillArchiveInput {
     slot: number;
     provider: "helius";
     commitment: "confirmed" | "finalized";
+    source: "HISTORICAL_BACKFILL" | "LIVE_MONITOR";
     receivedAt: string;
     createEvents: unknown[];
     tradeEvents: unknown[];
@@ -688,7 +689,9 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
     const signatureEvidence = state.signatures.find(item => item.signature === transaction.signature);
     if (transaction.mint !== mint || !signaturePattern.test(transaction.signature) ||
         !Number.isSafeInteger(transaction.slot) || transaction.slot < 0 ||
-        !signatureEvidence || signatureEvidence.slot !== transaction.slot ||
+        (transaction.source === "HISTORICAL_BACKFILL" && !signatureEvidence) ||
+        (signatureEvidence !== undefined && signatureEvidence.slot !== transaction.slot) ||
+        !["HISTORICAL_BACKFILL","LIVE_MONITOR"].includes(transaction.source) ||
         transaction.provider !== "helius" || !["confirmed","finalized"].includes(transaction.commitment) ||
         !Number.isFinite(Date.parse(transaction.receivedAt)) ||
         !Array.isArray(transaction.createEvents) || !Array.isArray(transaction.tradeEvents)) {
@@ -734,13 +737,13 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
       const raw = JSON.stringify(transaction);
       const result = await client.query(
         `INSERT INTO helius_transaction_observations
-          (session_id,mint,signature,slot,provider,commitment,received_at,create_events,trade_events,raw_observation)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb)
+          (session_id,mint,signature,slot,provider,commitment,observation_source,received_at,create_events,trade_events,raw_observation)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb)
          ON CONFLICT (session_id,mint,signature) DO UPDATE SET
            raw_observation=EXCLUDED.raw_observation
          WHERE helius_transaction_observations.raw_observation=EXCLUDED.raw_observation
          RETURNING signature`,
-        [sessionId,mint,transaction.signature,transaction.slot,transaction.provider,transaction.commitment,
+        [sessionId,mint,transaction.signature,transaction.slot,transaction.provider,transaction.commitment,transaction.source,
           transaction.receivedAt,JSON.stringify(transaction.createEvents),JSON.stringify(transaction.tradeEvents),raw]
       );
       if (result.rowCount !== 1) throw new Error("Historical transaction signature conflicts with previously archived evidence.");
