@@ -2,7 +2,11 @@ import { DurableObject } from "cloudflare:workers";
 import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "../../../../src/paper/session-ledger.js";
 import { updateCandidatePriceTracker, type CandidatePriceTracker } from "../../../../src/paper/candidate-price-ledger.js";
 import { evaluateStrictStrategyAudit, calculateReclaimConfirmation } from "../../../../src/paper/strategy-audit.js";
-import { createPaperPortfolio, type PaperPortfolioState } from "../../../../src/paper/portfolio.js";
+import {
+  closePaperPosition, createPaperPortfolio, markPaperPosition, openPaperPosition,
+  type ExecutablePaperQuote, type PaperPortfolioState
+} from "../../../../src/paper/portfolio.js";
+import { commitPaperPortfolioTransition } from "../../../../src/paper/portfolio-session.js";
 
 type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "SESSION_HEARTBEAT" | "WORKER_RESTARTED" | "DISCOVERY" |
   "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "CANDIDATE_EXPIRED" | "OBSERVATION" |
@@ -436,6 +440,102 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await txn.put(pageKey, page);
       await txn.put(dedupeKey, sequence);
       await txn.put(metaKey, { ...meta, eventCount: sequence });
+    });
+  }
+
+
+  async recordPaperEntry(input: {
+    mint: string; positionId: string; buyQuote: ExecutablePaperQuote; sellQuote: ExecutablePaperQuote;
+  }): Promise<unknown> {
+    await this.hydrate();
+    const sessionId = this.activeSessionId;
+    if (!sessionId) throw new Error("No active paper session.");
+    const occurredAt = new Date().toISOString();
+    const idempotencyKey = `paper-entry:${input.mint}:${input.buyQuote.quoteId}`;
+    return commitPaperPortfolioTransition(this.ctx.storage, {
+      sessionId, idempotencyKey, occurredAt, mint: input.mint,
+      apply: portfolio => {
+        const opened = openPaperPosition(portfolio, { ...input, occurredAt, nowMs: Date.parse(occurredAt) });
+        const events = [{
+          kind: "PAPER_ENTRY" as const,
+          data: { position: opened.position, buyQuoteId: input.buyQuote.quoteId,
+            initialSellQuoteId: input.sellQuote.quoteId }
+        }];
+        if (opened.state.bankroll.topUpCount > portfolio.bankroll.topUpCount) {
+          events.push({
+            kind: "BANKROLL_TOP_UP" as const,
+            data: { topUpCount: opened.state.bankroll.topUpCount,
+              totalTopUpsUsd: opened.state.bankroll.totalTopUpsUsd }
+          });
+        }
+        return { state: opened.state, result: opened.position, events };
+      }
+    });
+  }
+
+  async recordPaperExit(input: {
+    positionId: string; sellQuote: ExecutablePaperQuote; exitReason: string;
+  }): Promise<unknown> {
+    await this.hydrate();
+    const sessionId = this.activeSessionId;
+    if (!sessionId) throw new Error("No active paper session.");
+    const occurredAt = new Date().toISOString();
+    const idempotencyKey = `paper-exit:${input.positionId}:${input.sellQuote.quoteId}`;
+    return commitPaperPortfolioTransition(this.ctx.storage, {
+      sessionId, idempotencyKey, occurredAt,
+      apply: portfolio => {
+        const closed = closePaperPosition(portfolio, { ...input, closedAt: occurredAt, nowMs: Date.parse(occurredAt) });
+        const events = [{
+          kind: "PAPER_EXIT" as const,
+          mint: closed.position.mint,
+          data: { position: closed.position, sellQuoteId: input.sellQuote.quoteId,
+            exitReason: input.exitReason }
+        }];
+        if (closed.state.bankroll.topUpCount > portfolio.bankroll.topUpCount) {
+          events.push({
+            kind: "BANKROLL_TOP_UP" as const,
+            mint: closed.position.mint,
+            data: { topUpCount: closed.state.bankroll.topUpCount,
+              totalTopUpsUsd: closed.state.bankroll.totalTopUpsUsd }
+          });
+        }
+        return { state: closed.state, result: closed.position, events };
+      }
+    });
+  }
+
+  async recordPaperMark(input: {
+    sellQuotes: ExecutablePaperQuote[];
+  }): Promise<unknown> {
+    await this.hydrate();
+    const sessionId = this.activeSessionId;
+    if (!sessionId) throw new Error("No active paper session.");
+    const markedAt = new Date().toISOString();
+    const quoteIds = input.sellQuotes.map(quote => quote.quoteId).sort();
+    const idempotencyKey = `paper-mark:${markedAt}:${quoteIds.join(",")}`;
+    return commitPaperPortfolioTransition(this.ctx.storage, {
+      sessionId, idempotencyKey, occurredAt: markedAt,
+      apply: portfolio => {
+        const marked = markPaperPosition(portfolio, {
+          sellQuotes: input.sellQuotes, markedAt, nowMs: Date.parse(markedAt)
+        });
+        const openPositions = marked.positions.filter(position => position.status !== "CLOSED");
+        const liquidationValueUsd = openPositions.reduce((sum, position) =>
+          sum + position.latestLiquidationValueUsd, 0);
+        const events = [{
+          kind: "POSITION_MARK" as const,
+          data: { markedAt, quoteIds, liquidationValueUsd,
+            equityUsd: marked.availableCashUsd + liquidationValueUsd }
+        }];
+        if (marked.bankroll.topUpCount > portfolio.bankroll.topUpCount) {
+          events.push({
+            kind: "BANKROLL_TOP_UP" as const,
+            data: { topUpCount: marked.bankroll.topUpCount,
+              totalTopUpsUsd: marked.bankroll.totalTopUpsUsd }
+          });
+        }
+        return { state: marked, result: { liquidationValueUsd, equityUsd: marked.bankroll.currentEquityUsd }, events };
+      }
     });
   }
 
