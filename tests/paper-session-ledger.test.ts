@@ -68,3 +68,20 @@ describe("strict strategy audit", () => {
   expect(result.rules.find(rule=>rule.rule==="RECLAIM")?.status).toBe("UNKNOWN");
  });
 });
+
+ it("does not count a pre-rejection peak as post-rejection performance", () => {
+  const pre = updateCandidatePriceTracker(null, {
+   mint:"mint",quoteMint:"SOL",quoteAmount:"300",tokenAmount:"1000",
+   timestamp:"2026-11-12T12:00:00Z",signature:"before",isBuy:true,
+   discoveryPriceQuotePerToken:0.1
+  });
+  const after = updateCandidatePriceTracker(pre, {
+   mint:"mint",quoteMint:"SOL",quoteAmount:"260",tokenAmount:"1000",
+   timestamp:"2026-11-12T12:06:00Z",signature:"after",isBuy:true,
+   decisionPriceQuotePerToken:0.25,decisionAt:"2026-11-12T12:05:00Z",
+   discoveryPriceQuotePerToken:0.1
+  });
+  expect(after.maxMultipleFromDiscovery).toBe(3);
+  expect(after.maxMultipleFromDecision).toBeCloseTo(1.04);
+  expect(after.reached3xFromDecision).toBe(false);
+ });

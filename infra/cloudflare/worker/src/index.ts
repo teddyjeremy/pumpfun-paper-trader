@@ -490,7 +490,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (monitoredMints.length === 0) return;
     const report = await this.listTradeFlows() as {
       flows: Array<{ mint: string; quoteMint: string | null; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
-      priceVolumeProfiles: Array<{ mint:string; quoteMint:string|null; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
+      priceVolumeProfiles: Array<{ mint:string; quoteMint:string|null; baselinePrice:number|null; buckets:Array<{closePrice:number;endTime:number}>; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
       creatorSellRisk: Array<{mint:string;status:string}>;
       walletClusterRisk: Array<{mint:string;status:string}>;
     };
@@ -530,8 +530,28 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       });
       await this.appendAudit("FEATURE_SNAPSHOT", mint, { triggerSignature, profile, flow },
         `features:${triggerSignature}:${mint}`);
-      await this.appendAudit("STRATEGY_DECISION", mint, evaluated,
-        `decision:${triggerSignature}:${mint}`);
+      const decisionPriceQuotePerToken = profile?.buckets.at(-1)?.closePrice ?? null;
+      await this.appendAudit("STRATEGY_DECISION", mint, {
+        ...evaluated, decisionPriceQuotePerToken,
+        discoveryPriceQuotePerToken: profile?.baselinePrice ?? null,
+        quoteMint: profile?.quoteMint ?? null
+      }, `decision:${triggerSignature}:${mint}`);
+      if (profile?.quoteMint && profile.baselinePrice !== null && profile.baselinePrice > 0) {
+        const refKey = `candidate_price_refs:${this.activeSessionId}:${mint}:${profile.quoteMint}`;
+        const previousRefs = await this.ctx.storage.get<{
+          decisionPriceQuotePerToken: number | null; decisionAt: string | null;
+          discoveryPriceQuotePerToken: number | null;
+        }>(refKey);
+        await this.ctx.storage.put(refKey, {
+          discoveryPriceQuotePerToken: previousRefs?.discoveryPriceQuotePerToken ?? profile.baselinePrice,
+          decisionPriceQuotePerToken: evaluated.decision === "REJECT"
+            ? previousRefs?.decisionPriceQuotePerToken ?? decisionPriceQuotePerToken
+            : previousRefs?.decisionPriceQuotePerToken ?? null,
+          decisionAt: evaluated.decision === "REJECT"
+            ? previousRefs?.decisionAt ?? evaluated.evaluatedAt
+            : previousRefs?.decisionAt ?? null
+        });
+      }
       for (const rule of evaluated.rules) {
         await this.appendAudit("RULE_EVALUATION", mint, { triggerSignature, ...rule },
           `rule:${triggerSignature}:${mint}:${rule.rule}`);
@@ -556,7 +576,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       if (await txn.get<boolean>(processedKey)) return;
       const trackerKey = `candidate_price:${sessionId}:${trade.mint}:${trade.quoteMint}`;
       const previous = await txn.get<CandidatePriceTracker>(trackerKey) ?? null;
-      const tracker = { ...updateCandidatePriceTracker(previous, trade), sessionId };
+      const refs = await txn.get<{
+        decisionPriceQuotePerToken: number | null; decisionAt: string | null;
+        discoveryPriceQuotePerToken: number | null;
+      }>(`candidate_price_refs:${sessionId}:${trade.mint}:${trade.quoteMint}`);
+      const tracker = { ...updateCandidatePriceTracker(previous, {
+        ...trade, decisionPriceQuotePerToken: refs?.decisionPriceQuotePerToken ?? null,
+        decisionAt: refs?.decisionAt ?? null,
+        discoveryPriceQuotePerToken: refs?.discoveryPriceQuotePerToken ?? null
+      }), sessionId };
       const metaKey = `audit_session:${sessionId}`;
       const meta = await txn.get<AuditSessionMeta>(metaKey);
       if (!meta) throw new Error("Audit session metadata missing.");
