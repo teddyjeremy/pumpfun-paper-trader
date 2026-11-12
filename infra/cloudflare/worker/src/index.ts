@@ -309,6 +309,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         return;
       }
     }
+    if (this.status.enabled && this.postgresLeaseHeld) {
+      await this.drainHeliusQueue();
+    }
     await this.flushAllAuditSessionsToPostgres();
     if (this.status.enabled && this.postgresLeaseHeld) {
       await this.ctx.storage.setAlarm(Date.now() + 15_000);
