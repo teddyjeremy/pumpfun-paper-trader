@@ -24,12 +24,16 @@ Provider receipt time is local receipt time, not a chain timestamp. PumpPortal m
 
 ## Queue and budget behavior
 
-The initial TypeScript ingestion primitives provide:
-- A token bucket that rejects rates above 10 requests/second.
-- A bounded RPC queue prioritizing open positions, then candidates, then backfill.
-- Explicit return of rejected/evicted work so callers can persist a data-gap event.
+The Worker now wires a deliberately smaller Helius path:
+- It selects at most 10 non-migrated candidates with valid bonding-curve addresses.
+- Each candidate receives one standard `logsSubscribe` using a single-address `mentions` filter. No program-wide logs subscription or Enhanced WebSocket method is used.
+- Only notifications with `err === null` enter the durable signature queue. Failed transactions are counted and never fetched as observations.
+- The durable queue is capped at 100 signatures; signature deduplication retains the most recent 5,000 signatures. Queue overflow and malformed notifications mark the affected mint incomplete.
+- The Worker drains one signature at a time through a 2 requests/second token bucket, below the Helius Free 10 RPS ceiling. The generic priority queue remains available for future open-position prioritization but is not yet used by this candidate-only worker.
+- Individual transactions are fetched with standard `getTransaction`, decoded only after the successful-transaction gate, and retained with provider, commitment, slot, signature, mint and receipt timestamp. Verified retention is capped at 2,000 transactions.
+- Candidate expiry/migration removes its Helius subscription; socket reconnect clears socket-scoped subscription IDs and resubscribes the bounded active set. A persisted queue is drained after reconnection.
 
-These RPC primitives are not yet wired into the Worker. The new candidate store is bounded and durable, but it is not the complete Helius work queue and does not yet schedule selective account subscriptions.
+The token bucket is process-local and resets on Durable Object restart; it is conservative but not a durable global quota ledger. A worker restart can therefore create a short burst up to its two-token capacity. Provider gaps, queue overflow, fetch failures and malformed messages remain explicit data gaps. This does not provide historical backfill or guarantee that every chain event is observed.
 
 ## Decoder status
 
@@ -37,14 +41,15 @@ These RPC primitives are not yet wired into the Worker. The new candidate store 
 - Amounts and reserve values remain raw integers (`bigint`); the decoder does not convert units or treat non-SOL quote amounts as SOL.
 - `decodeSuccessfulPumpTransaction` gates event decoding on a successful Solana transaction (`meta.err === null`) and carries signature and slot. Failed transactions return `FAILED_TRANSACTION`; missing metadata/logs or malformed event bytes return `DATA_INCOMPLETE`.
 - `src/ingestion/helius.ts` builds standard Helius HTTPS/WSS URLs, candidate-specific `logsSubscribe` requests (one bonding-curve address per subscription), parses complete `logsNotification` signatures/slots, and fetches individual transactions through standard `getTransaction` at `confirmed` by default. It checks the returned signature, successful transaction metadata, Pump.fun program invocation, and decoded event mint before returning `VERIFIED`. Provider provenance, commitment, slot, signature, and local receipt time are carried with the verified result. HTTP/RPC/network errors, unavailable transactions, and malformed metadata return `DATA_INCOMPLETE`; failed transactions and unrelated mints are not observations.
-- The Helius adapter is a tested primitive, not yet wired to the Durable Object's subscription lifecycle, shared token bucket, or durable work queue. No automatic candidate fan-out or transaction polling is enabled yet.
+- The Helius adapter is wired to the Durable Object for bounded candidate subscriptions, a durable signature queue, conservative serial transaction fetching, and persisted verified event evidence. It remains event evidence only; no strategy decisions or quote calculations are connected.
 
 ## Not yet enabled / incomplete
 
 - Deployed no-key PumpPortal handshake and real connection verification.
 - Provider-gap reconciliation and health checks that prove subscription delivery rather than only socket-open state.
-- Durable Object wiring for Helius candidate-specific subscriptions, shared rate-budget scheduling, and transaction-fetch queue.
 - Verified bonding-curve PDA derivation and account decoder.
+- Reconnect-gap backfill and reconciliation; an open socket alone does not prove complete event delivery.
+- Durable/global RPC quota accounting across Worker restarts.
 - Candidate admission limits selected from measured launch volume and Cloudflare budget.
 - Helius backfill/reconciliation for reconnect gaps.
 - Observation windows and strict strategy evaluation.
