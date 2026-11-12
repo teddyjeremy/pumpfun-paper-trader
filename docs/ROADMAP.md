@@ -11,7 +11,7 @@
 - [ ] Verify no-key PumpPortal WebSocket handshake in the deployed Worker
 - [ ] Add reconnect/backoff and provider-gap reconciliation
 - [x] Helius transaction verification adapter and bounded candidate-specific monitoring (10 slots, durable queue, event verification, and evidence-driven slot rotation)
-- [ ] Verify Pump.fun official SDK/program interfaces and implement bonding-curve PDA/account decoder
+- [x] Verify official Pump program and PumpSwap IDL layouts; implement fail-closed bonding-curve and pool/vault account decoders (PDA derivation remains delegated to the official SDK)
 - [ ] Authoritative graduation detector and migrated-pool discovery\n- [x] Pure fail-closed market transition rules for live curve, migration pending, verified canonical pool and EXIT_BLOCKED (account decoder and Worker integration remain outstanding)
 - [ ] Helius backfill/reconciliation for missed provider events
 - [ ] Complete entry decision engine and explainable decisions (strict per-rule evaluation and 1–2 second reclaim freshness confirmation are implemented; numeric volume-profile thresholds, executable quotes and automated ledger integration remain outstanding)
@@ -19,7 +19,7 @@
 - [x] Fetch and validate fresh SOL/USDT last-trade reference data for USD-notional spam filtering; reject stale, malformed or unavailable observations (not an execution price)
 - [x] Direct creator-sale screening, bounded wallet-funding linkage inspection, and observed individual/linked-cluster hard rejects
 - [ ] Complete wallet attribution and full holder census; current funding inspection is sampled and top-20 holder evidence is partial
-- [ ] Verified PumpSwap quote adapter with dynamic protocol/creator fee, network, priority, impact and slippage accounting
+- [ ] Verified Pump/PumpSwap executable quote adapter using official SDK quote math, dynamic protocol/creator fees, network/priority costs, impact and slippage accounting
 - [x] Durable session journal core (append-only pages, idempotency, atomic session lifecycle, restart markers, pagination and JSON export); Durable Object runtime acceptance tests and six-hour soak remain outstanding
 - [ ] PostgreSQL migrations, append-only event/trade ledger, idempotency and worker leader lease
 - [ ] Deterministic paper executor and migration-aware position state machine
