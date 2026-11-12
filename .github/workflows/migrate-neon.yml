@@ -1,0 +1,51 @@
+name: Apply Neon database migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type APPLY to run the ordered database migrations against the configured Neon database"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neon-production-migrations
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: ${{ inputs.confirm == 'APPLY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Validate migration build
+        run: npm run build
+
+      - name: Require database credential
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Configure the GitHub Actions secret DATABASE_URL with the Neon connection string before running this workflow."
+            exit 1
+          fi
+
+      - name: Apply ordered migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: node dist/src/db/migrate.js
