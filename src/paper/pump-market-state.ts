@@ -42,8 +42,8 @@ export interface PumpMarketState {
 
 export const MARKET_EVIDENCE_MAX_AGE_MS = 2_000;
 
-function validBaseUnits(value: string): boolean {
-  return /^\\d+$/.test(value) && BigInt(value) > 0n;
+function validBaseUnits(value: string, allowZero = false): boolean {
+  return /^\\d+$/.test(value) && (allowZero ? BigInt(value) >= 0n : BigInt(value) > 0n);
 }
 
 function validObservation(observedAt: string, nowMs: number): boolean {
@@ -91,9 +91,10 @@ export function updatePumpMarketState(
 
   if (input.curve) {
     const curve = input.curve;
+    const terminalCurve = curve.complete || curve.migrated;
     const curveValid = curve.verified === true && curve.mint === previous.mint &&
-      Boolean(curve.curveAddress.trim()) && validBaseUnits(curve.tokenReserveBaseUnits) &&
-      validBaseUnits(curve.quoteReserveBaseUnits) && validSlot(curve.slot) &&
+      Boolean(curve.curveAddress.trim()) && validBaseUnits(curve.tokenReserveBaseUnits, terminalCurve) &&
+      validBaseUnits(curve.quoteReserveBaseUnits, terminalCurve) && validSlot(curve.slot) &&
       validObservation(curve.observedAt, nowMs);
     if (!curveValid) {
       return { ...previous, status: "EXIT_BLOCKED", updatedAt: now, curve: null,
