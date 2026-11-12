@@ -117,8 +117,14 @@ export function confirmHeliusSubscription(
   now = new Date().toISOString()
 ): HeliusMonitorState {
   if (!Number.isSafeInteger(subscriptionId) || subscriptionId < 0) return state;
+  const confirmed = state.subscriptions.find(item => item.requestId === requestId);
+  if (!confirmed) return state;
   return {
     ...state,
+    // A new acknowledged subscription establishes a fresh coverage boundary.
+    // Old windows remain excluded by subscribedAt; new complete windows may
+    // become usable without permanently poisoning this mint after a reconnect.
+    incompleteMints: state.incompleteMints.filter(mint => mint !== confirmed.mint),
     subscriptions: state.subscriptions.map(item => item.requestId === requestId
       ? { ...item, subscriptionId, subscribedAt: now }
       : item)
