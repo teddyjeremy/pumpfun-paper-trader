@@ -44,7 +44,7 @@ function sellQuote(): PumpSdkCurveQuote {
     transferTaxVerifiedZero: true, executionReady: false, blockers: []
   };
 }
-const bearishWindows = [2_000, 4_000].map(endedAtMs => ({
+const bearishWindows = [now - 3_000, now - 1_000].map(endedAtMs => ({
   endedAtMs, windowSeconds: 2 as const, complete: true,
   buySellRatio: 0.5, buyVolumeDeclinePct: 50, buyerRateDeclinePct: 50,
   sellVolumeExpansionPct: 60, priceResponseDeclinePct: 50,
