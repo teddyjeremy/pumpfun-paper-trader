@@ -40,7 +40,7 @@ import {
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
 import { buildCandidateTradeFlows, isSolQuoteMint, SOL_QUOTE_MINT } from "../../../../src/ingestion/trade-flow.js";
-import { fetchHolderConcentration } from "../../../../src/ingestion/holder-risk.js";
+import { fetchHolderConcentration, type HolderConcentrationResult } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
 import { officialPumpSdkModulesAvailable } from "../../../../src/ingestion/pump-sdk-runtime.js";
@@ -158,6 +158,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private verifiedTransactions: Array<VerifiedPumpTransaction & { receivedAt?: string }> = [];
   private walletLinkSnapshots: Record<string, WalletFundingEvidenceResult> = {};
   private walletHoldingsByMint: Record<string, WalletHoldingEvidence[]> = {};
+  private holderRiskSnapshots: Record<string, HolderConcentrationResult> = {};
+  private riskEvidenceAttemptedAtByMint: Record<string, number> = {};
   private status: CoordinatorStatus = { ...INITIAL_STATUS };
   private discovery: DiscoveryStoreState = emptyDiscoveryStore();
   private hydrated = false;
@@ -389,18 +391,22 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   private async hydrate(): Promise<void> {
     if (this.hydrated) return;
-    const [savedStatus, savedDiscovery, enabled, savedWalletLinks, savedWalletHoldings, activeSessionId] = await Promise.all([
+    const [savedStatus, savedDiscovery, enabled, savedWalletLinks, savedWalletHoldings, savedHolderRisk, savedRiskAttempts, activeSessionId] = await Promise.all([
       this.ctx.storage.get<CoordinatorStatus>("status"),
       this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
       this.ctx.storage.get<boolean>("enabled"),
       this.ctx.storage.get<Record<string, WalletFundingEvidenceResult>>("wallet_link_snapshots"),
       this.ctx.storage.get<Record<string, WalletHoldingEvidence[]>>("wallet_holdings_by_mint"),
+      this.ctx.storage.get<Record<string, HolderConcentrationResult>>("holder_risk_snapshots"),
+      this.ctx.storage.get<Record<string, number>>("risk_evidence_attempted_at_by_mint"),
       this.ctx.storage.get<string>("active_audit_session_id")
     ]);
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
     this.activeSessionId = activeSessionId ?? null;
     this.walletLinkSnapshots = savedWalletLinks ?? {};
     this.walletHoldingsByMint = savedWalletHoldings ?? {};
+    this.holderRiskSnapshots = savedHolderRisk ?? {};
+    this.riskEvidenceAttemptedAtByMint = savedRiskAttempts ?? {};
     this.heliusState = normalizeHeliusMonitorState(await this.ctx.storage.get<HeliusMonitorState>("helius_monitor_state"));
     this.verifiedTransactions = (await this.ctx.storage.get<Array<VerifiedPumpTransaction & { receivedAt?: string }>>("verified_transactions")) ?? [];
     // A Durable Object restart destroys outbound WebSockets. Without historical
@@ -438,6 +444,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.heliusState = emptyHeliusMonitorState();
       this.walletLinkSnapshots = {};
       this.walletHoldingsByMint = {};
+      this.holderRiskSnapshots = {};
+      this.riskEvidenceAttemptedAtByMint = {};
       this.status = { ...INITIAL_STATUS };
       const sessionId = crypto.randomUUID();
       const meta: AuditSessionMeta = {
@@ -462,6 +470,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put("verified_transactions", []);
         await txn.put("wallet_link_snapshots", {});
         await txn.put("wallet_holdings_by_mint", {});
+        await txn.put("holder_risk_snapshots", {});
+        await txn.put("risk_evidence_attempted_at_by_mint", {});
         await txn.put(`helius_backfill_mints:${sessionId}`, []);
         await txn.put(`paper_bankroll:${sessionId}`, createBankrollState(2.70));
         await txn.put(`paper_portfolio:${sessionId}`, createPaperPortfolio(2.70));
@@ -1153,14 +1163,20 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       apiKey: this.env.HELIUS_API_KEY,
       fetcher: this.rateLimitedHeliusFetcher()
     });
-    await this.appendAudit("RISK_EVIDENCE", mint, { evidenceType: "HOLDER_CONCENTRATION", result: jsonSafe(result) });
+    this.holderRiskSnapshots[mint] = result;
     if (result.status === "OBSERVED") {
       this.walletHoldingsByMint[mint] = result.snapshot.accounts.map(account => ({
         mint, wallet: account.owner, amount: account.amount
       }));
       this.reconcileHelius();
-      await this.persist();
+    } else {
+      // Never let an older holder snapshot masquerade as current evidence.
+      delete this.walletHoldingsByMint[mint];
     }
+    await this.persist();
+    await this.appendAudit("RISK_EVIDENCE", mint, {
+      evidenceType: "HOLDER_CONCENTRATION", result: jsonSafe(result)
+    }, `holder-risk:${mint}:${Math.floor(Date.now() / 60_000)}`);
     return result;
   }
 
@@ -1190,8 +1206,79 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       links: result.links,
       holdings: this.walletHoldingsByMint[mint] ?? []
     });
-    await this.appendAudit("RISK_EVIDENCE", mint, { evidenceType: "WALLET_CLUSTER", fundingEvidence: jsonSafe(result), risk: jsonSafe(risk) });
+    await this.appendAudit("RISK_EVIDENCE", mint, {
+      evidenceType: "WALLET_CLUSTER", fundingEvidence: jsonSafe(result), risk: jsonSafe(risk)
+    }, `wallet-links:${mint}:${Math.floor(Date.now() / 60_000)}`);
     return { ...result, risk };
+  }
+
+  /** Collect one bounded holder or wallet-link snapshot on each scheduled tick. */
+  async collectNextRiskEvidence(): Promise<unknown> {
+    await this.hydrate();
+    if (!this.status.enabled || !this.activeSessionId || !this.env.HELIUS_API_KEY) {
+      return { status: "IDLE", reason: "No active paper session or Helius API key." };
+    }
+
+    const monitoredMints = new Set(this.heliusState.subscriptions.map(item => item.mint));
+    const launches = new Set(this.verifiedTransactions.flatMap(tx => tx.createEvents).map(event => event.mint));
+    const candidates = this.discovery.candidates
+      .filter(candidate => candidate.status === "DISCOVERED" &&
+        monitoredMints.has(candidate.mint) && launches.has(candidate.mint))
+      .sort((a, b) => Date.parse(a.firstSeenAt) - Date.parse(b.firstSeenAt));
+    const now = Date.now();
+
+    for (const candidate of candidates) {
+      const mint = candidate.mint;
+      const lastAttempt = this.riskEvidenceAttemptedAtByMint[mint] ?? 0;
+      if (now - lastAttempt < 60_000) continue;
+
+      const holder = this.holderRiskSnapshots[mint];
+      const walletLinks = this.walletLinkSnapshots[mint];
+      const holderObservedAt = holder?.status === "OBSERVED" ? Date.parse(holder.snapshot.observedAt) : Number.NaN;
+      const walletLinksObservedAt = walletLinks?.status === "OBSERVED" ? Date.parse(walletLinks.observedAt) : Number.NaN;
+      const holderNeedsRefresh = !holder || !Number.isFinite(holderObservedAt) ||
+        holderObservedAt > now || now - holderObservedAt >= 120_000 ||
+        (holder.status !== "OBSERVED" && now - lastAttempt >= 60_000);
+      const walletLinksNeedRefresh = !walletLinks || !Number.isFinite(walletLinksObservedAt) ||
+        walletLinksObservedAt > now || now - walletLinksObservedAt >= 120_000 ||
+        (walletLinks.status !== "OBSERVED" && now - lastAttempt >= 60_000);
+
+      let evidenceType: "HOLDER_CONCENTRATION" | "WALLET_CLUSTER";
+      if (holderNeedsRefresh) {
+        evidenceType = "HOLDER_CONCENTRATION";
+      } else if (walletLinksNeedRefresh) {
+        const distinctTradeWallets = new Set(this.verifiedTransactions.flatMap(tx => tx.tradeEvents)
+          .filter(trade => trade.mint === mint && trade.quoteAmount > 0n)
+          .map(trade => trade.user)).size;
+        if (distinctTradeWallets < 2) continue;
+        evidenceType = "WALLET_CLUSTER";
+      } else {
+        continue;
+      }
+
+      this.riskEvidenceAttemptedAtByMint[mint] = now;
+      await this.ctx.storage.put("risk_evidence_attempted_at_by_mint", this.riskEvidenceAttemptedAtByMint);
+      try {
+        const result = evidenceType === "HOLDER_CONCENTRATION"
+          ? await this.getHolderRisk(mint)
+          : await this.collectWalletLinks(mint);
+        const evidenceStatus = result && typeof result === "object" && "status" in result
+          ? String(result.status) : "UNKNOWN";
+        return {
+          status: evidenceStatus === "OBSERVED" ? "COLLECTED" : "DATA_INCOMPLETE",
+          mint, evidenceType, evidenceStatus
+        };
+      } catch (error) {
+        await this.appendAudit("DATA_GAP", mint, {
+          reason: "AUTOMATED_RISK_EVIDENCE_COLLECTION_FAILED",
+          evidenceType,
+          message: error instanceof Error ? error.message : "Risk evidence collection failed."
+        }, `risk-evidence-failed:${mint}:${Math.floor(now / 60_000)}`);
+        return { status: "DATA_INCOMPLETE", mint, evidenceType };
+      }
+    }
+
+    return { status: "IDLE", reason: "No monitored candidate currently needs a risk snapshot." };
   }
 
   private async getSolUsdPrice(): Promise<Awaited<ReturnType<typeof fetchSolUsdPrice>>> {
@@ -1278,7 +1365,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           links: snapshot?.links ?? [],
           holdings: this.walletHoldingsByMint[mint] ?? []
         }),
-        collection: snapshot ?? null
+        collection: snapshot ?? null,
+        holderConcentration: this.holderRiskSnapshots[mint] ?? null
       };
     });
     const creatorRiskRank = (status: string): number =>
@@ -1321,6 +1409,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           mint: candidate.mint,
           status: candidate.status,
           creatorSellStatus: creatorRiskByMint.get(candidate.mint)?.status ?? "UNKNOWN",
+          holderEvidenceStatus: this.holderRiskSnapshots[candidate.mint]?.status ?? "NOT_COLLECTED",
+          walletLinkEvidenceStatus: this.walletLinkSnapshots[candidate.mint]?.status ?? "NOT_COLLECTED",
           monitoring: subscription?.subscriptionId !== null && subscription?.subscriptionId !== undefined
             ? "SUBSCRIBED"
             : subscription ? "SUBSCRIPTION_PENDING" : "NOT_MONITORED"
@@ -2074,7 +2164,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       helius_monitor_state: this.heliusState,
       verified_transactions: this.verifiedTransactions,
       wallet_link_snapshots: this.walletLinkSnapshots,
-      wallet_holdings_by_mint: this.walletHoldingsByMint
+      wallet_holdings_by_mint: this.walletHoldingsByMint,
+      holder_risk_snapshots: this.holderRiskSnapshots,
+      risk_evidence_attempted_at_by_mint: this.riskEvidenceAttemptedAtByMint
     }));
     this.persistChain = write.catch(() => undefined);
     try {
@@ -2260,6 +2352,9 @@ export default {
     context: ExecutionContext
   ): Promise<void> {
     const coordinator = env.COORDINATOR.get(env.COORDINATOR.idFromName("primary"));
-    context.waitUntil(coordinator.ensureRunning());
+    context.waitUntil((async () => {
+      await coordinator.ensureRunning();
+      await coordinator.collectNextRiskEvidence();
+    })());
   }
 };
