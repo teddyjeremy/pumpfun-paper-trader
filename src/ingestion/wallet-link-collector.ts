@@ -92,14 +92,14 @@ export async function collectWalletFundingEvidence(
     funderCounts.set(wallet, counts);
   }
 
-  const walletByFunder = new Map<string, string[]>();
+  const walletByFunder = new Map<string, Array<{ wallet: string; timestamps: number[] }>>();
   for (const [wallet, counts] of funderCounts) {
     for (const [funder, fundingEvidence] of counts) {
       if (fundingEvidence.signatures.size < 2 || fundingEvidence.timestamps.length < 2) continue;
       const sortedTimes = [...fundingEvidence.timestamps].sort((a, b) => a - b);
       if (sortedTimes.at(-1)! - sortedTimes[0]! > 60) continue;
       const recipients = walletByFunder.get(funder) ?? [];
-      recipients.push(wallet);
+      recipients.push({ wallet, timestamps: fundingEvidence.timestamps });
       walletByFunder.set(funder, recipients);
     }
   }
@@ -111,7 +111,9 @@ export async function collectWalletFundingEvidence(
       for (let j = i + 1; j < recipients.length; j += 1) {
         const a = recipients[i]!;
         const b = recipients[j]!;
-        const pair = [a, b].sort();
+        const combinedTimes = [...a.timestamps, ...b.timestamps].sort((x, y) => x - y);
+        if (combinedTimes.at(-1)! - combinedTimes[0]! > 60) continue;
+        const pair = [a.wallet, b.wallet].sort();
         const key = pair.join(":");
         if (emitted.has(key)) continue;
         emitted.add(key);
