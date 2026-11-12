@@ -555,20 +555,22 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         discoveryPriceQuotePerToken: profile?.baselinePrice ?? null,
         quoteMint: profile?.quoteMint ?? null
       }, `decision:${triggerSignature}:${mint}`);
-      if (profile?.quoteMint && ((profile.baselinePrice !== null && profile.baselinePrice > 0) || evaluated.decision === "REJECT")) {
+      if (profile?.quoteMint) {
         const refKey = `candidate_price_refs:${this.activeSessionId}:${mint}:${profile.quoteMint}`;
         const previousRefs = await this.ctx.storage.get<{
           decisionPriceQuotePerToken: number | null; decisionAt: string | null;
           discoveryPriceQuotePerToken: number | null;
         }>(refKey);
+        // WATCH is a real strategy outcome too: preserve the first evaluated
+        // decision-time price instead of waiting for a hard REJECT (which may
+        // never happen because missing evidence correctly remains WATCH).
         await this.ctx.storage.put(refKey, {
-          discoveryPriceQuotePerToken: previousRefs?.discoveryPriceQuotePerToken ?? profile.baselinePrice,
-          decisionPriceQuotePerToken: evaluated.decision === "REJECT"
-            ? previousRefs?.decisionPriceQuotePerToken ?? decisionPriceQuotePerToken
-            : previousRefs?.decisionPriceQuotePerToken ?? null,
-          decisionAt: evaluated.decision === "REJECT"
-            ? previousRefs?.decisionAt ?? evaluated.evaluatedAt
-            : previousRefs?.decisionAt ?? null
+          discoveryPriceQuotePerToken: previousRefs?.discoveryPriceQuotePerToken ??
+            (profile.baselinePrice !== null && profile.baselinePrice > 0 ? profile.baselinePrice : null),
+          decisionPriceQuotePerToken: previousRefs?.decisionPriceQuotePerToken ??
+            (decisionPriceQuotePerToken !== null && decisionPriceQuotePerToken > 0 ? decisionPriceQuotePerToken : null),
+          decisionAt: previousRefs?.decisionAt ??
+            (decisionPriceQuotePerToken !== null && decisionPriceQuotePerToken > 0 ? evaluated.evaluatedAt : null)
         });
       }
       for (const rule of evaluated.rules) {
