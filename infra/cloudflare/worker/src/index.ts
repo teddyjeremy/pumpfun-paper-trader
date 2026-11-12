@@ -688,17 +688,20 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const outcomes = await Promise.all(selected.map(async candidate => {
       const mint = String(candidate.mint);
       const observed = byMint.get(mint) ?? [];
+      const solTrackers = observed.filter(tracker => isSolQuoteMint(tracker.quoteMint))
+        .sort((a, b) => Date.parse(b.firstObservedAt) - Date.parse(a.firstObservedAt));
+      const quoteMint = solTrackers[0]?.quoteMint ?? SOL_QUOTE_MINT;
       const refs = await this.ctx.storage.get<{
         decisionPriceQuotePerToken: number | null; decisionAt: string | null;
         discoveryPriceQuotePerToken: number | null;
-      }>(`candidate_price_refs:${sessionId}:${mint}:${SOL_QUOTE_MINT}`);
+      }>(`candidate_price_refs:${sessionId}:${mint}:${quoteMint}`);
       return {
         ...candidate,
         decisionPriceQuotePerToken: refs?.decisionPriceQuotePerToken ?? null,
         decisionAt: refs?.decisionAt ?? null,
         discoveryPriceQuotePerToken: refs?.discoveryPriceQuotePerToken ?? null,
-        quoteMint: SOL_QUOTE_MINT,
-        followUpStatus: observed.length > 0 ? "PARTIAL" : "MISSING",
+        quoteMint,
+        followUpStatus: solTrackers.length > 0 ? "PARTIAL" : "MISSING",
         priceTrackers: observed.sort((a, b) => a.quoteMint.localeCompare(b.quoteMint))
       };
     }));
