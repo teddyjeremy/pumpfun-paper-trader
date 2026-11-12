@@ -230,7 +230,7 @@ export function replayHistoricalCoin(
         .find(item => item.mint === input.mint && item.quoteUnit === "SOL");
       if (!profile || !flow) continue;
       // Risk evaluators must see only evidence available at this historical instant.
-      const evidenceTransactions = input.transactions.filter(tx => tx.blockTime !== null && tx.blockTime !== undefined && Number.isSafeInteger(tx.blockTime) && tx.blockTime <= evaluatedAt);
+      const evidenceTransactions = input.transactions.filter(tx => typeof tx.blockTime === "number" && Number.isSafeInteger(tx.blockTime) && tx.blockTime <= evaluatedAt);
       const creatorRisk = evaluateCreatorSellRisk(evidenceTransactions, {
         nowSeconds: evaluatedAt,
         candidateMints: [input.mint],
