@@ -1,4 +1,4 @@
-import { Message, MessageV0, VersionedMessage } from "@solana/web3.js";
+import { ComputeBudgetProgram, Message, MessageV0, PublicKey, TransactionInstruction, TransactionMessage, VersionedMessage } from "@solana/web3.js";
 import { buildHeliusRpcUrl } from "./helius.js";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -38,6 +38,83 @@ export interface SolanaFeeEstimatorConfig {
   computeUnitLimit: number;
   fetcher?: typeof fetch;
   nowMs?: number;
+}
+
+
+/**
+ * Compile the exact unsigned instruction set intended for paper execution.
+ * The caller supplies the venue instructions, payer identity and recent
+ * blockhash. This adds the actual CU limit and derives writable locks from
+ * the compiled message header. It never signs, simulates or submits.
+ */
+export interface UnsignedFeeMessageInput {
+  payer: PublicKey;
+  recentBlockhash: string;
+  instructions: readonly TransactionInstruction[];
+  computeUnitLimit: number;
+}
+
+export interface UnsignedFeeMessage {
+  messageBase64: string;
+  writableAccountKeys: string[];
+  computeUnitLimit: number;
+  messageSha256: string;
+}
+
+export async function compileUnsignedFeeMessage(
+  input: UnsignedFeeMessageInput
+): Promise<UnsignedFeeMessage> {
+  if (!Number.isSafeInteger(input.computeUnitLimit) ||
+      input.computeUnitLimit < 1 || input.computeUnitLimit > MAX_COMPUTE_UNIT_LIMIT) {
+    throw new Error("Unsigned fee message compute-unit limit is invalid.");
+  }
+  if (input.instructions.length < 1 || input.instructions.length > 48) {
+    throw new Error("Unsigned fee message requires a bounded, non-empty venue instruction list.");
+  }
+  if (input.instructions.some(ix => ix.programId.equals(ComputeBudgetProgram.programId))) {
+    throw new Error("Venue instructions must not contain Compute Budget instructions; the compiler owns fee settings.");
+  }
+  if (typeof input.recentBlockhash !== "string" || !input.recentBlockhash.trim()) {
+    throw new Error("A recent blockhash is required to compile the exact unsigned message.");
+  }
+
+  const message = new TransactionMessage({
+    payerKey: input.payer,
+    recentBlockhash: input.recentBlockhash,
+    instructions: [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: input.computeUnitLimit }),
+      ...input.instructions
+    ]
+  }).compileToLegacyMessage();
+
+  const keys = message.accountKeys;
+  const header = message.header;
+  const signedWritable = header.numRequiredSignatures - header.numReadonlySignedAccounts;
+  const unsignedWritable = keys.length - header.numRequiredSignatures - header.numReadonlyUnsignedAccounts;
+  const writableAccountKeys = keys.filter((_key, index) =>
+    index < signedWritable ||
+    (index >= header.numRequiredSignatures &&
+      index < header.numRequiredSignatures + unsignedWritable)
+  ).map(key => key.toBase58());
+
+  if (writableAccountKeys.length < 1 || writableAccountKeys.length > 128 ||
+      new Set(writableAccountKeys).size !== writableAccountKeys.length) {
+    throw new Error("Compiled transaction produced invalid writable account locks.");
+  }
+
+  const bytes = message.serialize();
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const messageBase64 = btoa(binary);
+  const digestBytes = new Uint8Array(await crypto.subtle.digest(
+    "SHA-256", new TextEncoder().encode(messageBase64)
+  ));
+  return {
+    messageBase64,
+    writableAccountKeys,
+    computeUnitLimit: input.computeUnitLimit,
+    messageSha256: [...digestBytes].map(value => value.toString(16).padStart(2, "0")).join("")
+  };
 }
 
 /**
