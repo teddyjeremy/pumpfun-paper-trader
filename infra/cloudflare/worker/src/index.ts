@@ -446,8 +446,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async listCandidateOutcomes(): Promise<unknown> {
     await this.hydrate();
-    const trackers = await this.ctx.storage.list<CandidatePriceTracker>({ prefix: "candidate_price:" });
-    return [...trackers.values()].sort((a, b) => a.mint.localeCompare(b.mint) || a.quoteMint.localeCompare(b.quoteMint));
+    const [trackers, candidates] = await Promise.all([
+      this.ctx.storage.list<CandidatePriceTracker>({ prefix: "candidate_price:" }),
+      this.ctx.storage.list<Record<string, unknown>>({ prefix: "candidate_seen:" })
+    ]);
+    const byMint = new Map<string, CandidatePriceTracker[]>();
+    for (const tracker of trackers.values()) {
+      const items = byMint.get(tracker.mint) ?? [];
+      items.push(tracker);
+      byMint.set(tracker.mint, items);
+    }
+    return [...candidates.values()].map(candidate => {
+      const mint = String(candidate.mint);
+      const observed = byMint.get(mint) ?? [];
+      return {
+        ...candidate,
+        followUpStatus: observed.length > 0 ? "PARTIAL" : "MISSING",
+        priceTrackers: observed.sort((a, b) => a.quoteMint.localeCompare(b.quoteMint))
+      };
+    }).sort((a, b) => String(a.mint).localeCompare(String(b.mint)));
   }
 
   async listAuditEvents(after = 0, limit = 100, requestedSessionId?: string): Promise<unknown> {
@@ -731,6 +748,19 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             candidateStatus: this.discovery.candidates.find(item => item.mint === parsed.event.mint)?.status ?? null },
           parsed.event.signature ? `pumpportal:${parsed.event.signature}:${parsed.event.kind}` : undefined
         );
+        const candidateKey = `candidate_seen:${parsed.event.mint}`;
+        const previousCandidate = await this.ctx.storage.get<Record<string, unknown>>(candidateKey);
+        await this.ctx.storage.put(candidateKey, {
+          mint: parsed.event.mint,
+          creator: parsed.event.creator ?? previousCandidate?.creator ?? null,
+          bondingCurve: parsed.event.bondingCurve ?? previousCandidate?.bondingCurve ?? null,
+          name: parsed.event.name ?? previousCandidate?.name ?? null,
+          symbol: parsed.event.symbol ?? previousCandidate?.symbol ?? null,
+          firstSeenAt: previousCandidate?.firstSeenAt ?? parsed.event.receivedAt,
+          lastSeenAt: parsed.event.receivedAt,
+          latestKind: parsed.event.kind,
+          latestSignature: parsed.event.signature ?? previousCandidate?.latestSignature ?? null
+        });
         if (result.outcome === "OVERFLOW") await this.appendAudit("DATA_GAP", parsed.event.mint, {
           reason: "DISCOVERY_CANDIDATE_CAP_REACHED", cap: MAX_CANDIDATES
         });
