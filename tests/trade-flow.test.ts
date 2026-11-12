@@ -162,6 +162,8 @@ describe("verified Pump.fun trade-flow windows", () => {
       nowSeconds: 106, horizonSeconds: 60, solUsdPriceUsd: 100, minimumTradeUsd: 0.01
     });
     expect(flow?.microTradeFilterStatus).toBe("APPLIED");
+    expect(flow?.ignoredMicroTradeCount).toBe(9);
+    expect(flow?.ignoredMicroTradeQuoteVolume).toBe("300006");
     expect(flow?.windows[0]).toMatchObject({
       tradeCount: 3, uniqueBuyers: 3, uniqueSellers: 0,
       buyQuoteVolume: "600000", sellQuoteVolume: "0", flowWindowPass: true
