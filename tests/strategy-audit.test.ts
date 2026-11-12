@@ -126,6 +126,52 @@ describe("strict strategy audit timing", () => {
     expect(rejected.rules.find(rule => rule.rule === "ROUND_TRIP_COST")?.status).toBe("FAIL");
   });
 
+
+  it("authorizes BUY only when all 15 mandatory rules explicitly PASS", () => {
+    const audit = evaluateStrictStrategyAudit({
+      ...base,
+      candidateAgeSeconds: 120,
+      profile: {
+        impulsePriceChangePct: 25,
+        pullbackPct: 16,
+        reclaimDetected: true,
+        reclaimAbovePreviousFiveSecondHighPct: 1.2,
+        pullbackVolumeVsImpulsePct: 45,
+        reclaimVolumeVsPullbackPct: 160,
+        dataComplete: true,
+        microTradeFilterStatus: "APPLIED"
+      },
+      flow: {
+        dataComplete: true,
+        latestThreeWindowFlowPass: true,
+        sampleIntervalSeconds: 1,
+        windows: [0, 1, 2].map(startTime => ({
+          startTime, buySellRatio: 4, flowWindowPass: true, uniqueBuyers: 3, uniqueSellers: 1
+        })),
+        distinctBuyersAcrossLatestThree: 5,
+        largestBuyerShareAcrossLatestThreeBps: 5_000,
+        microTradeFilterStatus: "APPLIED"
+      },
+      creatorRiskStatus: "PASS_COMPLETE",
+      walletClusterRiskStatus: "PASS_COMPLETE",
+      attributionConfidenceBps: 8_000,
+      signalAgeSeconds: 1,
+      nextObservationConfirmed: true,
+      executableQuoteAvailable: true,
+      volumeThresholds: {
+        maxPullbackVolumeVsImpulsePct: 50,
+        minReclaimVolumeVsPullbackPct: 150
+      },
+      roundTripCostPct: 3.5
+    });
+    expect(audit.rules).toHaveLength(15);
+    expect(audit.rules.every(rule => rule.status === "PASS")).toBe(true);
+    expect(audit.decision).toBe("BUY");
+    expect(audit.buyAllowed).toBe(true);
+    expect(audit.watchReasons).toHaveLength(0);
+    expect(audit.blockingUnknownRules).toHaveLength(0);
+  });
+
   it("keeps a missing or future launch age unknown rather than treating it as fresh", () => {
     for (const age of [null, -1, Number.NaN]) {
       const audit = evaluateStrictStrategyAudit({ ...base, candidateAgeSeconds: age });
