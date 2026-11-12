@@ -38,7 +38,7 @@ export async function collectWalletFundingEvidence(
 ): Promise<WalletFundingEvidenceResult> {
   const warnings = [
     "Only the latest 20 signatures per wallet are sampled; this is not a complete wallet history.",
-    "A shared funder can be an exchange, custodian, or service and is not proof of common ownership.",
+    "Links require at least two distinct funding transactions to each wallet within a 60-second window, but a shared funder can still be an exchange, custodian, or service and is not proof of common ownership.",
     "No observed link is UNKNOWN, never a wallet-cluster safety PASS."
   ];
   if (!ADDRESS.test(mint)) {
@@ -71,7 +71,7 @@ export async function collectWalletFundingEvidence(
     // The RPC returns newest first; inspect the oldest three in this bounded
     // recent sample to approximate initial funding without unbounded history.
     const sample = validSignatures.slice(-MAX_TRANSACTIONS_PER_WALLET);
-    const counts = new Map<string, Set<string>>();
+    const counts = new Map<string, { signatures: Set<string>; timestamps: number[] }>();
     for (const signature of sample) {
       const tx = await rpc(fetcher, url, "getTransaction", [signature, {
         encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 0
@@ -83,9 +83,10 @@ export async function collectWalletFundingEvidence(
       transactionsChecked += 1;
       for (const transfer of parsedSystemTransfers(tx.result)) {
         if (transfer.destination !== wallet || transfer.source === wallet) continue;
-        const signaturesFromFunder = counts.get(transfer.source) ?? new Set<string>();
-        signaturesFromFunder.add(signature);
-        counts.set(transfer.source, signaturesFromFunder);
+        const evidence = counts.get(transfer.source) ?? { signatures: new Set<string>(), timestamps: [] };
+        evidence.signatures.add(signature);
+        if (transfer.blockTime !== null) evidence.timestamps.push(transfer.blockTime);
+        counts.set(transfer.source, evidence);
       }
     }
     funderCounts.set(wallet, counts);
@@ -93,8 +94,10 @@ export async function collectWalletFundingEvidence(
 
   const walletByFunder = new Map<string, string[]>();
   for (const [wallet, counts] of funderCounts) {
-    for (const [funder, fundingSignatures] of counts) {
-      if (fundingSignatures.size < 2) continue;
+    for (const [funder, fundingEvidence] of counts) {
+      if (fundingEvidence.signatures.size < 2 || fundingEvidence.timestamps.length < 2) continue;
+      const sortedTimes = [...fundingEvidence.timestamps].sort((a, b) => a - b);
+      if (sortedTimes.at(-1)! - sortedTimes[0]! > 60) continue;
       const recipients = walletByFunder.get(funder) ?? [];
       recipients.push(wallet);
       walletByFunder.set(funder, recipients);
@@ -135,8 +138,10 @@ export async function collectWalletFundingEvidence(
   };
 }
 
-function parsedSystemTransfers(input: unknown): Array<{ source: string; destination: string }> {
+function parsedSystemTransfers(input: unknown): Array<{ source: string; destination: string; blockTime: number | null }> {
   const root = asRecord(input);
+  const blockTime = typeof root?.blockTime === "number" && Number.isSafeInteger(root.blockTime)
+    ? root.blockTime : null;
   const transaction = asRecord(root?.transaction);
   const message = asRecord(transaction?.message);
   const meta = asRecord(root?.meta);
@@ -156,7 +161,7 @@ function parsedSystemTransfers(input: unknown): Array<{ source: string; destinat
         typeof info?.source !== "string" || !ADDRESS.test(info.source) ||
         typeof info.destination !== "string" || !ADDRESS.test(info.destination) ||
         typeof info.lamports !== "number" || !Number.isSafeInteger(info.lamports) || info.lamports <= 0) continue;
-    output.push({ source: info.source, destination: info.destination });
+    output.push({ source: info.source, destination: info.destination, blockTime });
   }
   return output;
 }
