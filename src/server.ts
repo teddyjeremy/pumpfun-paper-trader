@@ -140,20 +140,27 @@ app.get("/api/diagnostics", async () => ({
 app.get("/api/tracking", async () => trackingSnapshot());
 app.get("/api/persistence", async () => getPersistenceStatus());
 app.get("/api/worker", async (_request, reply) => {
-  if (!config.PAPER_WORKER_URL || !config.PAPER_WORKER_CONTROL_TOKEN) {
-    return { configured: false, connected: false, enabled: false, tradingReady: false,
-      blocker: "Configure PAPER_WORKER_URL and PAPER_WORKER_CONTROL_TOKEN on the server to connect the live monitor." };
+  if (!config.PAPER_WORKER_URL) {
+    return { configured: false, canControl: false, connected: false, enabled: false, tradingReady: false,
+      blocker: "Configure PAPER_WORKER_URL on the server to connect the Cloudflare monitor." };
   }
+  const canControl = Boolean(config.PAPER_WORKER_CONTROL_TOKEN);
   try {
-    const response = await fetch(new URL("/dashboard", config.PAPER_WORKER_URL), {
-      headers: { authorization: `Bearer ${config.PAPER_WORKER_CONTROL_TOKEN}` },
+    const response = await fetch(new URL(canControl ? "/dashboard" : "/health", config.PAPER_WORKER_URL), {
+      headers: canControl ? { authorization: `Bearer ${config.PAPER_WORKER_CONTROL_TOKEN}` } : {},
       signal: AbortSignal.timeout(5_000), cache: "no-store"
     });
-    if (!response.ok) return reply.code(502).send({ configured: true, connected: false,
+    if (!response.ok) return reply.code(502).send({ configured: true, canControl, connected: false,
       enabled: false, tradingReady: false, blocker: `Worker status request failed (HTTP ${response.status}).` });
-    return { configured: true, connected: true, ...(await response.json() as Record<string, unknown>) };
+    const snapshot = await response.json() as Record<string, unknown>;
+    if (canControl) return { configured: true, canControl: true, connected: true, ...snapshot };
+    return {
+      configured: true, canControl: false, connected: true, status: snapshot,
+      candidates: [], recentActivity: [],
+      blocker: "Cloudflare Worker is connected in read-only mode. Add PAPER_WORKER_CONTROL_TOKEN to enable candidate details and monitor controls."
+    };
   } catch {
-    return reply.code(502).send({ configured: true, connected: false, enabled: false,
+    return reply.code(502).send({ configured: true, canControl, connected: false, enabled: false,
       tradingReady: false, blocker: "Cloudflare Worker is unreachable; no trading state is assumed." });
   }
 });
@@ -396,8 +403,8 @@ function list(items,empty){return items.length?items.map(x=>'<div class="list-it
 function latency(x){return x&&x.samples?num(x.p50Ms)+' / '+num(x.p95Ms)+' ms':'—'}
 async function refresh(){try{
  const [d,r,t,db,ledger,worker]=await Promise.all([fetch('/api/diagnostics',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Diagnostics '+x.status);return x.json()}),fetch('/api/results/summary',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Summary '+x.status);return x.json()}),fetch('/api/tracking',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Tracking '+x.status);return x.json()}),fetch('/api/persistence',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Persistence '+x.status);return x.json()}),fetch('/api/portfolio',{cache:'no-store'}).then(x=>{if(!x.ok)throw Error('Portfolio '+x.status);return x.json()}),fetch('/api/worker',{cache:'no-store'}).then(x=>x.json()).catch(()=>({configured:false,connected:false,enabled:false,tradingReady:false,blocker:'Worker status unavailable'}))]);
- const workerCandidates=worker.candidates||[];$('#workerCandidateRows').innerHTML=workerCandidates.length?workerCandidates.map(c=>'<tr><td title="'+esc(c.mint)+'">'+esc(short(c.mint))+'</td><td>'+tag(c.status)+'</td><td>'+num(c.observations||0)+'</td><td>'+esc(c.firstSeenAt?new Date(c.firstSeenAt).toLocaleTimeString():'—')+'</td><td>'+esc(c.lastSeenAt?new Date(c.lastSeenAt).toLocaleTimeString():'—')+'</td></tr>').join(''):'<tr><td colspan="5" class="empty">No live candidates reported by Worker</td></tr>';const activity=worker.recentActivity||[];$('#workerActivityRows').innerHTML=activity.length?activity.map(e=>{const data=e.data||{};const summary=data.reason||data.decision||data.status||data.exitReason||data.message||'Audited event';return '<tr><td>'+esc(e.occurredAt?new Date(e.occurredAt).toLocaleTimeString():'—')+'</td><td title="'+esc(e.mint||'')+'">'+esc(short(e.mint))+'</td><td>'+tag(e.kind)+'</td><td>'+esc(typeof summary==='string'?summary:JSON.stringify(summary))+'</td></tr>'}).join(''):'<tr><td colspan="4" class="empty">No live strategy or execution events yet</td></tr>';
- const ws=worker.status||worker;const workerConnected=worker.connected===true;$('#workerTag').className='tag '+(workerConnected&&ws.enabled?'good':workerConnected?'warn':'bad');$('#workerTag').textContent=!worker.configured?'NOT CONFIGURED':!workerConnected?'OFFLINE':ws.enabled?'MONITORING':'STOPPED';$('#workerPump').textContent=ws.connected?'Connected':'Disconnected';$('#workerHelius').textContent=ws.heliusConnected?'Connected':'Disconnected';$('#workerCandidates').textContent=num(ws.monitoredCandidates??ws.candidates??0);$('#workerVerified').textContent=num(ws.verifiedTransactions??0);$('#workerBlocker').textContent=worker.blocker||ws.blocker||(workerConnected?'Discovery monitor connected.':'Configure Worker connection on the server.');$('#paperExecutionState').textContent=ws.tradingReady===true?'PAPER EXECUTION READY':'PAPER EXECUTION DISABLED';$('#paperExecutionState').className='tag '+(ws.tradingReady===true?'good':'warn');$('#startMonitor').disabled=!worker.configured||!workerConnected||ws.enabled===true;$('#stopMonitor').disabled=!worker.configured||!workerConnected||ws.enabled!==true;
+ const workerCandidates=worker.candidates||[];$('#workerCandidateRows').innerHTML=workerCandidates.length?workerCandidates.map(c=>'<tr><td title="'+esc(c.mint)+'">'+esc(short(c.mint))+'</td><td>'+tag(c.status)+'</td><td>'+num(c.observations||0)+'</td><td>'+esc(c.firstSeenAt?new Date(c.firstSeenAt).toLocaleTimeString():'—')+'</td><td>'+esc(c.lastSeenAt?new Date(c.lastSeenAt).toLocaleTimeString():'—')+'</td></tr>').join(''):'<tr><td colspan="5" class="empty">'+(worker.canControl===true?'No live candidates reported by Worker':'Candidate details require the authenticated Worker connection')+'</td></tr>';const activity=worker.recentActivity||[];$('#workerActivityRows').innerHTML=activity.length?activity.map(e=>{const data=e.data||{};const summary=data.reason||data.decision||data.status||data.exitReason||data.message||'Audited event';return '<tr><td>'+esc(e.occurredAt?new Date(e.occurredAt).toLocaleTimeString():'—')+'</td><td title="'+esc(e.mint||'')+'">'+esc(short(e.mint))+'</td><td>'+tag(e.kind)+'</td><td>'+esc(typeof summary==='string'?summary:JSON.stringify(summary))+'</td></tr>'}).join(''):'<tr><td colspan="4" class="empty">'+(worker.canControl===true?'No live strategy or execution events yet':'Strategy and execution events require the authenticated Worker connection')+'</td></tr>';
+ const ws=worker.status||worker;const workerConnected=worker.connected===true;$('#workerTag').className='tag '+(workerConnected&&ws.enabled?'good':workerConnected?'warn':'bad');$('#workerTag').textContent=!worker.configured?'NOT CONFIGURED':!workerConnected?'OFFLINE':ws.enabled?'MONITORING':'STOPPED';$('#workerPump').textContent=ws.connected?'Connected':'Disconnected';$('#workerHelius').textContent=ws.heliusConnected?'Connected':'Disconnected';$('#workerCandidates').textContent=num(ws.monitoredCandidates??ws.candidates??0);$('#workerVerified').textContent=num(ws.verifiedTransactions??0);$('#workerBlocker').textContent=worker.blocker||ws.blocker||(workerConnected?'Discovery monitor connected.':'Configure Worker connection on the server.');$('#paperExecutionState').textContent=ws.tradingReady===true?'PAPER EXECUTION READY':'PAPER EXECUTION DISABLED';$('#paperExecutionState').className='tag '+(ws.tradingReady===true?'good':'warn');$('#startMonitor').disabled=!worker.configured||worker.canControl!==true||!workerConnected||ws.enabled===true;$('#stopMonitor').disabled=!worker.configured||worker.canControl!==true||!workerConnected||ws.enabled!==true;
  const portfolio=r.portfolio||{};const usd2=v=>v===null||v===undefined?'—':'$'+Number(v).toFixed(2);$('#startingBalance').textContent=usd2(portfolio.startingBalanceUsd);$('#positionPrincipal').textContent=usd2(portfolio.positionSizeUsd);const slots=Number(portfolio.maxOpenPositions);$('#positionCapacity').textContent=Number.isFinite(slots)?'Maximum '+slots+' simultaneous position'+(slots===1?'':'s'):'Position capacity unavailable';
  const ready=!!d.readiness?.ready;$('#healthDot').className='dot '+(ready?'good':'bad');$('#healthText').textContent=ready?'READY':'DEGRADED';$('#readyTag').className='tag '+(ready?'good':'warn');$('#readyTag').textContent=ready?'READY':'NOT READY';
  $('#diagnosis').textContent=d.diagnosis?.status||'Unknown';$('#diagnosisDetail').textContent=(d.diagnosis?.notes||[]).join(' ')||'No diagnosis details';

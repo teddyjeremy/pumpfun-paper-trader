@@ -70,6 +70,7 @@ import {
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
   CONTROL_TOKEN: string;
+  CONTROL_TOKEN_SHA256?: string;
   HELIUS_API_KEY: string;
   PAPER_EVENT_INGEST_URL?: string;
   PAPER_EVENT_INGEST_TOKEN?: string;
@@ -2376,9 +2377,19 @@ function jsonSafe(value: unknown): unknown {
   return value;
 }
 
-function authorized(request: Request, env: Env): boolean {
-  return Boolean(env.CONTROL_TOKEN) &&
-    request.headers.get("authorization") === "Bearer " + env.CONTROL_TOKEN;
+async function authorized(request: Request, env: Env): Promise<boolean> {
+  const authorization = request.headers.get("authorization") ?? "";
+  if (env.CONTROL_TOKEN && authorization === "Bearer " + env.CONTROL_TOKEN) return true;
+  if (!env.CONTROL_TOKEN_SHA256 || !authorization.startsWith("Bearer ")) return false;
+  const supplied = authorization.slice("Bearer ".length);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(supplied));
+  const actual = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  if (actual.length !== env.CONTROL_TOKEN_SHA256.length) return false;
+  let difference = 0;
+  for (let index = 0; index < actual.length; index += 1) {
+    difference |= actual.charCodeAt(index) ^ env.CONTROL_TOKEN_SHA256.charCodeAt(index);
+  }
+  return difference === 0;
 }
 
 export default {
@@ -2394,12 +2405,16 @@ export default {
         ready: false,
         provider: "pumpportal",
         connected: status.connected,
+        enabled: status.enabled,
+        heliusConnected: status.heliusConnected,
         candidates: status.candidates,
+        monitoredCandidates: status.monitoredCandidates,
+        verifiedTransactions: status.verifiedTransactions,
         blocker: status.blocker
-      });
+      }, { headers: { "cache-control": "no-store" } });
     }
 
-    if (!authorized(request, env)) {
+    if (!(await authorized(request, env))) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
     if (url.pathname === "/start" && request.method === "POST") {
