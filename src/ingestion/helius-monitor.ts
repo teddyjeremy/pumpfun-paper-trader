@@ -106,7 +106,7 @@ export function selectHeliusCandidates(
       const lastSeenA = Date.parse(a.lastSeenAt);
       const lastSeenB = Date.parse(b.lastSeenAt);
       if (lastSeenA !== lastSeenB) return lastSeenB - lastSeenA;
-      return Date.parse(a.firstSeenAt) - Date.parse(b.firstSeenAt);
+      return Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt);
     });
 
   // Reserve four slots for candidates still inside the initial 60-second
