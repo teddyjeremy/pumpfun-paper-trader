@@ -1,4 +1,19 @@
 import { DurableObject } from "cloudflare:workers";
+
+type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "WORKER_RESTARTED" | "DISCOVERY" |
+  "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "OBSERVATION" | "DATA_GAP" |
+  "PROVIDER_STATUS" | "ERROR" | "RISK_EVIDENCE" | "BANKROLL_TOP_UP" | "CANDIDATE_OUTCOME";
+interface StoredAuditEvent {
+  sessionId: string; sequence: number; eventId: string; kind: AuditKind;
+  occurredAt: string; mint: string | null; strategyVersion: string; data: unknown;
+}
+interface AuditSessionMeta {
+  sessionId: string; startedAt: string; stoppedAt: string | null;
+  strategyVersion: string; eventCount: number; initialBankrollUsd: number;
+  topUpAmountUsd: number; topUpThresholdUsd: number; topUpCount: number;
+  totalTopUpsUsd: number;
+}
+const AUDIT_PAGE_SIZE = 100;
 import {
   buildCandidateLogsSubscribe, buildHeliusWebSocketUrl, fetchAndVerifyPumpTransaction,
   parseHeliusLogsNotification, type VerifiedPumpTransaction
@@ -121,6 +136,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private discovery: DiscoveryStoreState = emptyDiscoveryStore();
   private hydrated = false;
   private pendingWrites = 0;
+  private activeSessionId: string | null = null;
   private persistChain: Promise<void> = Promise.resolve();
   private connectingSinceMs = 0;
   constructor(ctx: DurableObjectState, env: Env) {
@@ -131,7 +147,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   private async hydrate(): Promise<void> {
     if (this.hydrated) return;
-    const [savedStatus, savedDiscovery, enabled, savedWalletLinks, savedWalletHoldings] = await Promise.all([
+    const [savedStatus, savedDiscovery, enabled, savedWalletLinks, savedWalletHoldings, activeSessionId] = await Promise.all([
       this.ctx.storage.get<CoordinatorStatus>("status"),
       this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
       this.ctx.storage.get<boolean>("enabled"),
@@ -139,7 +155,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.ctx.storage.get<Record<string, WalletHoldingEvidence[]>>("wallet_holdings_by_mint")
     ]);
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
-    this.walletLinkSnapshots = savedWalletLinks ?? {};
+    this.activeSessionId = activeSessionId ?? null;\n    this.walletLinkSnapshots = savedWalletLinks ?? {};
     this.walletHoldingsByMint = savedWalletHoldings ?? {};
     this.heliusState = normalizeHeliusMonitorState(await this.ctx.storage.get<HeliusMonitorState>("helius_monitor_state"));
     this.verifiedTransactions = (await this.ctx.storage.get<VerifiedPumpTransaction[]>("verified_transactions")) ?? [];
@@ -277,6 +293,52 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.status.monitoredCandidates = this.heliusState.subscriptions.length;
     this.status.queuedHeliusSignatures = this.heliusState.queue.length;
     return { ...this.status };
+  }
+
+  private async appendAudit(kind: AuditKind, mint: string | null, data: unknown): Promise<void> {
+    if (!this.activeSessionId) return;
+    const sessionId = this.activeSessionId;
+    await this.ctx.storage.transaction(async txn => {
+      const metaKey = `audit_session:${sessionId}`;
+      const meta = await txn.get<AuditSessionMeta>(metaKey);
+      if (!meta) throw new Error("Audit session metadata missing.");
+      const sequence = meta.eventCount + 1;
+      const pageNumber = Math.floor((sequence - 1) / AUDIT_PAGE_SIZE);
+      const pageKey = `audit_events:${sessionId}:${String(pageNumber).padStart(8, "0")}`;
+      const page = await txn.get<StoredAuditEvent[]>(pageKey) ?? [];
+      const event: StoredAuditEvent = {
+        sessionId, sequence, eventId: `${sessionId}:${sequence}`, kind,
+        occurredAt: new Date().toISOString(), mint,
+        strategyVersion: meta.strategyVersion, data: jsonSafe(data)
+      };
+      page.push(event);
+      await txn.put(pageKey, page);
+      await txn.put(metaKey, { ...meta, eventCount: sequence,
+        topUpCount: meta.topUpCount, totalTopUpsUsd: meta.totalTopUpsUsd });
+    });
+  }
+
+  async listAuditEvents(after = 0, limit = 100): Promise<unknown> {
+    await this.hydrate();
+    const sessionId = this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
+    if (!sessionId) return { sessionId: null, events: [], nextAfter: null };
+    const meta = await this.ctx.storage.get<AuditSessionMeta>(`audit_session:${sessionId}`);
+    if (!meta) return { sessionId, events: [], nextAfter: null };
+    const safeAfter = Number.isSafeInteger(after) && after >= 0 ? after : 0;
+    const safeLimit = Number.isSafeInteger(limit) ? Math.max(1, Math.min(500, limit)) : 100;
+    const firstPage = Math.floor(safeAfter / AUDIT_PAGE_SIZE);
+    const lastPage = Math.floor((Math.min(meta.eventCount, safeAfter + safeLimit) - 1) / AUDIT_PAGE_SIZE);
+    const events: StoredAuditEvent[] = [];
+    if (meta.eventCount > safeAfter) {
+      for (let pageNumber = firstPage; pageNumber <= lastPage; pageNumber++) {
+        const page = await this.ctx.storage.get<StoredAuditEvent[]>(`audit_events:${sessionId}:${String(pageNumber).padStart(8, "0")}`) ?? [];
+        events.push(...page.filter(event => event.sequence > safeAfter));
+      }
+    }
+    const result = events.slice(0, safeLimit);
+    const last = result.at(-1)?.sequence ?? safeAfter;
+    return { session: meta, events: result, nextAfter: last < meta.eventCount ? last : null,
+      totalEvents: meta.eventCount, pageSize: AUDIT_PAGE_SIZE };
   }
 
   async listVerifiedTransactions(limit = 100): Promise<unknown[]> {
@@ -477,7 +539,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           socket.close(1000, "Coordinator disabled before connection opened");
           return;
         }
-        this.status.connected = true;
+        this.status.connected = true;\n        void this.appendAudit("PROVIDER_STATUS", null, { provider: "pumpportal", status: "CONNECTED" }).catch(() => undefined);
         this.status.subscriptionsSent = false;
         this.status.connectedAt = new Date().toISOString();
         this.connectingSinceMs = 0;
@@ -505,7 +567,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         );
         if (parsed.status === "IGNORED") return;
         if (parsed.status === "DATA_INCOMPLETE") {
-          this.discovery.incomplete += 1;
+          this.discovery.incomplete += 1;\n          void this.appendAudit("DISCOVERY_INCOMPLETE", null, { status: parsed.status, rawMessage: typeof message.data === "string" ? message.data.slice(0, 2000) : "NON_TEXT_MESSAGE" }).catch(() => { this.status.lastError = "Audit journal append failed."; });
           this.pendingWrites += 1;
           this.syncCounts();
           if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist().catch(() => undefined);
@@ -543,7 +605,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
       socket.addEventListener("error", () => {
         if (this.socket !== socket || !this.status.enabled) return;
-        this.status.lastError = "PumpPortal WebSocket transport error.";
+        this.status.lastError = "PumpPortal WebSocket transport error.";\n        void this.appendAudit("ERROR", null, { subsystem: "PUMPPORTAL_WEBSOCKET", message: this.status.lastError }).catch(() => undefined);
         void this.persist().catch(() => undefined);
       });
     } catch {
@@ -653,7 +715,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           socket.close(1000, "Coordinator disabled before Helius connection opened");
           return;
         }
-        this.status.heliusConnected = true;
+        this.status.heliusConnected = true;\n        void this.appendAudit("PROVIDER_STATUS", null, { provider: "helius", status: "CONNECTED" }).catch(() => undefined);
         this.heliusConnectedAtMs = Date.now();
         this.heliusConnectingSinceMs = 0;
         this.heliusState = resetHeliusSubscriptionIds(this.heliusState);
@@ -710,7 +772,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       });
       socket.addEventListener("error", () => {
         if (this.heliusSocket !== socket) return;
-        this.status.lastError = "Helius WebSocket transport error.";
+        this.status.lastError = "Helius WebSocket transport error.";\n        void this.appendAudit("ERROR", null, { subsystem: "HELIUS_WEBSOCKET", message: this.status.lastError }).catch(() => undefined);
         void this.persist().catch(() => undefined);
       });
     } catch {
@@ -758,7 +820,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           commitment: "confirmed"
         });
         if (result.status === "VERIFIED") {
-          this.verifiedTransactions = [...this.verifiedTransactions, result.transaction].slice(-2_000);
+          this.verifiedTransactions = [...this.verifiedTransactions, result.transaction].slice(-2_000);\n          void this.appendAudit("OBSERVATION", work.mint, { signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction), retentionPolicy: "LATEST_2000_TRANSACTION_SNAPSHOT_PLUS_APPEND_ONLY_AUDIT" }).catch(() => { this.status.lastError = "Audit journal append failed."; });
           this.status.verifiedTransactions += 1;
           // Re-rank the six evidence-follow-up slots as verified events arrive.
           // Fresh launches remain protected by the four-slot first-minute reserve.
@@ -781,7 +843,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         activeWork = null;
       }
     } catch {
-      this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
+      this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";\n      void this.appendAudit("ERROR", activeWork?.mint ?? null, { subsystem: "HELIUS_QUEUE", message: this.status.lastError }).catch(() => undefined);
       // Only remove the item that actually failed. A storage failure after a
       // successful dequeue must never discard the next candidate's work.
       if (activeWork) {
@@ -813,7 +875,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       ...this.heliusState,
       incompleteMints: [...this.heliusState.incompleteMints, ...newlyIncomplete].slice(-10)
     };
-    this.status.incompleteHeliusTransactions += newlyIncomplete.length;
+    this.status.incompleteHeliusTransactions += newlyIncomplete.length;\n    void this.appendAudit("DATA_GAP", null, { reason: "HELIUS_COVERAGE_INTERRUPTED", affectedMints: newlyIncomplete }).catch(() => undefined);
   }
 
   private markHeliusIncomplete(): void {
@@ -922,7 +984,7 @@ export default {
     if (url.pathname === "/candidates" && request.method === "GET") {
       return Response.json(await coordinator.listCandidates());
     }
-    if (url.pathname === "/observations" && request.method === "GET") {
+    if (url.pathname === "/audit" && request.method === "GET") {\n      const after = Number(url.searchParams.get("after") ?? "0");\n      const limit = Number(url.searchParams.get("limit") ?? "100");\n      return Response.json(await coordinator.listAuditEvents(after, limit));\n    }\n    if (url.pathname === "/observations" && request.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? "100");
       const transactions = await coordinator.listVerifiedTransactions(limit);
       return Response.json({
