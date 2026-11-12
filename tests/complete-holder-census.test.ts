@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Keypair } from "@solana/web3.js";
 import { fetchCompleteHolderConcentration } from "../src/ingestion/holder-risk.js";
 
 const mint = "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi";
@@ -91,8 +92,8 @@ describe("complete holder census", () => {
     const fullPage = Response.json({
       jsonrpc: "2.0",
       result: {
-        token_accounts: Array.from({ length: 1_000 }, (_, index) => ({
-          address: `HolderAccountAddress${index.toString().padStart(4, "0")}`,
+        token_accounts: Array.from({ length: 1_000 }, () => ({
+          address: Keypair.generate().publicKey.toBase58(),
           owner: ownerA,
           mint,
           amount: "1"
