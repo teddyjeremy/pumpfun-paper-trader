@@ -420,6 +420,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return sessions.filter((item): item is AuditSessionMeta => item !== undefined);
   }
 
+  async listCandidateOutcomes(): Promise<unknown> {
+    await this.hydrate();
+    const trackers = await this.ctx.storage.list<CandidatePriceTracker>({ prefix: "candidate_price:" });
+    return [...trackers.values()].sort((a, b) => a.mint.localeCompare(b.mint) || a.quoteMint.localeCompare(b.quoteMint));
+  }
+
   async listAuditEvents(after = 0, limit = 100, requestedSessionId?: string): Promise<unknown> {
     await this.hydrate();
     const sessionId = requestedSessionId ?? this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
@@ -464,6 +470,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       apiKey: this.env.HELIUS_API_KEY,
       fetcher: this.rateLimitedHeliusFetcher()
     });
+    await this.appendAudit("RISK_EVIDENCE", mint, { evidenceType: "HOLDER_CONCENTRATION", result: jsonSafe(result) });
     if (result.status === "OBSERVED") {
       this.walletHoldingsByMint[mint] = result.snapshot.accounts.map(account => ({
         mint, wallet: account.owner, amount: account.amount
@@ -500,6 +507,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       links: result.links,
       holdings: this.walletHoldingsByMint[mint] ?? []
     });
+    await this.appendAudit("RISK_EVIDENCE", mint, { evidenceType: "WALLET_CLUSTER", fundingEvidence: jsonSafe(result), risk: jsonSafe(risk) });
     return { ...result, risk };
   }
 
@@ -1027,6 +1035,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   private markHeliusIncomplete(): void {
     const mint = this.heliusState.queue[0]?.mint;
+    void this.appendAudit("DATA_GAP", mint ?? null, { provider: "helius", reason: "INCOMPLETE_NOTIFICATION_OR_QUEUE_ITEM" }).catch(() => undefined);
     if (mint) this.heliusState = {
       ...this.heliusState,
       incompleteMints: [...new Set([...this.heliusState.incompleteMints, mint])].slice(-10)
@@ -1039,6 +1048,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.status.reconnectAttempts += 1;
     const delayMs = Math.min(60_000, 1_000 * (2 ** Math.min(this.status.reconnectAttempts - 1, 6)));
     this.status.nextReconnectAt = new Date(Date.now() + delayMs).toISOString();
+    void this.appendAudit("PROVIDER_STATUS", null, {
+      provider: "pumpportal", status: "RECONNECT_SCHEDULED",
+      attempt: this.status.reconnectAttempts, nextReconnectAt: this.status.nextReconnectAt
+    }).catch(() => undefined);
   }
 
   private syncCounts(): void {
@@ -1143,6 +1156,9 @@ export default {
     }
     if (url.pathname === "/audit/sessions" && request.method === "GET") {
       return Response.json(await coordinator.listAuditSessions());
+    }
+    if (url.pathname === "/candidate-outcomes" && request.method === "GET") {
+      return Response.json(await coordinator.listCandidateOutcomes());
     }
     if (url.pathname === "/audit" && request.method === "GET") {
       const after = Number(url.searchParams.get("after") ?? "0");
