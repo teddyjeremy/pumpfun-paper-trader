@@ -157,6 +157,16 @@ export function buildExecutablePaperQuote(input: {
 
   const venue = quoteVenue(quote);
   const fees = sdkFees(quote);
+  const protocolFeeBase = assertBaseUnits(fees.protocol, "SDK protocol fee", true);
+  const creatorFeeBase = assertBaseUnits(fees.creator, "SDK creator fee", true);
+  const poolFeeBase = assertBaseUnits(fees.pool, "SDK pool fee", true);
+  const pumpFeeBase = assertBaseUnits(fees.pumpAggregate, "SDK aggregate Pump fee", true);
+  const grossQuoteBase = assertBaseUnits(quote.grossQuoteAmountBaseUnits, "Gross quote amount");
+  const netQuoteBase = assertBaseUnits(quote.netQuoteAmountBaseUnits, "Net quote amount");
+  const sdkFeeTotalBase = protocolFeeBase + creatorFeeBase + poolFeeBase + pumpFeeBase;
+  if (grossQuoteBase < netQuoteBase || grossQuoteBase - netQuoteBase !== sdkFeeTotalBase) {
+    throw new Error("SDK gross/net quote amounts do not reconcile exactly with all venue fee components.");
+  }
   const protocolFeeUsd = baseUnitsToNumber(fees.protocol, quote.quoteDecimals) * solUsd.priceUsd;
   const creatorFeeUsd = baseUnitsToNumber(fees.creator, quote.quoteDecimals) * solUsd.priceUsd;
   const poolFeeUsd = baseUnitsToNumber(fees.pool, quote.quoteDecimals) * solUsd.priceUsd;
@@ -166,12 +176,6 @@ export function buildExecutablePaperQuote(input: {
   const outputAmount = assertBaseUnits(quote.outputAmountBaseUnits, "SDK output amount");
   const inputAmount = assertBaseUnits(quote.inputAmountBaseUnits, "SDK input amount");
   const feeTotal = protocolFeeUsd + creatorFeeUsd + poolFeeUsd + pumpFeeUsd;
-  if (quote.side === "BUY" && Math.abs((netQuoteUsd + feeTotal) - grossQuoteUsd) > Math.max(0.00000001, grossQuoteUsd * 0.000001)) {
-    throw new Error("SDK buy quote gross/net amounts do not reconcile with its fee breakdown.");
-  }
-  if (quote.side === "SELL" && netQuoteUsd > grossQuoteUsd + 0.00000001) {
-    throw new Error("SDK sell quote net proceeds exceed gross proceeds.");
-  }
 
   const requestedUsd = quote.side === "BUY" ? netQuoteUsd : grossQuoteUsd;
   const outputUsd = quote.side === "BUY" ? netQuoteUsd : grossQuoteUsd;
