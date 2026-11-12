@@ -75,6 +75,7 @@ function humanTokenAmount(amountBaseUnits: string, decimals: number): number {
   return amount;
 }
 function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL", mint: string): void {
+  if (!Number.isFinite(now)) throw new Error("Quote validation clock is invalid.");
   if (!quote.executable || quote.side !== side || quote.mint !== mint ||
       !quote.quoteId || !quote.provider || !quote.routeId) throw new Error("Executable quote identity or status is invalid.");
   const observed = Date.parse(quote.observedAt), expires = Date.parse(quote.expiresAt);
