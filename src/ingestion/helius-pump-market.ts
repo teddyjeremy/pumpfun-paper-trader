@@ -27,7 +27,7 @@ export async function refreshPumpMarketStateFromHelius(input: {
   state: PumpMarketState;
   config: HeliusAccountReadConfig;
 }): Promise<PumpMarketState> {
-  const nowMs = (input.config.now ?? Date.now)();
+  let nowMs = (input.config.now ?? Date.now)();
   if (!Number.isFinite(nowMs)) {
     return { ...input.state, status: "EXIT_BLOCKED", pool: null,
       reason: "Helius account verifier received an invalid local timestamp." };
@@ -52,6 +52,8 @@ export async function refreshPumpMarketStateFromHelius(input: {
 
   let curveState: PumpMarketState;
   try {
+    nowMs = (input.config.now ?? Date.now)();
+    if (!Number.isFinite(nowMs)) throw new Error("Invalid curve verification timestamp.");
     curveState = applyVerifiedPumpCurveAccount({
       state: input.state, account: curveAccount, nowMs
     });
@@ -81,6 +83,8 @@ export async function refreshPumpMarketStateFromHelius(input: {
     if (!poolAccount || !baseVaultAccount || !quoteVaultAccount) {
       return { ...curveState, reason: "Curve is complete; canonical pool or one of its vault accounts is not yet available." };
     }
+    nowMs = (input.config.now ?? Date.now)();
+    if (!Number.isFinite(nowMs)) throw new Error("Invalid pool verification timestamp.");
     return applyVerifiedPumpSwapPoolAccounts({
       state: curveState, poolAccount, baseVaultAccount, quoteVaultAccount, nowMs
     });
