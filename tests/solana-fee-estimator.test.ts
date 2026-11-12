@@ -220,8 +220,9 @@ describe("unsigned transaction fee-message compiler", () => {
     expect(result.writableAccountKeys).toContain(recipient.toBase58());
     const decoded = Message.from(Buffer.from(result.messageBase64, "base64"));
     expect(decoded.instructions).toHaveLength(2);
-    expect(decoded.instructions[0]?.data[0]).toBe(2);
-    expect(decoded.instructions[0]?.data.readUInt32LE(1)).toBe(240_000);
+    const computeLimitData = decodeBase58ForTest(decoded.instructions[0]!.data);
+    expect(computeLimitData[0]).toBe(2);
+    expect(computeLimitData.readUInt32LE(1)).toBe(240_000);
   });
 
   it("rejects caller-provided compute-budget instructions to prevent fee-setting ambiguity", async () => {
@@ -248,3 +249,21 @@ describe("unsigned transaction fee-message compiler", () => {
     })).rejects.toThrow(/compute-unit limit/);
   });
 });
+
+
+function decodeBase58ForTest(value: string): Buffer {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let number = 0n;
+  for (const char of value) {
+    const digit = alphabet.indexOf(char);
+    if (digit < 0) throw new Error("Invalid base58 instruction data.");
+    number = number * 58n + BigInt(digit);
+  }
+  const bytes: number[] = [];
+  while (number > 0n) {
+    bytes.unshift(Number(number & 255n));
+    number >>= 8n;
+  }
+  for (let index = 0; index < value.length && value[index] === "1"; index += 1) bytes.unshift(0);
+  return Buffer.from(bytes);
+}
