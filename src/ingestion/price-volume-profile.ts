@@ -279,6 +279,10 @@ export function buildCandidatePriceVolumeProfiles(
         if (bucket.lowPrice < lowPrice) {
           lowPrice = bucket.lowPrice;
           pullbackLowIndex = i;
+          if (((peakPrice - lowPrice) / peakPrice) * 100 > 40) {
+            tooDeep = true;
+            break;
+          }
         }
       }
     }
@@ -286,7 +290,7 @@ export function buildCandidatePriceVolumeProfiles(
     const pullbackPct = peakPrice > 0 && Number.isFinite(lowPrice)
       ? ((peakPrice - lowPrice) / peakPrice) * 100
       : null;
-    const impulseBuckets = peakIndex >= 0 ? buckets.slice(thresholdIndex, peakIndex + 1) : [];
+    const impulseBuckets = peakIndex >= 0 ? buckets.slice(0, peakIndex + 1) : [];
     const pullbackEnd = reclaimIndex >= 0 ? pullbackLowIndex : buckets.length - 1;
     const pullbackBuckets = pullbackIndex >= 0 && pullbackEnd >= pullbackIndex
       ? buckets.slice(pullbackIndex, pullbackEnd + 1)
