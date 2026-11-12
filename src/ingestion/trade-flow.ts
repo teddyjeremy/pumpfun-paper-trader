@@ -133,8 +133,12 @@ export function buildCandidateTradeFlows(
     const firstFullyCoveredWindow = coverageStart === undefined
       ? null
       : Math.ceil(coverageStart / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
+    const latestCompletedWindowEnd =
+      Math.floor(nowSeconds / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
+    const latestThreeAreFresh = Boolean(latestThree) &&
+      latestThree![2]!.endTime === latestCompletedWindowEnd;
     const dataComplete = !incomplete.has(group.mint) &&
-      Boolean(latestThree) &&
+      latestThreeAreFresh &&
       (firstFullyCoveredWindow === null || latestThree![0]!.startTime >= firstFullyCoveredWindow);
     const flowConfirmationPass = dataComplete &&
       latestThreeWindowFlowPass &&
