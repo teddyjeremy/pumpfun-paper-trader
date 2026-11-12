@@ -222,8 +222,8 @@ export function decodePumpSwapPoolAccount(account: RawProgramAccount): DecodedPu
   if (account.owner !== PUMP_AMM_PROGRAM_ID) throw new Error("Pool account is not owned by the PumpSwap program.");
   assertDiscriminator(account.data, POOL_DISCRIMINATOR, "PumpSwap pool");
   const data = account.data;
-  // Base layout is 245 bytes; appended fields are virtual quote reserves,
-  // creator fee bps, can_edit_creator_fee and is_holder_reward.
+  // Base layout is 245 bytes; later IDL versions append virtual quote reserves,
+  // creator fee bps, edit/holder flags, protocol fee accumulator and creator fee accumulator.
   if (![245, 261, 269, 270, 271, 279, 287].includes(data.length)) {
     throw new Error("Unsupported or partially written PumpSwap pool account length.");
   }
