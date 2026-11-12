@@ -325,6 +325,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
+  private async flushAllHeliusBackfillArchivesToPostgres(): Promise<void> {
+    if (!this.postgresIngestConfigured) return;
+    const sessions = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
+    for (const sessionId of sessions) {
+      await this.flushHeliusBackfillArchivesToPostgres(sessionId);
+    }
+  }
+
   private async flushAllAuditSessionsToPostgres(): Promise<void> {
     if (!this.postgresIngestConfigured) return;
     const sessions = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
@@ -357,7 +365,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await this.drainHeliusQueue();
     }
     await this.flushAllAuditSessionsToPostgres();
-    await this.flushHeliusBackfillArchivesToPostgres();
+    await this.flushAllHeliusBackfillArchivesToPostgres();
     if (this.status.enabled && this.postgresLeaseHeld) {
       const now = Date.now();
       const pendingRetryAt = this.heliusState.queue
