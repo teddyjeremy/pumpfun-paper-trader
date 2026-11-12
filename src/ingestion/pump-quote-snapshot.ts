@@ -98,7 +98,7 @@ export function verifyPumpQuoteAccountSnapshot(input: {
     slot: input.snapshot.slot,
     commitment: input.snapshot.commitment,
     observedAt: input.snapshot.observedAt,
-    accounts,
+    accounts: accounts as VerifiedPumpQuoteSnapshot["accounts"],
     accountCount: entries.length
   };
 }
