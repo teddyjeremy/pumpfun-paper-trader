@@ -22,6 +22,14 @@ describe("Helius paper priority fee estimation",()=>{
     expect(estimate.microLamportsPerComputeUnit).toBe("3000");
     expect(estimate.priorityFeeLamports).toBe("600");
   });
+  it("records when priority fee samples are scoped to writable accounts",()=>{
+    const estimate=buildPaperNetworkFeeEstimate({
+      samples:[{slot:1,microLamportsPerComputeUnit:"1000"}],
+      computeUnitLimit:200_000,writableAccountCount:3
+    });
+    expect(estimate.priorityFeeScope).toBe("ACCOUNT_SPECIFIC");
+    expect(estimate.writableAccountCount).toBe(3);
+  });
   it("returns zero priority fee only when the provider explicitly reports zero samples",()=>{
     const estimate=buildPaperNetworkFeeEstimate({
       samples:[{slot:1,microLamportsPerComputeUnit:"0"}],computeUnitLimit:200_000
