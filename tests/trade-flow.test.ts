@@ -116,7 +116,7 @@ describe("verified Pump.fun trade-flow windows", () => {
       nowSeconds: 108, horizonSeconds: 60, candidateMints: [mint]
     });
     expect(flow).toMatchObject({
-      mint, observedTradeEvents: 0, dataComplete: false,
+      mint, quoteMint: null, quoteUnit: "UNKNOWN", observedTradeEvents: 0, dataComplete: false,
       latestThreeWindowFlowPass: false, flowConfirmationPass: false,
       entryEligible: false
     });
