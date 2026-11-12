@@ -15,6 +15,8 @@ const pool: PumpSwapQuoteState = {
   baseVaultReserves: "1000000000000",
   quoteVaultReserves: "30000000000",
   virtualQuoteReserves: "-100000000",
+  protocolFeeBucketsBaseUnits: "5000000",
+  creatorFeeBucketsBaseUnits: "3000000",
   fees: { protocol: 50, creator: 30, lp: 20 }
 };
 
@@ -58,6 +60,14 @@ describe("Pump exact-input quote math", () => {
     expect(() => quotePumpSwapSell({
       tokenInBaseUnits: "1000", state: { ...pool, fees: { protocol: 9000, creator: 2000, lp: 0 } }
     })).toThrow(/exceed 100%/);
+  });
+
+  it("caps PumpSwap sells at quote-vault liquidity excluding booked protocol and creator fees", () => {
+    expect(() => quotePumpSwapSell({
+      tokenInBaseUnits: "100000000000000000000",
+      state: { ...pool, quoteVaultReserves: "1000000", virtualQuoteReserves: "0",
+        protocolFeeBucketsBaseUnits: "700000", creatorFeeBucketsBaseUnits: "300000" }
+    })).toThrow(/fee buckets/);
   });
 
   it("rejects inputs whose integer rounding produces zero output", () => {
