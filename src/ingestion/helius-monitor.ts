@@ -86,7 +86,7 @@ export function reconcileHeliusSubscriptions(
   const subscriptions = selected.map(candidate => {
     const existing = byMint.get(candidate.mint);
     if (existing?.bondingCurve === candidate.bondingCurve) {
-      return { ...existing, subscriptionId: null, subscribedAt: null };
+      return existing;
     }
     const requestId = state.nextRequestId++;
     return { ...candidate, requestId, subscriptionId: null, subscribedAt: null };
@@ -149,4 +149,12 @@ export function enqueueHeliusNotification(
 export function takeHeliusWork(state: HeliusMonitorState): { state: HeliusMonitorState; work: HeliusSignatureWork | null } {
   if (state.queue.length === 0) return { state, work: null };
   return { state: { ...state, queue: state.queue.slice(1) }, work: state.queue[0] ?? null };
+}
+
+/** Drop socket-scoped subscription IDs before reconnecting a new WebSocket. */
+export function resetHeliusSubscriptionIds(state: HeliusMonitorState): HeliusMonitorState {
+  return {
+    ...state,
+    subscriptions: state.subscriptions.map(item => ({ ...item, subscriptionId: null, subscribedAt: null }))
+  };
 }
