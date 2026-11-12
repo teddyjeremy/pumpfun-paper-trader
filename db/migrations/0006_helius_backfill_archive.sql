@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS helius_backfill_jobs (
   mint TEXT NOT NULL,
   bonding_curve TEXT NOT NULL,
   create_signature TEXT NOT NULL,
-  launch_block_time BIGINT NOT NULL CHECK (launch_block_time >= 0),
+  launch_block_time BIGINT CHECK (launch_block_time IS NULL OR launch_block_time >= 0),
   horizon_seconds INTEGER NOT NULL CHECK (horizon_seconds BETWEEN 60 AND 1800),
   max_signatures INTEGER NOT NULL CHECK (max_signatures BETWEEN 1 AND 500),
   pages_scanned INTEGER NOT NULL DEFAULT 0 CHECK (pages_scanned >= 0),
