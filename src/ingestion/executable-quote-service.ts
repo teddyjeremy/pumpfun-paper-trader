@@ -8,12 +8,38 @@ import {
 import { fetchHeliusPriorityFeeSamples, buildPaperNetworkFeeEstimate } from "./helius-priority-fee.js";
 import type { HeliusRpcConfig } from "./helius.js";
 import { fetchSolUsdPrice } from "./sol-usd-price.js";
+import { fetchPumpCurveSdkQuote } from "./pump-sdk-curve-quote-adapter.js";
+import { fetchPumpSwapSdkQuote } from "./pump-sdk-quote-adapter.js";
+import type { HeliusAccountReadConfig } from "./helius-accounts.js";
 
 export type QuoteSide = "BUY" | "SELL";
 export type OfflineQuoteFetcher = (input: {
   side: QuoteSide;
   amountBaseUnits: string;
 }) => Promise<OfflinePumpQuote>;
+
+/** Creates a curve quote callback backed by the verified Helius account snapshot adapter. */
+export function createPumpCurveOfflineQuoteFetcher(input: {
+  mint: string;
+  config: HeliusAccountReadConfig;
+}): OfflineQuoteFetcher {
+  return request => fetchPumpCurveSdkQuote({
+    mint: input.mint, side: request.side,
+    amountBaseUnits: request.amountBaseUnits, config: input.config
+  });
+}
+
+/** Creates a PumpSwap quote callback backed by the verified pool/account snapshot adapter. */
+export function createPumpSwapOfflineQuoteFetcher(input: {
+  mint: string;
+  poolAddress: string;
+  config: HeliusAccountReadConfig;
+}): OfflineQuoteFetcher {
+  return request => fetchPumpSwapSdkQuote({
+    mint: input.mint, poolAddress: input.poolAddress, side: request.side,
+    amountBaseUnits: request.amountBaseUnits, config: input.config
+  });
+}
 
 export interface ExecutableRoundTripQuote {
   status: "QUOTES_VALIDATED";
