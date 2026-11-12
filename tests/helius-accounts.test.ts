@@ -74,7 +74,7 @@ describe("Helius same-slot account snapshots", () => {
   });
 
   it("discovers mint-matched PumpSwap pools but only selects the SDK-identified canonical pool", async () => {
-    const data = new Uint8Array(271);
+    const data = new Uint8Array(287);
     data.set([241, 154, 109, 4, 17, 177, 109, 188], 0);
     data[8] = 254;
     data[9] = 0; data[10] = 0;
