@@ -23,6 +23,13 @@ Each session needs a unique ID, UTC start/end, strategy/config version and durab
 10. Every rejected/watch candidate's follow-up observations, peak price/time, multiple from rejection-time and discovery prices, 1.5x/2x/3x milestones, time-to-milestone and follow-up completeness.
 11. Every dropped event, queue overflow, provider outage, reconnect, missing window, persistence failure and recovery.
 
+## Micro-trade filtering and pullback volume
+- Trades with USD notional less than or equal to $0.01 are excluded from both buy and sell flow counts, unique-wallet counts, and the price/volume buckets used for strategy evidence.
+- SOL quote amounts are converted from lamports using a fresh SOL/USDT last-trade reference. The Worker validates the symbol, positive price, exchange close timestamp and a maximum 10-second age; the in-memory request cache is one second.
+- The reference price is only for filtering tiny trades. It is not a bonding-curve execution quote, fill price or PnL price.
+- If the reference price is missing, stale or invalid, the filter is UNAVAILABLE. Flow confirmation is blocked and pullback/reclaim buy-volume ratios remain UNKNOWN; the system does not silently count spam as valid evidence.
+- Pullback volume is compared using buy-side quote volume only: pullback buys versus impulse buys, and reclaim buys versus pullback buys. Sell volume remains separately recorded for pressure analysis and the >3:1 flow rule.
+
 ## Missed-candidate outcomes
 - Rejection must never delete a candidate's session history.
 - Keep discovery price separate from decision-time price. A 3x from launch may still be a poor entry after a large pre-rejection run.
