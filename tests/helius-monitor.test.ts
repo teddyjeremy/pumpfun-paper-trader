@@ -49,6 +49,10 @@ describe("bounded Helius candidate monitor", () => {
     state = resetHeliusSubscriptionIds(state);
     expect(state.subscriptions[0]!.subscriptionId).toBeNull();
     expect(state.subscriptions[0]!.requestId).toBe(requestId);
+    state = { ...state, incompleteMints: [candidate(0).mint] };
+    state = confirmHeliusSubscription(state, requestId, 78, "2026-11-12T00:01:00.000Z");
+    expect(state.incompleteMints).not.toContain(candidate(0).mint);
+    expect(state.subscriptions[0]!.subscriptionId).toBe(78);
   });
   it("queues successful logs, ignores failed transactions and deduplicates signatures", () => {
     let state = reconcileHeliusSubscriptions(emptyHeliusMonitorState(), [candidate(0)]);
