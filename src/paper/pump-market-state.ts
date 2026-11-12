@@ -10,6 +10,7 @@ export interface VerifiedCurveEvidence {
   verified: true;
   mint: string;
   curveAddress: string;
+  quoteMint: string;
   complete: boolean;
   migrated: boolean;
   tokenReserveBaseUnits: string;
@@ -93,7 +94,7 @@ export function updatePumpMarketState(
     const curve = input.curve;
     const terminalCurve = curve.complete || curve.migrated;
     const curveValid = curve.verified === true && curve.mint === previous.mint &&
-      Boolean(curve.curveAddress.trim()) && validBaseUnits(curve.tokenReserveBaseUnits, terminalCurve) &&
+      Boolean(curve.curveAddress.trim()) && Boolean(curve.quoteMint.trim()) && validBaseUnits(curve.tokenReserveBaseUnits, terminalCurve) &&
       validBaseUnits(curve.quoteReserveBaseUnits, terminalCurve) && validSlot(curve.slot) &&
       validObservation(curve.observedAt, nowMs);
     if (!curveValid) {
