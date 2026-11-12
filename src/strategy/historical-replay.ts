@@ -12,8 +12,10 @@ export interface HistoricalReplayCoinInput {
   horizonSeconds?: number;
   decodeComplete: boolean;
   decodeReason?: string | null;
-  /** Historical second at which independently sourced wallet-link and holder coverage became complete. */
+  /** Historical second at which the sampled wallet-link evidence was fully ingested. */
   walletClusterEvidenceCompleteAt?: number;
+  /** Historical second at which a genuinely complete holder census was independently verified. Top-20 snapshots do not qualify. */
+  holderCensusCompleteAt?: number;
   walletLinks?: readonly WalletLinkEvidence[];
   walletHoldings?: readonly WalletHoldingEvidence[];
 }
@@ -75,7 +77,7 @@ export interface HistoricalCoinReplay {
   snapshots: HistoricalSetupSnapshot[];
   firstSetup: HistoricalSetupSnapshot | null;
   outcome: HistoricalEntryOutcome | null;
-  status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY";
+  status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY" | "RISK_NOT_CLEARED";
 }
 
 export interface VolumeThresholdCandidate {
@@ -125,6 +127,22 @@ function sortedTrades(input: HistoricalReplayCoinInput): PumpTradeEvent[] {
     .sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
 }
 
+export function classifyHistoricalWalletClusterRisk(input: {
+  walletRisk: ReturnType<typeof evaluateWalletClusterRisk> | null;
+  walletClusterEvidenceCompleteAt?: number;
+  holderCensusCompleteAt?: number;
+  evaluatedAt: number;
+}): "PASS_COMPLETE" | "REJECT_OBSERVED" | "UNKNOWN" {
+  if (input.walletRisk?.status === "REJECT_OBSERVED") return "REJECT_OBSERVED";
+  const walletCoverageComplete = Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) &&
+    input.walletClusterEvidenceCompleteAt! <= input.evaluatedAt;
+  const holderCoverageComplete = Number.isSafeInteger(input.holderCensusCompleteAt) &&
+    input.holderCensusCompleteAt! <= input.evaluatedAt;
+  if (walletCoverageComplete && holderCoverageComplete && input.walletRisk !== null &&
+      input.walletRisk.attributionStatus !== "INVALID_EVIDENCE") return "PASS_COMPLETE";
+  return "UNKNOWN";
+}
+
 function metrics(input: {
   trades: readonly PumpTradeEvent[];
   entryAt: number;
@@ -132,6 +150,7 @@ function metrics(input: {
   horizonEnd: number;
   label?: HistoricalReplayConfig["label"];
   decodeComplete: boolean;
+  riskCleared: boolean;
 }): HistoricalEntryOutcome | null {
   const future = input.trades.filter(event => {
     const at = eventTimestamp(event);
@@ -150,15 +169,17 @@ function metrics(input: {
   const netFinalReturnPct = roundTripCostPct === null ? null : grossFinalReturnPct - roundTripCostPct;
   let label: HistoricalEntryOutcome["label"] = "UNKNOWN";
   let labelReason = "A complete forward window, explicit excursion thresholds and an assumed round-trip cost are required.";
-  if (input.decodeComplete && input.label && netFinalReturnPct !== null) {
+  if (!input.riskCleared) {
+    labelReason = "Creator and complete holder/cluster evidence were not cleared at the candidate time; reserve-price performance is exploratory and is not labelled as a strategy outcome.";
+  } else if (input.decodeComplete && input.label && netFinalReturnPct !== null) {
     const metExcursions = maxFavorableExcursionPct >= input.label.minFavorableExcursionPct &&
       maxAdverseExcursionPct <= input.label.maxAdverseExcursionPct;
     label = metExcursions && netFinalReturnPct > 0 ? "SUCCESS" : "FAILURE";
     labelReason = label === "SUCCESS"
-      ? "Observed forward path met both excursion criteria and remained net-positive after the supplied round-trip cost."
+      ? "Risk-cleared candidate path met both excursion criteria and remained net-positive after the supplied round-trip cost."
       : !metExcursions
-        ? "Observed forward path failed at least one configured excursion criterion."
-        : "Observed final return was not positive after the supplied round-trip cost.";
+        ? "Risk-cleared candidate path failed at least one configured excursion criterion."
+        : "Risk-cleared candidate final return was not positive after the supplied round-trip cost.";
   } else if (!input.decodeComplete) {
     labelReason = "Transaction decoding coverage is incomplete; outcome is not labelled.";
   }
@@ -230,7 +251,7 @@ export function replayHistoricalCoin(
         .find(item => item.mint === input.mint && item.quoteUnit === "SOL");
       if (!profile || !flow) continue;
       // Risk evaluators must see only evidence available at this historical instant.
-      const evidenceTransactions = input.transactions.filter(tx => typeof tx.blockTime === "number" && Number.isSafeInteger(tx.blockTime) && tx.blockTime <= evaluatedAt);
+      const evidenceTransactions = input.transactions.filter(tx => tx.blockTime !== null && tx.blockTime !== undefined && Number.isSafeInteger(tx.blockTime) && tx.blockTime <= evaluatedAt);
       const creatorRisk = evaluateCreatorSellRisk(evidenceTransactions, {
         nowSeconds: evaluatedAt,
         candidateMints: [input.mint],
@@ -254,9 +275,16 @@ export function replayHistoricalCoin(
         })
       }) : null;
       const creatorRiskStatus = creatorRisk?.status ?? "UNKNOWN";
-      const walletClusterRiskStatus = walletRisk?.status === "REJECT_OBSERVED"
-        ? "REJECT_OBSERVED"
-        : Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) && input.walletClusterEvidenceCompleteAt! <= evaluatedAt && walletRisk !== null ? "PASS_COMPLETE" : "UNKNOWN";
+      const walletClusterRiskStatus = classifyHistoricalWalletClusterRisk({
+        walletRisk,
+        ...(input.walletClusterEvidenceCompleteAt === undefined ? {} : {
+          walletClusterEvidenceCompleteAt: input.walletClusterEvidenceCompleteAt
+        }),
+        ...(input.holderCensusCompleteAt === undefined ? {} : {
+          holderCensusCompleteAt: input.holderCensusCompleteAt
+        }),
+        evaluatedAt
+      });
       const setupEligible = input.decodeComplete && profile.dataComplete &&
         profile.microTradeFilterStatus === "APPLIED" &&
         profile.reclaimDetected && profile.pullbackVolumeVsImpulsePct !== null &&
@@ -297,15 +325,17 @@ export function replayHistoricalCoin(
 
   const entryAt = entryEvent ? eventTimestamp(entryEvent) : null;
   const entryPrice = entryEvent ? eventPrice(entryEvent) : null;
-  const outcome = entryAt !== null && entryPrice !== null
+  const outcome = firstSetup !== null && entryAt !== null && entryPrice !== null
     ? metrics({
         trades, entryAt, entryPrice, horizonEnd,
-        label: config.label, decodeComplete: input.decodeComplete
+        label: config.label, decodeComplete: input.decodeComplete,
+        riskCleared: firstSetup.riskClearedSetupEligible
       })
     : null;
   const status = !input.decodeComplete ? "INCOMPLETE"
     : !firstSetup ? "NO_SETUP"
-      : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
+      : !firstSetup.riskClearedSetupEligible ? "RISK_NOT_CLEARED"
+        : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
   return {
     mint: input.mint,
     launchBlockTime: input.launchBlockTime,
