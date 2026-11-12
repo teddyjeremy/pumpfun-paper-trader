@@ -761,6 +761,15 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
           transaction.receivedAt,JSON.stringify(transaction.createEvents),JSON.stringify(transaction.tradeEvents),raw]
       );
       if (result.rowCount !== 1) throw new Error("Historical transaction signature conflicts with previously archived evidence.");
+      if (transaction.source === "HISTORICAL_BACKFILL") {
+        await client.query(
+          `UPDATE helius_backfill_jobs SET verified_transaction_count=(
+             SELECT COUNT(*)::int FROM helius_transaction_observations
+             WHERE session_id=$1 AND mint=$2 AND observation_source='HISTORICAL_BACKFILL'
+           ) WHERE session_id=$1 AND mint=$2`,
+          [sessionId,mint]
+        );
+      }
     }
     await client.query("COMMIT");
   } catch (error) {
