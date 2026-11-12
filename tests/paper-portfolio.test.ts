@@ -36,8 +36,8 @@ describe("paper portfolio accounting",()=>{
  it("marks high water and realizes net proceeds without pretending fees are profit",()=>{
   const p=createPaperPortfolio();
   const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
-  const marked=markPaperPosition(opened.state,{positionId:"p1",priceUsdPerToken:0.000002,markedAt:now});
-  expect(marked.positions[0]!.highWaterPriceUsdPerToken).toBe(0.000002);
+  const marked=markPaperPosition(opened.state,{positionId:"p1",priceUsdPerToken:2,markedAt:now});
+  expect(marked.positions[0]!.highWaterPriceUsdPerToken).toBe(2);
   const sell=quote("mint","SELL","1000000",1.5);
   const closed=closePaperPosition(marked,{positionId:"p1",sellQuote:sell,exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
   expect(closed.position.status).toBe("CLOSED");
