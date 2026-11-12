@@ -11,6 +11,7 @@ import {
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
 import { buildCandidateTradeFlows } from "../../../../src/ingestion/trade-flow.js";
+import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
@@ -309,14 +310,26 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         : subscriptionWindowStart;
       return [[item.mint, start]];
     }));
+    const candidateMints = this.discovery.candidates
+      .filter(candidate => candidate.status === "DISCOVERED")
+      .map(candidate => candidate.mint);
     const flows = buildCandidateTradeFlows(this.verifiedTransactions, {
       incompleteMints,
       coverageStartByMint,
-      candidateMints: this.discovery.candidates
-        .filter(candidate => candidate.status === "DISCOVERED")
-        .map(candidate => candidate.mint)
+      candidateMints
     });
-    const rankedFlows = [...flows].sort((a, b) =>
+    const creatorSellRisk = evaluateCreatorSellRisk(this.verifiedTransactions, {
+      nowSeconds: Math.floor(Date.now() / 1_000),
+      candidateMints,
+      incompleteMints,
+      coverageStartByMint
+    });
+    const creatorRiskByMint = new Map(creatorSellRisk.map(item => [item.mint, item]));
+    const rankedFlows = [...flows].map(flow => ({
+      ...flow,
+      creatorSellStatus: creatorRiskByMint.get(flow.mint)?.status ?? "UNKNOWN"
+    })).sort((a, b) =>
+      Number(a.creatorSellStatus === "REJECT_OBSERVED") - Number(b.creatorSellStatus === "REJECT_OBSERVED") ||
       Number(b.dataComplete) - Number(a.dataComplete) ||
       Number(b.flowConfirmationPass) - Number(a.flowConfirmationPass) ||
       Number(b.latestThreeWindowFlowPass) - Number(a.latestThreeWindowFlowPass) ||
@@ -331,11 +344,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       retainedVerifiedTransactions: this.verifiedTransactions.length,
       retentionMayBeTruncated,
       knownIncompleteMints: incompleteMints,
+      creatorSellRisk,
       candidateCoverage: this.discovery.candidates.map(candidate => {
         const subscription = this.heliusState.subscriptions.find(item => item.mint === candidate.mint);
         return {
           mint: candidate.mint,
           status: candidate.status,
+          creatorSellStatus: creatorRiskByMint.get(candidate.mint)?.status ?? "UNKNOWN",
           monitoring: subscription?.subscriptionId !== null && subscription?.subscriptionId !== undefined
             ? "SUBSCRIBED"
             : subscription ? "SUBSCRIPTION_PENDING" : "NOT_MONITORED"
