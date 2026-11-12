@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PumpTradeEvent } from "../src/ingestion/pump-events.js";
+import type { PumpCreateEvent, PumpTradeEvent } from "../src/ingestion/pump-events.js";
 import type { VerifiedPumpTransaction } from "../src/ingestion/helius.js";
 import { buildCandidatePriceVolumeProfiles } from "../src/ingestion/price-volume-profile.js";
 import { SOL_QUOTE_MINT } from "../src/ingestion/trade-flow.js";
@@ -19,6 +19,17 @@ function trade(timestamp: bigint, price: bigint, isBuy = true): PumpTradeEvent {
     buybackFee: 0n, shareholders: [], quoteMint: SOL_QUOTE_MINT,
     quoteAmount: price, virtualQuoteReserves: 0n, realQuoteReserves: 0n,
     holderRewardsBps: 0n, holderRewards: 0n, creatorFeeUnclaimed: 0n
+  };
+}
+
+function createEvent(): PumpCreateEvent {
+  return {
+    name: "Test", symbol: "TST", uri: "https://example.invalid/metadata.json",
+    mint, bondingCurve: "curve", user: "creator", creator: "creator", timestamp: 100n,
+    virtualTokenReserves: 1_000n, virtualSolReserves: 1_000n, realTokenReserves: 1n,
+    tokenTotalSupply: 1_000_000n, tokenProgram: "token-program",
+    isMayhemMode: false, isCashbackEnabled: false, quoteMint: SOL_QUOTE_MINT,
+    virtualQuoteReserves: 0n, creatorFeeBps: 0n, isHolderReward: false, depth: 0
   };
 }
 
@@ -54,6 +65,18 @@ describe("observed price and stage-volume profile", () => {
     expect(profile?.reclaimVolume.totalQuoteVolume).toBe("1200");
     expect(profile?.pullbackVolumeVsImpulsePct).toBe(95.56);
     expect(profile?.reclaimVolumeVsPullbackPct).toBe(55.81);
+  });
+
+  it("uses the verified launch reserve price as the impulse baseline", () => {
+    const base = transaction([trade(105n, 1_250n), trade(110n, 1_300n)]);
+    base.createEvents = [createEvent()];
+    const [profile] = buildCandidatePriceVolumeProfiles([base], {
+      nowSeconds: 115, horizonSeconds: 60, coverageStartByMint: { [mint]: 100 }
+    });
+    expect(profile?.baselinePrice).toBeCloseTo(1, 6);
+    expect(profile?.impulsePriceChangePct).toBeCloseTo(30, 6);
+    expect(profile?.coverageStatus).toBe("COMPLETE_FROM_LAUNCH");
+    expect(profile?.dataComplete).toBe(true);
   });
 
   it("does not call a greater-than-40% drawdown a valid pullback", () => {
