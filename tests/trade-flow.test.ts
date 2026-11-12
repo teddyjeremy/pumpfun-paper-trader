@@ -58,6 +58,7 @@ describe("verified Pump.fun trade-flow windows", () => {
     ];
     const [flow] = buildCandidateTradeFlows([tx(events)], { nowSeconds: 108, horizonSeconds: 60 });
     expect(flow?.latestThreeWindowFlowPass).toBe(false);
+    expect(flow?.dataComplete).toBe(false);
     expect(flow?.flowConfirmationPass).toBe(false);
   });
 
