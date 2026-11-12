@@ -63,10 +63,10 @@ export async function estimateSolanaTransactionFees(
       !BASE64.test(config.messageBase64)) {
     return unavailable("A valid base64 compiled transaction message is required.");
   }
-  if (!Array.isArray(config.writableAccountKeys) || config.accountKeys.length < 1 ||
-      config.accountKeys.length > 128 ||
-      config.accountKeys.some(key => typeof key !== "string" || !ADDRESS.test(key)) ||
-      new Set(config.accountKeys).size !== config.accountKeys.length) {
+  if (!Array.isArray(config.writableAccountKeys) || config.writableAccountKeys.length < 1 ||
+      config.writableAccountKeys.length > 128 ||
+      config.writableAccountKeys.some(key => typeof key !== "string" || !ADDRESS.test(key)) ||
+      new Set(config.writableAccountKeys).size !== config.writableAccountKeys.length) {
     return unavailable("Writable transaction account locks are missing, duplicated or invalid.");
   }
   if (!Number.isSafeInteger(config.computeUnitLimit) ||
@@ -81,7 +81,7 @@ export async function estimateSolanaTransactionFees(
 
   const [feeResponse, priorityResponse, slotResponse] = await Promise.all([
     rpc(fetcher, rpcUrl, "getFeeForMessage", [config.messageBase64, { commitment: "confirmed" }]),
-    rpc(fetcher, rpcUrl, "getRecentPrioritizationFees", [config.accountKeys]),
+    rpc(fetcher, rpcUrl, "getRecentPrioritizationFees", [config.writableAccountKeys]),
     rpc(fetcher, rpcUrl, "getSlot", [{ commitment: "confirmed" }])
   ]);
   if (!feeResponse.ok || !priorityResponse.ok || !slotResponse.ok) {
@@ -96,8 +96,10 @@ export async function estimateSolanaTransactionFees(
   if (!Number.isSafeInteger(currentSlot) || (currentSlot as number) < 1) {
     return unavailable("Solana RPC returned an invalid confirmed slot.");
   }
-  if (!Array.isArray(priorityResponse.result)) {
-    return unavailable("Solana RPC returned malformed prioritization-fee samples.");
+  if (!Array.isArray(priorityResponse.result) ||
+      priorityResponse.result.length < MIN_RECENT_FEE_SAMPLES ||
+      priorityResponse.result.length > RECENT_SLOT_WINDOW) {
+    return unavailable("Solana RPC returned malformed, insufficient or oversized prioritization-fee samples.");
   }
 
   const samples = priorityResponse.result.flatMap((item: unknown) => {
@@ -112,6 +114,9 @@ export async function estimateSolanaTransactionFees(
 
   if (samples.length < MIN_RECENT_FEE_SAMPLES) {
     return unavailable("Fewer than ten recent account-lock-specific priority-fee samples are available.");
+  }
+  if (new Set(samples.map(sample => sample.slot)).size !== samples.length) {
+    return unavailable("Recent priority-fee samples contain duplicate slots.");
   }
 
   const orderedFees = samples.map(sample => sample.microLamports).sort((a, b) =>
