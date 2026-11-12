@@ -1,9 +1,13 @@
 import Fastify from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import { authorizeDashboardRequest } from "./dashboard-auth.js";
 import { config } from "./config.js";
 import { diagnose, increment, snapshot } from "./diagnostics/registry.js";
 import { trackingSnapshot } from "./diagnostics/tracker.js";
-import { getPersistenceStatus, getTradingDashboardSnapshot } from "./persistence/postgres.js";
+import {
+  acquireWorkerLease, heartbeatWorkerLease, persistPaperAuditEvents,
+  releaseWorkerLease, getPersistenceStatus, getTradingDashboardSnapshot
+} from "./persistence/postgres.js";
 
 export const app = Fastify({
   logger: { level: config.LOG_LEVEL, redact: ["*.HELIUS_API_KEY", "*.apiKey", "*.secret", "*.authorization"] }
@@ -14,6 +18,18 @@ export const app = Fastify({
 app.addHook("onRequest", async (request, reply) => {
   const pathname = request.url.split("?")[0];
   if (pathname === "/health" || pathname === "/ready") return;
+  if (pathname === "/internal/paper-events" || pathname === "/internal/worker-lease") {
+    const expected = config.PAPER_EVENT_INGEST_TOKEN;
+    if (!expected) return reply.code(503).send({ error: "Internal ingestion authentication is not configured." });
+    const authorization = request.headers.authorization ?? "";
+    const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+    const a = Buffer.from(supplied);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      return reply.code(401).send({ error: "Internal service authentication required." });
+    }
+    return;
+  }
   const result = authorizeDashboardRequest({
     authorization: request.headers.authorization ?? null,
     username: config.DASHBOARD_USERNAME,
@@ -28,6 +44,49 @@ app.addHook("onRequest", async (request, reply) => {
     .code(401).send({ error: "Authentication required." });
 });
 
+
+
+app.post("/internal/paper-events", async (request, reply) => {
+  const body = request.body && typeof request.body === "object"
+    ? request.body as Record<string, unknown> : {};
+  const sessionId = body.sessionId;
+  const events = body.events;
+  if (typeof sessionId !== "string" || !sessionId.trim() ||
+      !Array.isArray(events) || events.length === 0 || events.length > 100) {
+    return reply.code(400).send({ error: "sessionId and 1-100 ordered events are required." });
+  }
+  try {
+    const result = await persistPaperAuditEvents(sessionId, events as never[]);
+    return { ok: true, ...result };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const conflict = message.includes("sequence") || message.includes("replay");
+    return reply.code(conflict ? 409 : 503).send({
+      error: conflict ? message : "Paper event persistence failed; the sender should retry."
+    });
+  }
+});
+
+app.post("/internal/worker-lease", async (request, reply) => {
+  const body = request.body && typeof request.body === "object"
+    ? request.body as Record<string, unknown> : {};
+  const { action, leaseName, ownerId, ttlSeconds } = body;
+  if ((action !== "acquire" && action !== "heartbeat" && action !== "release") ||
+      typeof leaseName !== "string" || typeof ownerId !== "string") {
+    return reply.code(400).send({ error: "action, leaseName and ownerId are required." });
+  }
+  try {
+    if (action === "acquire") {
+      return await acquireWorkerLease(leaseName, ownerId, typeof ttlSeconds === "number" ? ttlSeconds : 45);
+    }
+    if (action === "heartbeat") {
+      return await heartbeatWorkerLease(leaseName, ownerId, typeof ttlSeconds === "number" ? ttlSeconds : 45);
+    }
+    return { released: await releaseWorkerLease(leaseName, ownerId) };
+  } catch {
+    return reply.code(503).send({ error: "Worker lease persistence is unavailable." });
+  }
+});
 
 app.get("/health", async () => ({
   status: "ok",
