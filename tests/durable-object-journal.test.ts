@@ -273,6 +273,9 @@ describe("Durable Object audit storage contract", () => {
     storage.seed("helius_monitor_state", monitor);
     storage.seed("discovery_state", discovery);
     storage.seed("verified_transactions", [{ createEvents: [{ mint }], tradeEvents: [] }]);
+    storage.seed("holder_risk_snapshots", {
+      [mint]: { status: "OBSERVED", snapshot: { observedAt: "not-a-date" } }
+    });
 
     const { coordinator } = harness(storage, { HELIUS_API_KEY: "test-key" });
     const holder = vi.spyOn(coordinator, "getHolderRisk").mockResolvedValue({
@@ -281,7 +284,7 @@ describe("Durable Object audit storage contract", () => {
     const links = vi.spyOn(coordinator, "collectWalletLinks").mockResolvedValue({ status: "OBSERVED" });
 
     const result = await coordinator.collectNextRiskEvidence();
-    expect(result).toMatchObject({ status: "COLLECTED", mint, evidenceType: "HOLDER_CONCENTRATION" });
+    expect(result).toMatchObject({ status: "DATA_INCOMPLETE", mint, evidenceType: "HOLDER_CONCENTRATION", evidenceStatus: "DATA_INCOMPLETE" });
     expect(holder).toHaveBeenCalledTimes(1);
     expect(links).not.toHaveBeenCalled();
 
