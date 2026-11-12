@@ -32,6 +32,7 @@ The Worker now wires a deliberately smaller Helius path:
 - The Worker drains one signature at a time through a 2 requests/second token bucket, below the Helius Free 10 RPS ceiling. The generic priority queue remains available for future open-position prioritization but is not yet used by this candidate-only worker.
 - Individual transactions are fetched with standard `getTransaction`, decoded only after the successful-transaction gate, and retained with provider, commitment, slot, signature, mint and receipt timestamp. Verified retention is capped at 2,000 transactions.
 - Candidate expiry/migration removes its Helius subscription; socket reconnect clears socket-scoped subscription IDs and resubscribes the bounded active set. A persisted queue is drained after reconnection.
+- Authenticated `GET /observations?limit=100` exposes up to 500 most recent verified transactions for paper analysis. BigInt event amounts/reserves are serialized as decimal strings; this endpoint does not provide quotes or trading decisions.
 
 The token bucket is process-local and resets on Durable Object restart; it is conservative but not a durable global quota ledger. A worker restart can therefore create a short burst up to its two-token capacity. Provider gaps, queue overflow, fetch failures and malformed messages remain explicit data gaps. This does not provide historical backfill or guarantee that every chain event is observed.
 
