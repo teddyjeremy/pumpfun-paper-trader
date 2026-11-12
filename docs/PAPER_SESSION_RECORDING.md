@@ -109,3 +109,8 @@ The six-hour paper session remains blocked until the missing quote source, execu
 - When the curve is complete, it derives the canonical Pump pool-creator and index-0 pool PDAs, discovers candidates by `Pool.base_mint`, then re-fetches the curve, pool and both vaults together in a single Helius RPC context slot before accepting the migrated state.
 - A missing pool/vault leaves the market MIGRATION_PENDING; a mismatched owner, mint, authority, PDA, stale snapshot or empty liquidity sets EXIT_BLOCKED. Only a complete verified snapshot reaches MIGRATED_POOL_VERIFIED.
 - This pipeline is implemented and unit-tested, but it is not yet called by the Cloudflare Worker or connected to open paper positions, quote requests or the exit manager.
+
+## Official SDK dependency and quote safety
+- The project now pins the official Pump SDK at `@pump-fun/pump-sdk@4.3.1`. PumpSwap support is imported from its bundled `@pump-fun/pump-sdk/swap` subpath; the standalone package is intentionally not duplicated.
+- Export smoke tests cover the SDK's online/offline curve and PumpSwap entry points.
+- This dependency is not yet an executable quote adapter. SDK online helpers may read market state in separate RPC requests, while the bot's market policy requires a coherent, same-slot curve/pool/vault snapshot. In addition, aggregate fee totals cannot be guessed into individual fee buckets. Until a quote implementation can bind its pricing inputs to the verified snapshot and produce complete fee evidence, every such quote must remain non-executable.
