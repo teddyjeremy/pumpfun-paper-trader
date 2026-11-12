@@ -2,6 +2,7 @@ import BN from "bn.js";
 import { PublicKey } from "@solana/web3.js";
 import { describe, expect, it } from "vitest";
 import {
+  fetchPumpCurveSdkQuote,
   quotePumpCurveBuyFromSdkState, quotePumpCurveSellFromSdkState,
   type PumpCurveSdkQuoteState
 } from "../src/ingestion/pump-curve-sdk-quote-adapter.js";
@@ -39,6 +40,21 @@ describe("official Pump bonding-curve SDK quote adapter", () => {
       .toBe(1_000_000_000n);
     expect(BigInt(quote.fees.totalBaseUnits)).toBe(BigInt(quote.fees.protocolBaseUnits));
     expect(quote.executionReady).toBe(false);
+  });
+
+  it("fails closed when Helius cannot return the curve snapshot", async () => {
+    await expect(fetchPumpCurveSdkQuote({
+      mint: "So11111111111111111111111111111111111111112",
+      side: "BUY",
+      amountBaseUnits: "1000",
+      config: {
+        apiKey: "test-key",
+        fetcher: async () => new Response(JSON.stringify({
+          jsonrpc: "2.0", id: "paper-account-snapshot",
+          result: { context: { slot: 55 }, value: [null, null, null, null] }
+        }), { status: 200 })
+      }
+    })).rejects.toThrow(/market account/);
   });
 
   it("uses the SDK sell quote and reconciles protocol/creator fees", () => {
