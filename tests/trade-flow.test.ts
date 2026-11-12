@@ -149,6 +149,37 @@ describe("verified Pump.fun trade-flow windows", () => {
     expect(flow?.windows).toEqual([]);
   });
 
+  it("excludes trades worth one cent or less from flow and unique-buyer counts", () => {
+    const events = [100n, 102n, 104n].flatMap((timestamp, window) => [
+      trade(timestamp, trader(window * 3 + 1), true, 200_000n),
+      trade(timestamp, trader(window * 3 + 2), true, 200_000n),
+      trade(timestamp, trader(window * 3 + 3), true, 200_000n),
+      trade(timestamp, trader(50 + window), false, 100_000n),
+      trade(timestamp, trader(60 + window), true, 1n),
+      trade(timestamp, trader(70 + window), false, 1n)
+    ]);
+    const [flow] = buildCandidateTradeFlows([tx(events)], {
+      nowSeconds: 106, horizonSeconds: 60, solUsdPriceUsd: 100, minimumTradeUsd: 0.01
+    });
+    expect(flow?.microTradeFilterStatus).toBe("APPLIED");
+    expect(flow?.windows[0]).toMatchObject({
+      tradeCount: 3, uniqueBuyers: 3, uniqueSellers: 0,
+      buyQuoteVolume: "600000", sellQuoteVolume: "0", flowWindowPass: true
+    });
+    expect(flow?.flowConfirmationPass).toBe(true);
+  });
+
+  it("fails closed when SOL/USD is unavailable for the one-cent spam filter", () => {
+    const events = [100n, 102n, 104n].flatMap(timestamp => [
+      trade(timestamp, trader(1), true, 200_000n),
+      trade(timestamp, trader(2), true, 200_000n),
+      trade(timestamp, trader(3), true, 200_000n)
+    ]);
+    const [flow] = buildCandidateTradeFlows([tx(events)], { nowSeconds: 106, horizonSeconds: 60 });
+    expect(flow?.microTradeFilterStatus).toBe("UNAVAILABLE");
+    expect(flow?.flowConfirmationPass).toBe(false);
+  });
+
   it("keeps non-SOL quote mint amounts separate and raw", () => {
     const quoteMint = "TokenQuoteMint111111111111111111111111111";
     const events = [
