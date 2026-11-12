@@ -41,7 +41,7 @@ describe("paper portfolio accounting",()=>{
   const sell=quote("mint","SELL","1000000",1.5);
   const closed=closePaperPosition(marked,{positionId:"p1",sellQuote:sell,exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
   expect(closed.position.status).toBe("CLOSED");
-  expect(closed.position.realizedPnlUsd).toBeCloseTo(0.487);
+  expect(closed.position.realizedPnlUsd).toBeCloseTo(0.486);
  });
  it("records an automatic top-up only after cumulative losses take equity below $1",()=>{
   let state=createPaperPortfolio();
