@@ -187,7 +187,8 @@ export function buildPaperLedgerProjection(event: AuditEvent): PaperLedgerProjec
     const position = projectPosition(data.position, event.occurredAt);
     const sell = projectQuote(data.sellQuote);
     if (position.status !== "CLOSED" || sell.side !== "SELL" ||
-        sell.mint !== position.mint || sell.quoteId !== data.sellQuoteId) {
+        sell.mint !== position.mint || sell.quoteId !== data.sellQuoteId ||
+        sell.inputAmountBaseUnits !== position.tokenAmountBaseUnits) {
       throw new Error("Paper exit projection quote and closed position identities do not reconcile.");
     }
     result.positions.push(position);
