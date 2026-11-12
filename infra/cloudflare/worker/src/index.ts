@@ -1218,7 +1218,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction),
             retentionPolicy: "LATEST_2000_TRANSACTION_SNAPSHOT_PLUS_APPEND_ONLY_AUDIT"
           }, `helius:${work.signature}`);
-          await this.recordStrategyAudit(work.signature);
           for (let tradeIndex = 0; tradeIndex < result.transaction.tradeEvents.length; tradeIndex += 1) {
             const trade = result.transaction.tradeEvents[tradeIndex]!;
             const quoteAmount = trade.quoteMint === SOL_QUOTE_MINT
@@ -1236,6 +1235,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
               signature: work.signature, isBuy: trade.isBuy
             }, tradeIndex);
           }
+          // Strategy evaluation is downstream of raw observation and candidate
+          // outcome persistence; an audit-evaluation error must not skip trade tracking.
+          await this.recordStrategyAudit(work.signature);
           this.status.verifiedTransactions += 1;
           // Re-rank the six evidence-follow-up slots as verified events arrive.
           // Fresh launches remain protected by the four-slot first-minute reserve.
