@@ -49,13 +49,13 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
     ? result("ENTRY_WINDOW", "UNKNOWN", null, "candidate age <= 60 seconds", "Discovery timestamp is unavailable.")
     : result("ENTRY_WINDOW", input.candidateAgeSeconds <= 60 ? "PASS" : "FAIL", input.candidateAgeSeconds, "<= 60 seconds", "Entry window is limited to the first 60 seconds."));
   const profile = input.profile;
-  rules.push(!profile || profile.impulsePriceChangePct === null
+  rules.push(!profile || !profile.dataComplete || profile.impulsePriceChangePct === null
     ? result("IMPULSE", "UNKNOWN", profile?.impulsePriceChangePct ?? null, ">= +20%", "Insufficient verified price history.")
     : result("IMPULSE", profile.impulsePriceChangePct >= 20 ? "PASS" : "FAIL", profile.impulsePriceChangePct, ">= +20%", "Impulse measured from the observed launch baseline."));
-  rules.push(!profile || profile.pullbackPct === null
+  rules.push(!profile || !profile.dataComplete || profile.pullbackPct === null
     ? result("PULLBACK", "UNKNOWN", profile?.pullbackPct ?? null, "10% to 40%", "Pullback has not been established.")
     : result("PULLBACK", profile.pullbackPct >= 10 && profile.pullbackPct <= 40 ? "PASS" : "FAIL", profile.pullbackPct, "10% to 40%", "Pullback depth must remain within the agreed range."));
-  rules.push(!profile || profile.reclaimAbovePreviousFiveSecondHighPct === null
+  rules.push(!profile || !profile.dataComplete || profile.reclaimAbovePreviousFiveSecondHighPct === null
     ? result("RECLAIM", "UNKNOWN", profile?.reclaimAbovePreviousFiveSecondHighPct ?? null, ">= +1% above previous completed 5-second high", "No verified reclaim measurement is available.")
     : result("RECLAIM", profile.reclaimDetected && profile.reclaimAbovePreviousFiveSecondHighPct >= 1 ? "PASS" : "FAIL",
       profile.reclaimAbovePreviousFiveSecondHighPct, ">= +1%", "Reclaim must exceed the previous completed 5-second high."));

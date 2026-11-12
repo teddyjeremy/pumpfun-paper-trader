@@ -61,4 +61,10 @@ describe("strict strategy audit", () => {
   const result=evaluateStrictStrategyAudit(noSellFlow);
   expect(result.rules.find(rule=>rule.rule==="THREE_FLOW_WINDOWS")?.status).toBe("PASS");
  });
+ it("keeps price-pattern rules UNKNOWN when the profile coverage is incomplete", () => {
+  const result=evaluateStrictStrategyAudit({...base,profile:{...base.profile,dataComplete:false}});
+  expect(result.rules.find(rule=>rule.rule==="IMPULSE")?.status).toBe("UNKNOWN");
+  expect(result.rules.find(rule=>rule.rule==="PULLBACK")?.status).toBe("UNKNOWN");
+  expect(result.rules.find(rule=>rule.rule==="RECLAIM")?.status).toBe("UNKNOWN");
+ });
 });
