@@ -51,7 +51,7 @@ export async function collectWalletFundingEvidence(
 
   const fetcher = config.fetcher ?? fetch;
   const url = buildHeliusRpcUrl(config.apiKey);
-  const funderCounts = new Map<string, Map<string, number>>();
+  const funderCounts = new Map<string, Map<string, { signatures: Set<string>; timestamps: number[] }>>();
   let transactionsChecked = 0;
   let incomplete = false;
 
@@ -159,7 +159,7 @@ function parsedSystemTransfers(input: unknown): Array<{ source: string; destinat
       return Array.isArray(row?.instructions) ? row.instructions : [];
     }) : [])
   ];
-  const output: Array<{ source: string; destination: string }> = [];
+  const output: Array<{ source: string; destination: string; blockTime: number | null }> = [];
   for (const raw of instructions) {
     const instruction = asRecord(raw);
     const parsed = asRecord(instruction?.parsed);
