@@ -56,6 +56,9 @@ interface CoordinatorStatus {
   verifiedTransactions: number;
   incompleteHeliusTransactions: number;
   failedHeliusTransactions: number;
+  droppedHeliusSignatures: number;
+  duplicateHeliusSignatures: number;
+  incompleteHeliusCandidates: number;
 }
 
 const INITIAL_STATUS: CoordinatorStatus = {
@@ -86,7 +89,10 @@ const INITIAL_STATUS: CoordinatorStatus = {
   queuedHeliusSignatures: 0,
   verifiedTransactions: 0,
   incompleteHeliusTransactions: 0,
-  failedHeliusTransactions: 0
+  failedHeliusTransactions: 0,
+  droppedHeliusSignatures: 0,
+  duplicateHeliusSignatures: 0,
+  incompleteHeliusCandidates: 0
 };
 
 const MAX_CANDIDATES = 100;
@@ -235,6 +241,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.status.monitoredCandidates = this.heliusState.subscriptions.length;
     this.status.queuedHeliusSignatures = this.heliusState.queue.length;
     return { ...this.status };
+  }
+
+  async listVerifiedTransactions(limit = 100): Promise<unknown[]> {
+    await this.hydrate();
+    const boundedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 100;
+    return this.verifiedTransactions.slice(-boundedLimit).map(value => jsonSafe(value));
   }
 
   async listCandidates(): Promise<DiscoveryStoreState> {
@@ -522,6 +534,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.status.lastPersistedAt = this.discovery.lastPersistedAt;
     this.status.monitoredCandidates = this.heliusState.subscriptions.length;
     this.status.queuedHeliusSignatures = this.heliusState.queue.length;
+    this.status.droppedHeliusSignatures = this.heliusState.droppedSignatures;
+    this.status.duplicateHeliusSignatures = this.heliusState.duplicateSignatures;
+    this.status.incompleteHeliusCandidates = this.heliusState.incompleteMints.length;
   }
 
   private async persist(): Promise<void> {
@@ -547,6 +562,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       throw error;
     }
   }
+}
+
+function jsonSafe(value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) return value.map(item => jsonSafe(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, jsonSafe(item)]));
+  }
+  return value;
 }
 
 function authorized(request: Request, env: Env): boolean {
@@ -586,6 +610,15 @@ export default {
     }
     if (url.pathname === "/candidates" && request.method === "GET") {
       return Response.json(await coordinator.listCandidates());
+    }
+    if (url.pathname === "/observations" && request.method === "GET") {
+      const limit = Number(url.searchParams.get("limit") ?? "100");
+      return Response.json({
+        provider: "helius",
+        mode: "paper",
+        count: Math.max(1, Math.min(500, Number.isFinite(limit) ? Math.floor(limit) : 100)),
+        transactions: await coordinator.listVerifiedTransactions(limit)
+      });
     }
     return Response.json({ error: "Not found" }, { status: 404 });
   },
