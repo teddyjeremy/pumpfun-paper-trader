@@ -87,7 +87,7 @@ describe("observed price and stage-volume profile", () => {
     expect(profile?.microTradeFilterStatus).toBe("APPLIED");
     expect(profile?.pullbackVolumeVsImpulsePct).toBeCloseTo(95.56, 2);
     expect(profile?.reclaimVolumeVsPullbackPct).toBeCloseTo(55.81, 2);
-    expect(profile?.pullbackVolume.sellQuoteVolume).toBe("0");
+    expect(profile?.pullbackVolume.sellQuoteVolume).toBe("2000000");
   });
 
   it("does not publish buy-volume ratios when SOL/USD is unavailable", () => {
