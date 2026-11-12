@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
+  pruneExpiredCandidates,
   type DiscoveryInput
 } from "../src/ingestion/discovery-store.js";
 
@@ -94,5 +95,28 @@ describe("bounded discovery candidate store", () => {
     const invalid = applyDiscoveryEvent(emptyDiscoveryStore(), event({ receivedAt: "bad" }));
     expect(invalid.outcome).toBe("INVALID_TIME");
     expect(invalid.state.incomplete).toBe(1);
+  });
+});
+
+
+describe("discovery retention during idle periods", () => {
+  it("expires candidates on a sweep even when no new launch arrives", () => {
+    const first = applyDiscoveryEvent(emptyDiscoveryStore(), event());
+    const swept = pruneExpiredCandidates(first.state, "2026-11-12T00:16:00.000Z");
+    expect(swept.candidates).toHaveLength(0);
+    expect(swept.expired).toBe(1);
+    expect(swept.accepted).toBe(1);
+  });
+
+  it("keeps fresh candidates and leaves the state unchanged when nothing expires", () => {
+    const first = applyDiscoveryEvent(emptyDiscoveryStore(), event());
+    expect(pruneExpiredCandidates(first.state, "2026-11-12T00:01:00.000Z")).toEqual(first.state);
+  });
+
+  it("marks an invalid sweep time incomplete instead of deleting candidates", () => {
+    const first = applyDiscoveryEvent(emptyDiscoveryStore(), event());
+    const swept = pruneExpiredCandidates(first.state, "invalid");
+    expect(swept.candidates).toHaveLength(1);
+    expect(swept.incomplete).toBe(1);
   });
 });
