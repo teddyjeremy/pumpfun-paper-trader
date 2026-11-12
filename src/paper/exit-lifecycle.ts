@@ -101,14 +101,14 @@ export async function executePaperExit(input: PaperExitExecutionInput): Promise<
       return { status: "BLOCKED", reason: "Sell quote does not match the complete position balance, verified market venue, quote mint or market slot." };
     }
     const sellQuote = buildExecutablePaperQuote({
-      quote: sdkQuote, solUsd: result.context.solUsd, costs: result.context.costs, nowMs: now
+      quote: sdkQuote, solUsd: result.context.solUsd, costs: result.context.costs, nowMs: executionNow()
     });
     const netProceedsUsd = sellQuote.outputUsd - feeTotal(sellQuote);
     if (!Number.isFinite(netProceedsUsd) || netProceedsUsd < 0) {
       return { status: "BLOCKED", reason: "Executable sell quote has invalid net proceeds after all fees." };
     }
     const currentReturn = netReturnPct(netProceedsUsd, position);
-    const highestReturn = highestCompletedReturnPct(position);
+    const currentNetPrice = netProceedsUsd / wholeTokens(position);\n    const highestPrice = Math.max(position.highWaterPriceUsdPerToken, currentNetPrice);\n    const highestReturn = netReturnPct(highestPrice * wholeTokens(position), position);
     const durations = [2, 5, 10, 30] as const;
     const config = input.strategyConfig ?? DYNAMIC_EXIT_CALIBRATION_V1;
     const evaluations = durations.map(windowSeconds => evaluateExit({
@@ -116,7 +116,7 @@ export async function executePaperExit(input: PaperExitExecutionInput): Promise<
       highestCompletedNetReturnPct: highestReturn,
       emergencyReason: input.emergencyReason ?? null,
       freshExecutableSellQuote: true,
-      windowsOldestFirst: input.windows.filter(window => window.windowSeconds === windowSeconds)
+      windowsOldestFirst: input.windows.filter(window => window.windowSeconds === windowSeconds)\n        .sort((a, b) => a.endedAtMs - b.endedAtMs)
     }, config));
 
     const selected = evaluations.find(evaluation => evaluation.action === "sell");
