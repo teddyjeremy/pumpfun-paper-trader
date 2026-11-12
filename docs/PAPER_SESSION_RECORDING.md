@@ -24,7 +24,7 @@ Each session needs a unique ID, UTC start/end, strategy/config version and durab
 11. Every dropped event, queue overflow, provider outage, reconnect, missing window, persistence failure and recovery.
 
 ## Micro-trade filtering and pullback volume
-- Trades with USD notional less than or equal to $0.01 are excluded from both buy and sell flow counts, unique-wallet counts, and the price/volume buckets used for strategy evidence.
+- Trades with USD notional less than or equal to $0.01 are excluded from both buy and sell flow counts, unique-wallet counts, and the price/volume buckets used for strategy evidence. Their excluded count and raw quote volume are still recorded per candidate.
 - SOL quote amounts are converted from lamports using a fresh SOL/USDT last-trade reference. The Worker validates the symbol, positive price, exchange close timestamp and a maximum 10-second age; the in-memory request cache is one second.
 - The reference price is only for filtering tiny trades. It is not a bonding-curve execution quote, fill price or PnL price.
 - If the reference price is missing, stale or invalid, the filter is UNAVAILABLE. Flow confirmation is blocked and pullback/reclaim buy-volume ratios remain UNKNOWN; the system does not silently count spam as valid evidence.
