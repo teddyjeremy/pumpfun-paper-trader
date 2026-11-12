@@ -73,6 +73,10 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
       now - observed > PAPER_PORTFOLIO_POLICY.maxQuoteAgeMs || expires <= now) {
     throw new Error("Executable quote is stale or expired.");
   }
+  if (quote.priceImpactPct > PAPER_PORTFOLIO_POLICY.maxImpactPerSidePct ||
+      quote.taxPct > PAPER_PORTFOLIO_POLICY.maxTaxPerSidePct) {
+    throw new Error("Quote exceeds the per-side impact or tax limit.");
+  }
   if (!validPositive(quote.requestedUsd) || !validPositive(quote.outputUsd) || !/^\d+$/.test(quote.inputAmountBaseUnits) ||
       !/^\d+$/.test(quote.outputAmountBaseUnits) || BigInt(quote.inputAmountBaseUnits) <= 0n ||
       BigInt(quote.outputAmountBaseUnits) <= 0n || !Number.isFinite(quote.priceImpactPct) ||
