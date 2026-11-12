@@ -51,3 +51,13 @@ No implementation stage may bypass paper-only, strict-entry, fail-closed, no-fab
 - Requires explicit verified-zero transfer-tax evidence, fresh quote/price references, bounded quote TTL, explicit network/priority/provider costs and a simulated fill time before quote expiry.
 - Tests cover gross/net fee reconciliation, fee-category mapping, stale references, transfer-tax fail-closed behavior and simulated-latency expiry.
 - Still incomplete: non-zero Token-2022 transfer-fee calculation, live fee estimation, route/price impact slippage policy calibration, quote-to-Worker integration and end-to-end paper fills. The converter alone does not authorize entries.
+
+
+### PostgreSQL trade projections (draft PR #19)
+- New Durable Object PAPER_ENTRY events persist the complete normalized buy and initial full-balance sell quote evidence; PAPER_EXIT events persist the complete sell quote; POSITION_MARK events persist open position snapshots and their exact-size sell quotes.
+- Migration 0005 adds queryable session-scoped position, execution-quote and simulated-trade projections.
+- The PostgreSQL event insert and all derived projection upserts share one SQL transaction. Projection errors roll back the journal batch and leave the Durable Object outbox cursor unchanged for safe retry.
+- Event sequence controls position projection freshness. Session-scoped external quote/trade IDs are idempotent and conflicting raw payloads are rejected.
+- Authenticated `GET /api/paper-ledger` exposes persisted sessions, positions, quote evidence and trades.
+- Legacy journal events lacking complete quote payloads remain available in the immutable event table but are not assigned invented normalized fills.
+- Remaining validation: real PostgreSQL migration/apply test, transactional rollback and duplicate replay tests against PostgreSQL, restart recovery, and dashboard UI consumption.
