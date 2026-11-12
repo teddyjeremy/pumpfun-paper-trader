@@ -16,6 +16,7 @@ describe("bounded Helius historical backfill", () => {
     const request = buildAddressSignaturesRequest(address, newer, 50);
     expect(request.method).toBe("getSignaturesForAddress");
     expect(request.params[1]).toEqual({ commitment: "confirmed", limit: 50, before: newer });
+    expect(() => buildAddressSignaturesRequest(address, null, 1001)).toThrow(/limit/i);
   });
 
   it("marks complete only after reaching the verified create signature", () => {
