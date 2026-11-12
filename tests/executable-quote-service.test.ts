@@ -72,7 +72,7 @@ describe("executable quote service",()=>{
       fetchQuote:async({side,amountBaseUnits})=>({
         ...quote(side,side==="BUY"?100:101,amountBaseUnits),
         priceImpactPct:3,
-        ...(side==="SELL"?{venueFeeBaseUnits:"10000000"}:{})
+        ...(side==="SELL"?{grossQuoteAmountBaseUnits:"110000000",venueFeeBaseUnits:"10000000"}:{})
       }),
       helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
         result:[{slot:99,prioritizationFee:1000}]
