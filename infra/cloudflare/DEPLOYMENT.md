@@ -76,7 +76,7 @@ The public /health endpoint intentionally exposes only basic service state. All 
 
 ## GitHub Actions deployment
 
-The manual workflow .github/workflows/deploy-cloudflare-worker.yml deploys only when manually dispatched against main. Add these repository Actions secrets after creating the Cloudflare account:
+The workflow .github/workflows/deploy-cloudflare-worker.yml deploys only when manually dispatched against main. It installs the repository dependencies first so Wrangler can bundle the imported Pump SDK and Solana packages. Pushes and pull requests do not deploy automatically. Add these repository Actions secrets after creating the Cloudflare account:
 - CLOUDFLARE_API_TOKEN: scoped to the account with Workers Scripts edit permission.
 - CLOUDFLARE_ACCOUNT_ID: the account identifier.
 
