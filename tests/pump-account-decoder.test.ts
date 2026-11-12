@@ -116,8 +116,9 @@ describe("IDL-aligned Pump account decoders", () => {
   it("decodes PumpSwap pool fields and defaults appended fields on legacy layouts", () => {
     const decoded = decodePumpSwapPoolAccount(account("pool", PUMP_AMM_PROGRAM_ID, poolData()));
     expect(decoded).toMatchObject({
-      index: 0, creator: ZERO_KEY, baseMint: ZERO_KEY, quoteMint: ZERO_KEY,
-      baseVault: ZERO_KEY, quoteVault: ZERO_KEY, virtualQuoteReserves: "0",
+      bump: 254, index: 0, creator: ZERO_KEY, baseMint: ZERO_KEY, quoteMint: ZERO_KEY,
+      lpMint: ZERO_KEY, baseVault: ZERO_KEY, quoteVault: ZERO_KEY, lpSupplyBaseUnits: "1000",
+      virtualQuoteReserves: "0",
       creatorFeeBps: "0", protocolFeesBaseUnits: "100", creatorFeesBaseUnits: "200",
       isMayhemMode: false, isCashbackCoin: false, canEditCreatorFee: false, isHolderReward: false
     });
