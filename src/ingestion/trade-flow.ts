@@ -36,6 +36,7 @@ export interface CandidateTradeFlow {
   dataComplete: boolean;
   coverage: "OBSERVED_EVENTS_ONLY";
   entryEligible: false;
+  microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE";
 }
 
 /**
@@ -54,6 +55,8 @@ export function buildCandidateTradeFlows(
     incompleteMints?: readonly string[];
     coverageStartByMint?: Readonly<Record<string, number>>;
     candidateMints?: readonly string[];
+    solUsdPriceUsd?: number;
+    minimumTradeUsd?: number;
   } = {}
 ): CandidateTradeFlow[] {
   const nowSeconds = options.nowSeconds ?? Math.floor(Date.now() / 1_000);
@@ -63,6 +66,8 @@ export function buildCandidateTradeFlows(
     throw new Error("Invalid trade-flow time range.");
   }
 
+  const minimumTradeUsd = options.minimumTradeUsd ?? 0.01;
+  if (!Number.isFinite(minimumTradeUsd) || minimumTradeUsd < 0) throw new Error("Invalid minimum trade notional.");
   const lowerBound = nowSeconds - horizonSeconds;
   const incomplete = new Set(options.incompleteMints ?? []);
   const groups = new Map<string, {
@@ -89,6 +94,11 @@ export function buildCandidateTradeFlows(
       const timestamp = Number(trade.timestamp);
       if (!Number.isSafeInteger(timestamp) || timestamp < lowerBound || timestamp > nowSeconds) continue;
       const group = ensureGroup(trade.mint, trade.quoteMint);
+      if (trade.quoteMint === SOL_QUOTE_MINT && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0) {
+        const rawAmount = trade.quoteAmount > 0n ? trade.quoteAmount : trade.solAmount;
+        const notionalUsd = Number(rawAmount) / 1_000_000_000 * options.solUsdPriceUsd!;
+        if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) continue;
+      }
       const windowStart = Math.floor(timestamp / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
       if (windowStart + TRADE_FLOW_WINDOW_SECONDS > nowSeconds) continue;
       const events = group.windows.get(windowStart) ?? [];
@@ -140,7 +150,12 @@ export function buildCandidateTradeFlows(
     const dataComplete = !incomplete.has(group.mint) &&
       latestThreeAreFresh &&
       (firstFullyCoveredWindow === null || latestThree![0]!.startTime >= firstFullyCoveredWindow);
-    const flowConfirmationPass = dataComplete &&
+    const microTradeFilterStatus = group.quoteMint !== SOL_QUOTE_MINT
+      ? "UNSUPPORTED_QUOTE" as const
+      : Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
+        ? "APPLIED" as const : "UNAVAILABLE" as const;
+    const flowConfirmationPass = microTradeFilterStatus === "APPLIED" &&
+      dataComplete &&
       latestThreeWindowFlowPass &&
       distinctBuyers >= 5 &&
       totalBuyVolume > 0n &&
@@ -160,7 +175,8 @@ export function buildCandidateTradeFlows(
       flowConfirmationPass,
       dataComplete,
       coverage: "OBSERVED_EVENTS_ONLY",
-      entryEligible: false
+      entryEligible: false,
+      microTradeFilterStatus
     });
   }
   return output.sort((a, b) => a.mint.localeCompare(b.mint) ||
