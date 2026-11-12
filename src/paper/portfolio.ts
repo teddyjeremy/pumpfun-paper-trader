@@ -64,7 +64,8 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
       now - observed > PAPER_PORTFOLIO_POLICY.maxQuoteAgeMs || expires <= now) {
     throw new Error("Executable quote is stale or expired.");
   }
-  if (!validPositive(quote.outputUsd) || !/^\d+$/.test(quote.outputAmountBaseUnits) ||
+  if (!validPositive(quote.outputUsd) || !/^\d+$/.test(quote.inputAmountBaseUnits) ||
+      !/^\d+$/.test(quote.outputAmountBaseUnits) || BigInt(quote.inputAmountBaseUnits) <= 0n ||
       BigInt(quote.outputAmountBaseUnits) <= 0n || !Number.isFinite(quote.priceImpactPct) ||
       !Number.isFinite(quote.taxPct) || quote.priceImpactPct < 0 || quote.taxPct < 0 ||
       !Number.isFinite(quote.networkFeeUsd) || quote.networkFeeUsd < 0 ||
