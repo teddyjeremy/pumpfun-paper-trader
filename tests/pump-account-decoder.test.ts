@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createUnverifiedMarketState } from "../src/paper/pump-market-state.js";
+import { applyVerifiedPumpCurveAccount, applyVerifiedPumpSwapPoolAccounts } from "../src/ingestion/pump-market-verifier.js";
 import {
   decodePumpSwapPoolAccount, decodeSplTokenAccount, decodeVerifiedPumpCurveAccount,
   verifyCanonicalPumpSwapPoolSnapshot, toVerifiedPumpCurveEvidence, PUMP_AMM_PROGRAM_ID, PUMP_PROGRAM_ID,
@@ -143,4 +145,31 @@ describe("IDL-aligned Pump account decoders", () => {
       nowMs: Date.parse(observedAt)
     })).toThrow(/same RPC context slot/);
   });
+
+  it("connects decoded curve and canonical pool accounts to the fail-closed market state machine", () => {
+    const initial = createUnverifiedMarketState("mint", observedAt);
+    const live = applyVerifiedPumpCurveAccount({
+      state: initial, account: account("curve-pda", PUMP_PROGRAM_ID, curveData()),
+      expectedCurveAddress: "curve-pda", nowMs: Date.parse(observedAt)
+    });
+    expect(live.status).toBe("LIVE_CURVE");
+    const pending = applyVerifiedPumpCurveAccount({
+      state: initial, account: account("curve-pda", PUMP_PROGRAM_ID, curveData(true)),
+      expectedCurveAddress: "curve-pda", nowMs: Date.parse(observedAt)
+    });
+    expect(pending.status).toBe("MIGRATION_PENDING");
+    const migrated = applyVerifiedPumpSwapPoolAccounts({
+      state: pending,
+      poolAccount: account("pool", PUMP_AMM_PROGRAM_ID, poolData()),
+      baseVaultAccount: account(ZERO_KEY, SPL_TOKEN_PROGRAM_ID, tokenVault(10_000n)),
+      quoteVaultAccount: account(ZERO_KEY, SPL_TOKEN_PROGRAM_ID, tokenVault(20_000n)),
+      expectedPoolAddress: "pool",
+      expectedPoolCreatorAuthority: ZERO_KEY,
+      expectedPoolAuthority: ZERO_KEY,
+      nowMs: Date.parse(observedAt)
+    });
+    expect(migrated.status).toBe("MIGRATED_POOL_VERIFIED");
+    expect(migrated.pool?.baseReserveBaseUnits).toBe("10000");
+  });
+
 });
