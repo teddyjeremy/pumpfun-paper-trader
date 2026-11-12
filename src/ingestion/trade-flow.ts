@@ -6,6 +6,10 @@ export const TRADE_FLOW_HORIZON_SECONDS = 10 * 60;
 export const MAX_FLOW_WINDOWS_PER_MINT = TRADE_FLOW_HORIZON_SECONDS / TRADE_FLOW_WINDOW_SECONDS;
 // Pump.fun SOL-quoted markets use wrapped SOL as their quote mint.
 export const SOL_QUOTE_MINT = "So11111111111111111111111111111111111111112";
+export const LEGACY_SOL_QUOTE_MINT = "11111111111111111111111111111111";
+export function isSolQuoteMint(quoteMint: string | null | undefined): boolean {
+  return quoteMint === SOL_QUOTE_MINT || quoteMint === LEGACY_SOL_QUOTE_MINT;
+}
 
 export interface TradeFlowWindow {
   startTime: number;
@@ -99,7 +103,7 @@ export function buildCandidateTradeFlows(
       const timestamp = Number(trade.timestamp);
       if (!Number.isSafeInteger(timestamp) || timestamp < lowerBound || timestamp > nowSeconds) continue;
       const group = ensureGroup(trade.mint, trade.quoteMint);
-      if (trade.quoteMint === SOL_QUOTE_MINT && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0) {
+      if (isSolQuoteMint(trade.quoteMint) && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0) {
         const rawAmount = trade.quoteAmount > 0n ? trade.quoteAmount : trade.solAmount;
         const notionalUsd = Number(rawAmount) / 1_000_000_000 * options.solUsdPriceUsd!;
         if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) {
@@ -163,7 +167,7 @@ export function buildCandidateTradeFlows(
     const dataComplete = !incomplete.has(group.mint) &&
       latestThreeAreFresh &&
       (firstFullyCoveredWindow === null || latestThree![0]!.startTime >= firstFullyCoveredWindow);
-    const microTradeFilterStatus = group.quoteMint !== SOL_QUOTE_MINT
+    const microTradeFilterStatus = !isSolQuoteMint(group.quoteMint)
       ? "UNSUPPORTED_QUOTE" as const
       : Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
         ? "APPLIED" as const : "UNAVAILABLE" as const;
@@ -177,7 +181,7 @@ export function buildCandidateTradeFlows(
     output.push({
       mint: group.mint,
       quoteMint: group.quoteMint,
-      quoteUnit: group.quoteMint === null ? "UNKNOWN" : group.quoteMint === SOL_QUOTE_MINT ? "SOL" : "NON_SOL_RAW",
+      quoteUnit: group.quoteMint === null ? "UNKNOWN" : isSolQuoteMint(group.quoteMint) ? "SOL" : "NON_SOL_RAW",
       windowSeconds: TRADE_FLOW_WINDOW_SECONDS,
       horizonSeconds,
       windows: windows.map(({ buyers: _buyers, buyerVolumes: _buyerVolumes, buyVolume: _buyVolume, sellVolume: _sellVolume, ...window }) => window),
@@ -206,7 +210,7 @@ function summarizeWindow(startTime: number, events: readonly PumpTradeEvent[]) {
   const sellers = new Set<string>();
 
   for (const event of events) {
-    const amount = event.quoteMint === SOL_QUOTE_MINT
+    const amount = isSolQuoteMint(event.quoteMint)
       ? (event.quoteAmount > 0n ? event.quoteAmount : event.solAmount)
       : event.quoteAmount;
     if (amount <= 0n) continue;
