@@ -28,6 +28,10 @@ function tx(events: PumpTradeEvent[]): VerifiedPumpTransaction {
 }
 
 describe("verified Pump.fun trade-flow windows", () => {
+  it("recognizes the canonical wrapped-SOL quote mint", () => {
+    expect(SOL_QUOTE_MINT).toBe("So11111111111111111111111111111111111111112");
+  });
+
   it("aggregates three consecutive two-second windows and applies the agreed flow filters", () => {
     const events = [
       trade(100n, trader(1), true, 10n), trade(100n, trader(2), true, 10n),
