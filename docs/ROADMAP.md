@@ -11,8 +11,8 @@
 - [ ] Verify no-key PumpPortal WebSocket handshake in the deployed Worker
 - [ ] Add reconnect/backoff and provider-gap reconciliation
 - [x] Helius transaction verification adapter and bounded candidate-specific monitoring (10 slots, durable queue, event verification, and evidence-driven slot rotation)
-- [x] Verify official Pump program and PumpSwap IDL layouts; implement fail-closed bonding-curve and pool/vault account decoders (PDA derivation remains delegated to the official SDK)
-- [ ] Authoritative graduation detector, official-SDK PDA derivation, and Worker/position integration (bounded PumpSwap pool discovery by base mint and same-slot vault re-fetch primitives are implemented)
+- [x] Verify official Pump program and PumpSwap IDL layouts; implement fail-closed bonding-curve and pool/vault account decoders with PDA derivation from official IDL seeds
+- [ ] Authoritative graduation detector and Worker/position integration (bounded PumpSwap pool discovery, same-slot vault re-fetch, and IDL-seed PDA derivation are implemented)
 - [x] Pure fail-closed market transition rules for live curve, migration pending, verified canonical pool and EXIT_BLOCKED
 - [x] IDL-aligned Pump curve, PumpSwap pool, and SPL token-vault decoders with program-owner, discriminator, mint, vault, canonical index/authority, slot-coherence and freshness checks
 - [x] Helius getMultipleAccounts reader that returns related account data from one shared RPC context slot
