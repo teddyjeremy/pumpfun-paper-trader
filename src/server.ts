@@ -6,7 +6,8 @@ import { diagnose, increment, snapshot } from "./diagnostics/registry.js";
 import { trackingSnapshot } from "./diagnostics/tracker.js";
 import {
   acquireWorkerLease, heartbeatWorkerLease, persistPaperAuditEvents,
-  releaseWorkerLease, getPersistenceStatus, getTradingDashboardSnapshot
+  releaseWorkerLease, getPersistenceStatus, getTradingDashboardSnapshot, getPaperSessionLedgerSnapshot,
+  persistHeliusBackfillArchive
 } from "./persistence/postgres.js";
 
 export const app = Fastify({
@@ -18,7 +19,7 @@ export const app = Fastify({
 app.addHook("onRequest", async (request, reply) => {
   const pathname = request.url.split("?")[0];
   if (pathname === "/health" || pathname === "/ready") return;
-  if (pathname === "/internal/paper-events" || pathname === "/internal/worker-lease") {
+  if (pathname === "/internal/paper-events" || pathname === "/internal/worker-lease" || pathname === "/internal/helius-backfill") {
     const expected = config.PAPER_EVENT_INGEST_TOKEN;
     if (!expected) return reply.code(503).send({ error: "Internal ingestion authentication is not configured." });
     const authorization = request.headers.authorization ?? "";
@@ -63,6 +64,25 @@ app.post("/internal/paper-events", async (request, reply) => {
     const conflict = message.includes("sequence") || message.includes("replay");
     return reply.code(conflict ? 409 : 503).send({
       error: conflict ? message : "Paper event persistence failed; the sender should retry."
+    });
+  }
+});
+
+app.post("/internal/helius-backfill", async (request, reply) => {
+  const body = request.body && typeof request.body === "object"
+    ? request.body as Record<string, unknown> : {};
+  if (typeof body.sessionId !== "string" || typeof body.mint !== "string" ||
+      !body.state || typeof body.state !== "object") {
+    return reply.code(400).send({ error: "sessionId, mint and backfill state are required." });
+  }
+  try {
+    await persistHeliusBackfillArchive(body as never);
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const conflict = message.includes("conflicts") || message.includes("invalid");
+    return reply.code(conflict ? 409 : 503).send({
+      error: conflict ? message : "Helius archive persistence failed; the sender should retry."
     });
   }
 });
@@ -114,6 +134,10 @@ app.get("/api/diagnostics", async () => ({
 app.get("/api/tracking", async () => trackingSnapshot());
 app.get("/api/persistence", async () => getPersistenceStatus());
 app.get("/api/portfolio", async () => getTradingDashboardSnapshot());
+app.get("/api/paper-ledger", async request => {
+  const sessionId = (request.query as Record<string, unknown>).sessionId;
+  return getPaperSessionLedgerSnapshot(typeof sessionId === "string" ? sessionId : undefined);
+});
 
 app.get("/api/results/summary", async () => {
   const state = snapshot();

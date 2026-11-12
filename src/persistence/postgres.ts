@@ -1,4 +1,5 @@
 import pg from "pg";
+import { buildPaperLedgerProjection } from "./paper-ledger-projection.js";
 
 const { Pool } = pg;
 const connectionString = process.env.DATABASE_URL;
@@ -129,8 +130,17 @@ export async function getTradingDashboardSnapshot() {
 
   const persistence = await getPersistenceStatus();
   if (!persistence.connected) return unavailable("PostgreSQL is not connected");
-  if (persistence.migrationVersion !== "0004_paper_session_event_ingestion") {
-    return unavailable("Required ledger migrations 0001, 0002, 0003 and 0004 are not all applied");
+  try {
+    const requiredMigrations = await pool.query<{ version: string }>(
+      "SELECT version FROM schema_migrations WHERE version = ANY($1::text[])",
+      [["0001_initial_ledger", "0002_migration_aware_positions",
+        "0003_dynamic_exit_observations", "0004_paper_session_event_ingestion"]]
+    );
+    if (requiredMigrations.rows.length !== 4) {
+      return unavailable("Required ledger migrations 0001, 0002, 0003 and 0004 are not all applied");
+    }
+  } catch {
+    return unavailable("Ledger migration status could not be verified");
   }
 
   try {
@@ -349,15 +359,20 @@ export async function persistPaperAuditEvents(
     for (const event of ordered) {
       const sequence = BigInt(event.sequence);
       if (sequence <= lastSequence) {
-        const existing = await client.query<{ event_id: string; event_type: string }>(
-          "SELECT event_id,event_type FROM paper_session_events WHERE session_id=$1 AND sequence=$2",
-          [sessionId, event.sequence]
+        const existing = await client.query<{ event_id: string; event_type: string; same_event: boolean }>(
+          `SELECT event_id,event_type,
+             (payload=$3::jsonb AND occurred_at=$4 AND mint IS NOT DISTINCT FROM $5
+               AND strategy_version=$6) AS same_event
+           FROM paper_session_events WHERE session_id=$1 AND sequence=$2`,
+          [sessionId, event.sequence, JSON.stringify(event.data ?? {}),
+            event.occurredAt, event.mint, event.strategyVersion]
         );
         const existingEvent = existing.rows[0];
         if (!existingEvent ||
             existingEvent.event_id !== event.eventId ||
-            existingEvent.event_type !== event.kind) {
-          throw new Error("Paper audit replay conflicts with an existing session sequence.");
+            existingEvent.event_type !== event.kind ||
+            existingEvent.same_event !== true) {
+          throw new Error("Paper audit replay conflicts with an existing session sequence or payload.");
         }
         duplicates++;
         continue;
@@ -372,6 +387,77 @@ export async function persistPaperAuditEvents(
         [sessionId, event.eventId, event.sequence, event.kind, event.mint,
           event.strategyVersion, event.occurredAt, JSON.stringify(event.data ?? {})]
       );
+
+      // Keep queryable position/quote/trade projections in the same SQL
+      // transaction as the immutable journal event. A projection failure
+      // rolls back the event insert so the Durable Object outbox can retry.
+      const projection = buildPaperLedgerProjection(event);
+      for (const position of projection.positions) {
+        const projected = await client.query(
+          `INSERT INTO paper_position_projection
+            (session_id,external_position_id,mint,status,opened_at,closed_at,stake_usd,
+             token_amount_base_units,token_decimals,entry_price_usd_per_token,buy_costs_usd,
+             latest_liquidation_value_usd,realized_pnl_usd,exit_reason,last_event_sequence,snapshot)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)
+           ON CONFLICT (session_id,external_position_id) DO UPDATE SET
+             mint=EXCLUDED.mint,status=EXCLUDED.status,opened_at=EXCLUDED.opened_at,
+             closed_at=EXCLUDED.closed_at,stake_usd=EXCLUDED.stake_usd,
+             token_amount_base_units=EXCLUDED.token_amount_base_units,
+             token_decimals=EXCLUDED.token_decimals,
+             entry_price_usd_per_token=EXCLUDED.entry_price_usd_per_token,
+             buy_costs_usd=EXCLUDED.buy_costs_usd,
+             latest_liquidation_value_usd=EXCLUDED.latest_liquidation_value_usd,
+             realized_pnl_usd=EXCLUDED.realized_pnl_usd,exit_reason=EXCLUDED.exit_reason,
+             last_event_sequence=EXCLUDED.last_event_sequence,snapshot=EXCLUDED.snapshot,updated_at=now()
+           WHERE EXCLUDED.last_event_sequence >= paper_position_projection.last_event_sequence
+           RETURNING external_position_id`,
+          [sessionId, position.positionId, position.mint, position.status, position.openedAt,
+            position.closedAt, position.stakeUsd, position.tokenAmountBaseUnits,
+            position.tokenDecimals, position.entryPriceUsdPerToken, position.buyCostsUsd,
+            position.latestLiquidationValueUsd, position.realizedPnlUsd, position.exitReason,
+            event.sequence, JSON.stringify(position.raw)]
+        );
+        if ((projected.rowCount ?? 0) !== 1) throw new Error("Paper position projection conflicted with a newer event.");
+      }
+      for (const quote of projection.quotes) {
+        const projected = await client.query(
+          `INSERT INTO paper_execution_quote_projection
+            (session_id,external_quote_id,external_position_id,mint,side,provider,venue,context_slot,
+             observed_at,expires_at,requested_usd,input_amount_base_units,output_amount_base_units,
+             output_usd,price_impact_pct,simulated_latency_ms,simulated_fill_at,fee_breakdown_usd,raw_quote)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19::jsonb)
+           ON CONFLICT (session_id,external_quote_id) DO UPDATE SET
+             raw_quote=EXCLUDED.raw_quote
+           WHERE paper_execution_quote_projection.raw_quote=EXCLUDED.raw_quote
+           RETURNING external_quote_id`,
+          [sessionId, quote.quoteId, (projection.positions.find(position => position.mint === quote.mint)?.positionId) ??
+            String((event.data as Record<string, unknown>).positionId ?? ""),
+            quote.mint, quote.side, quote.provider, quote.venue ?? null, quote.slot ?? null,
+            quote.observedAt, quote.expiresAt, quote.requestedUsd, quote.inputAmountBaseUnits,
+            quote.outputAmountBaseUnits, quote.outputUsd, quote.priceImpactPct,
+            quote.simulatedLatencyMs, quote.simulatedFillAt,
+            JSON.stringify(quote.feeBreakdownUsd), JSON.stringify(quote.raw)]
+        );
+        if ((projected.rowCount ?? 0) !== 1) throw new Error("Paper quote projection id conflicts with different quote evidence.");
+      }
+      for (const trade of projection.trades) {
+        const projected = await client.query(
+          `INSERT INTO paper_trade_projection
+            (session_id,external_trade_id,external_position_id,mint,side,quote_id,executed_at,
+             token_amount_base_units,quote_amount_base_units,gross_usd,total_fees_usd,
+             simulated_latency_ms,raw_trade)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+           ON CONFLICT (session_id,external_trade_id) DO UPDATE SET
+             raw_trade=EXCLUDED.raw_trade
+           WHERE paper_trade_projection.raw_trade=EXCLUDED.raw_trade
+           RETURNING external_trade_id`,
+          [sessionId, trade.externalTradeId, trade.positionId, trade.mint, trade.side,
+            trade.quoteId, trade.executedAt, trade.tokenAmountBaseUnits,
+            trade.quoteAmountBaseUnits, trade.grossUsd, trade.totalFeesUsd,
+            trade.simulatedLatencyMs, JSON.stringify(trade.raw)]
+        );
+        if ((projected.rowCount ?? 0) !== 1) throw new Error("Paper trade projection id conflicts with different trade evidence.");
+      }
       const stopped = event.kind === "SESSION_STOPPED";
       await client.query(
         `UPDATE paper_sessions
@@ -459,4 +545,214 @@ export async function releaseWorkerLease(leaseName: string, ownerId: string): Pr
     [leaseName, ownerId]
   );
   return (result.rowCount ?? 0) === 1;
+}
+
+
+export async function getPaperSessionLedgerSnapshot(sessionId?: string) {
+  const unavailable = (reason: string) => ({
+    available: false as const, reason, generatedAt: new Date().toISOString(),
+    sessions: [], positions: [], quotes: [], trades: []
+  });
+  if (!pool) return unavailable("DATABASE_URL is not configured");
+  const persistence = await getPersistenceStatus();
+  if (!persistence.connected) return unavailable("PostgreSQL is not connected");
+  try {
+    const projectionMigration = await pool.query(
+      "SELECT 1 FROM schema_migrations WHERE version='0005_paper_trade_projections' LIMIT 1"
+    );
+    if (projectionMigration.rows.length === 0) {
+      return unavailable("Migration 0005_paper_trade_projections must be explicitly applied before reading the paper ledger projection");
+    }
+  } catch {
+    return unavailable("Paper ledger migration status could not be verified");
+  }
+  if (sessionId !== undefined && (!sessionId.trim() || sessionId.length > 128)) {
+    return unavailable("Invalid paper session id");
+  }
+  try {
+    const sessionsResult = await pool.query(
+      `SELECT id,status,started_at,stopped_at,strategy_version,last_sequence,last_event_at,metadata
+       FROM paper_sessions
+       ${sessionId ? "WHERE id=$1" : ""}
+       ORDER BY started_at DESC LIMIT 50`,
+      sessionId ? [sessionId] : []
+    );
+    const ids = sessionsResult.rows.map(row => String(row.id));
+    if (ids.length === 0) {
+      return { available: true as const, generatedAt: new Date().toISOString(),
+        sessions: [], positions: [], quotes: [], trades: [] };
+    }
+    const [positions, quotes, trades] = await Promise.all([
+      pool.query(
+        `SELECT session_id,external_position_id,mint,status,opened_at,closed_at,
+          stake_usd::text,token_amount_base_units::text,token_decimals,
+          entry_price_usd_per_token::text,buy_costs_usd::text,
+          latest_liquidation_value_usd::text,realized_pnl_usd::text,exit_reason,
+          last_event_sequence,snapshot
+         FROM paper_position_projection WHERE session_id=ANY($1::text[])
+         ORDER BY opened_at DESC`, [ids]
+      ),
+      pool.query(
+        `SELECT session_id,external_quote_id,external_position_id,mint,side,provider,venue,
+          context_slot,observed_at,expires_at,requested_usd::text,
+          input_amount_base_units::text,output_amount_base_units::text,output_usd::text,
+          price_impact_pct::text,simulated_latency_ms,simulated_fill_at,
+          fee_breakdown_usd,raw_quote
+         FROM paper_execution_quote_projection WHERE session_id=ANY($1::text[])
+         ORDER BY observed_at DESC LIMIT 500`, [ids]
+      ),
+      pool.query(
+        `SELECT session_id,external_trade_id,external_position_id,mint,side,quote_id,
+          executed_at,token_amount_base_units::text,quote_amount_base_units::text,
+          gross_usd::text,total_fees_usd::text,simulated_latency_ms,raw_trade
+         FROM paper_trade_projection WHERE session_id=ANY($1::text[])
+         ORDER BY executed_at DESC LIMIT 500`, [ids]
+      )
+    ]);
+    return {
+      available: true as const,
+      generatedAt: new Date().toISOString(),
+      sessions: sessionsResult.rows,
+      positions: positions.rows,
+      quotes: quotes.rows,
+      trades: trades.rows
+    };
+  } catch {
+    return unavailable("Paper ledger projection tables are unavailable; inspect migration 0005 and database logs");
+  }
+}
+
+
+export interface HeliusBackfillArchiveInput {
+  sessionId: string;
+  mint: string;
+  state: {
+    bondingCurve: string;
+    createSignature: string;
+    launchBlockTime: number | null;
+    horizonSeconds: number;
+    maxSignatures: number;
+    signatures: Array<{ signature: string; slot: number; blockTime: number | null; err: unknown }>;
+    pagesScanned: number;
+    scannedCount: number;
+    before: string | null;
+    status: "PENDING" | "PAGING" | "READY_TO_FETCH" | "COMPLETE" | "INCOMPLETE";
+    reason: string | null;
+  };
+  transaction?: {
+    mint: string;
+    signature: string;
+    slot: number;
+    provider: "helius";
+    commitment: "confirmed" | "finalized";
+    source: "HISTORICAL_BACKFILL" | "LIVE_MONITOR";
+    receivedAt: string;
+    createEvents: unknown[];
+    tradeEvents: unknown[];
+  };
+}
+
+/** Persist an idempotent backfill checkpoint and, when supplied, a verified decoded transaction. */
+export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveInput): Promise<void> {
+  if (!pool) throw new Error("PostgreSQL persistence is not configured.");
+  const { sessionId, mint, state, transaction } = input;
+  const address = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  const signaturePattern = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
+  if (!sessionId.trim() || sessionId.length > 128 || !address.test(mint) ||
+      !address.test(state.bondingCurve) || !signaturePattern.test(state.createSignature) ||
+      (state.launchBlockTime === null ? state.status !== "INCOMPLETE" :
+        !Number.isSafeInteger(state.launchBlockTime) || state.launchBlockTime < 0) ||
+      !Number.isSafeInteger(state.horizonSeconds) || state.horizonSeconds < 60 || state.horizonSeconds > 1800 ||
+      !Number.isSafeInteger(state.maxSignatures) || state.maxSignatures < 1 || state.maxSignatures > 500 ||
+      !Number.isSafeInteger(state.pagesScanned) || state.pagesScanned < 0 ||
+      !Number.isSafeInteger(state.scannedCount) || state.scannedCount < 0 ||
+      !Array.isArray(state.signatures) || state.signatures.length > state.maxSignatures ||
+      (state.before !== null && !signaturePattern.test(state.before)) ||
+      (state.status === "COMPLETE" && !state.signatures.some(item => item.signature === state.createSignature)) ||
+      !["PENDING","PAGING","READY_TO_FETCH","COMPLETE","INCOMPLETE"].includes(state.status)) {
+    throw new Error("Historical backfill archive contains invalid identity or progress fields.");
+  }
+  for (const item of state.signatures) {
+    if (!signaturePattern.test(item.signature) || !Number.isSafeInteger(item.slot) || item.slot < 0 ||
+        !(item.blockTime === null || (Number.isSafeInteger(item.blockTime) && item.blockTime >= 0))) {
+      throw new Error("Historical backfill archive contains an invalid signature record.");
+    }
+  }
+  if (state.status === "COMPLETE" &&
+      (state.launchBlockTime === null || state.signatures.some(item => item.blockTime === null))) {
+    throw new Error("Complete historical coverage requires verified block times for every archived signature.");
+  }
+  if (state.scannedCount < state.signatures.length) {
+    throw new Error("Historical signature count exceeds the verified scan count.");
+  }
+  if (transaction) {
+    const signatureEvidence = state.signatures.find(item => item.signature === transaction.signature);
+    if (transaction.mint !== mint || !signaturePattern.test(transaction.signature) ||
+        !Number.isSafeInteger(transaction.slot) || transaction.slot < 0 ||
+        (transaction.source === "HISTORICAL_BACKFILL" && !signatureEvidence) ||
+        (signatureEvidence !== undefined && signatureEvidence.slot !== transaction.slot) ||
+        !["HISTORICAL_BACKFILL","LIVE_MONITOR"].includes(transaction.source) ||
+        transaction.provider !== "helius" || !["confirmed","finalized"].includes(transaction.commitment) ||
+        !Number.isFinite(Date.parse(transaction.receivedAt)) ||
+        !Array.isArray(transaction.createEvents) || !Array.isArray(transaction.tradeEvents)) {
+      throw new Error("Historical transaction observation does not match verified signature evidence.");
+    }
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const session = await client.query("SELECT id FROM paper_sessions WHERE id=$1 FOR SHARE", [sessionId]);
+    if (session.rowCount !== 1) throw new Error("Paper session must be ingested before its Helius archive.");
+    const checkpoint = await client.query(
+      `INSERT INTO helius_backfill_jobs
+        (session_id,mint,bonding_curve,create_signature,launch_block_time,horizon_seconds,max_signatures,
+         pages_scanned,scanned_count,before_signature,status,reason,signature_count,signature_state,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,now())
+       ON CONFLICT (session_id,mint) DO UPDATE SET
+         pages_scanned=EXCLUDED.pages_scanned,scanned_count=EXCLUDED.scanned_count,
+         before_signature=EXCLUDED.before_signature,status=EXCLUDED.status,reason=EXCLUDED.reason,
+         signature_count=EXCLUDED.signature_count,signature_state=EXCLUDED.signature_state,updated_at=now()
+       WHERE helius_backfill_jobs.bonding_curve=EXCLUDED.bonding_curve
+         AND helius_backfill_jobs.create_signature=EXCLUDED.create_signature
+         AND helius_backfill_jobs.launch_block_time IS NOT DISTINCT FROM EXCLUDED.launch_block_time
+         AND helius_backfill_jobs.horizon_seconds=EXCLUDED.horizon_seconds
+         AND helius_backfill_jobs.max_signatures=EXCLUDED.max_signatures
+         AND EXCLUDED.pages_scanned >= helius_backfill_jobs.pages_scanned
+         AND EXCLUDED.scanned_count >= helius_backfill_jobs.scanned_count
+         AND (EXCLUDED.pages_scanned > helius_backfill_jobs.pages_scanned OR
+           (EXCLUDED.scanned_count=helius_backfill_jobs.scanned_count
+            AND EXCLUDED.before_signature IS NOT DISTINCT FROM helius_backfill_jobs.before_signature
+            AND EXCLUDED.status=helius_backfill_jobs.status
+            AND EXCLUDED.reason IS NOT DISTINCT FROM helius_backfill_jobs.reason
+            AND EXCLUDED.signature_state=helius_backfill_jobs.signature_state))
+       RETURNING mint`,
+      [sessionId,mint,state.bondingCurve,state.createSignature,state.launchBlockTime,state.horizonSeconds,
+        state.maxSignatures,state.pagesScanned,state.scannedCount,state.before,state.status,state.reason,
+        state.signatures.length,JSON.stringify(state.signatures)]
+    );
+    if (checkpoint.rowCount !== 1) {
+      throw new Error("Historical backfill checkpoint conflicts with immutable identity or previously persisted progress.");
+    }
+    if (transaction) {
+      const raw = JSON.stringify(transaction);
+      const result = await client.query(
+        `INSERT INTO helius_transaction_observations
+          (session_id,mint,signature,slot,provider,commitment,observation_source,received_at,create_events,trade_events,raw_observation)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb)
+         ON CONFLICT (session_id,mint,signature) DO UPDATE SET
+           raw_observation=EXCLUDED.raw_observation
+         WHERE helius_transaction_observations.raw_observation=EXCLUDED.raw_observation
+         RETURNING signature`,
+        [sessionId,mint,transaction.signature,transaction.slot,transaction.provider,transaction.commitment,transaction.source,
+          transaction.receivedAt,JSON.stringify(transaction.createEvents),JSON.stringify(transaction.tradeEvents),raw]
+      );
+      if (result.rowCount !== 1) throw new Error("Historical transaction signature conflicts with previously archived evidence.");
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }

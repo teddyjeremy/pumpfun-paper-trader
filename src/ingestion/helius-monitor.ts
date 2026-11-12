@@ -3,6 +3,8 @@ import type { DiscoveryCandidate } from "./discovery-store.js";
 export const MAX_HELIUS_CANDIDATES = 10;
 export const MAX_HELIUS_SIGNATURE_QUEUE = 200;
 export const MAX_HELIUS_SEEN_SIGNATURES = 5_000;
+export const MAX_HELIUS_RETRY_ATTEMPTS = 3;
+export const HELIUS_RETRY_DELAYS_MS = [5_000, 15_000, 60_000] as const;
 export const FRESH_LAUNCH_SLOT_RESERVE = 4;
 export const FRESH_LAUNCH_WINDOW_MS = 60_000;
 
@@ -28,6 +30,8 @@ export interface HeliusSignatureWork {
   /** Null when queued from a provider discovery event without a slot. */
   slot: number | null;
   queuedAt: string;
+  retryAttempt?: number;
+  retryAfterAt?: string;
 }
 
 export interface HeliusMonitorState {
@@ -186,17 +190,17 @@ export function enqueueHeliusSignatureWork(
       state.queue.some(item => item.signature === input.signature)) {
     return { state: { ...state, duplicateSignatures: state.duplicateSignatures + 1 }, outcome: "DUPLICATE" };
   }
-  const seenSignatures = [...state.seenSignatures, input.signature].slice(-MAX_HELIUS_SEEN_SIGNATURES);
   if (state.queue.length >= MAX_HELIUS_SIGNATURE_QUEUE) {
     return {
       state: {
-        ...state, seenSignatures,
+        ...state,
         droppedSignatures: state.droppedSignatures + 1,
         incompleteMints: [...new Set([...state.incompleteMints, input.mint])].slice(-MAX_HELIUS_CANDIDATES)
       },
       outcome: "OVERFLOW"
     };
   }
+  const seenSignatures = [...state.seenSignatures, input.signature].slice(-MAX_HELIUS_SEEN_SIGNATURES);
   return {
     state: {
       ...state, seenSignatures,
@@ -225,17 +229,17 @@ export function enqueueHeliusNotification(
   if (state.seenSignatures.includes(input.signature) || state.queue.some(item => item.signature === input.signature)) {
     return { state: { ...state, duplicateSignatures: state.duplicateSignatures + 1 }, outcome: "DUPLICATE" };
   }
-  const seenSignatures = [...state.seenSignatures, input.signature].slice(-MAX_HELIUS_SEEN_SIGNATURES);
   if (state.queue.length >= MAX_HELIUS_SIGNATURE_QUEUE) {
     return {
       state: {
-        ...state, seenSignatures,
+        ...state,
         droppedSignatures: state.droppedSignatures + 1,
         incompleteMints: [...new Set([...state.incompleteMints, subscription.mint])].slice(-MAX_HELIUS_CANDIDATES)
       },
       outcome: "OVERFLOW"
     };
   }
+  const seenSignatures = [...state.seenSignatures, input.signature].slice(-MAX_HELIUS_SEEN_SIGNATURES);
   return {
     state: {
       ...state, seenSignatures,
@@ -248,6 +252,45 @@ export function enqueueHeliusNotification(
 export function takeHeliusWork(state: HeliusMonitorState): { state: HeliusMonitorState; work: HeliusSignatureWork | null } {
   if (state.queue.length === 0) return { state, work: null };
   return { state: { ...state, queue: state.queue.slice(1) }, work: state.queue[0] ?? null };
+}
+
+/** Requeue a transiently incomplete transaction with durable bounded backoff. */
+export function retryHeliusSignatureWork(
+  state: HeliusMonitorState,
+  work: HeliusSignatureWork,
+  nowMs = Date.now()
+): { state: HeliusMonitorState; outcome: "RETRY_SCHEDULED" | "EXHAUSTED" | "OVERFLOW"; retryAfterAt: string | null } {
+  const attempt = (work.retryAttempt ?? 0) + 1;
+  if (!Number.isFinite(nowMs) || !Number.isSafeInteger(attempt) || attempt < 1) {
+    return {
+      state: { ...state, incompleteMints: [...new Set([...state.incompleteMints, work.mint])].slice(-MAX_HELIUS_CANDIDATES) },
+      outcome: "EXHAUSTED", retryAfterAt: null
+    };
+  }
+  if (attempt > MAX_HELIUS_RETRY_ATTEMPTS) {
+    return {
+      state: { ...state, incompleteMints: [...new Set([...state.incompleteMints, work.mint])].slice(-MAX_HELIUS_CANDIDATES) },
+      outcome: "EXHAUSTED", retryAfterAt: null
+    };
+  }
+  if (state.queue.length >= MAX_HELIUS_SIGNATURE_QUEUE) {
+    return {
+      state: {
+        ...state, droppedSignatures: state.droppedSignatures + 1,
+        incompleteMints: [...new Set([...state.incompleteMints, work.mint])].slice(-MAX_HELIUS_CANDIDATES)
+      },
+      outcome: "OVERFLOW", retryAfterAt: null
+    };
+  }
+  const retryAtMs = nowMs + HELIUS_RETRY_DELAYS_MS[attempt - 1]!;
+  const retryAfterAt = new Date(retryAtMs).toISOString();
+  const retryWork: HeliusSignatureWork = {
+    ...work, retryAttempt: attempt, retryAfterAt, queuedAt: new Date(nowMs).toISOString()
+  };
+  return {
+    state: { ...state, queue: [...state.queue, retryWork] },
+    outcome: "RETRY_SCHEDULED", retryAfterAt
+  };
 }
 
 /** Drop socket-scoped subscription IDs before reconnecting a new WebSocket. */
