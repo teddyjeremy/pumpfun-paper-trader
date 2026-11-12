@@ -1,6 +1,6 @@
 import type { PumpTradeEvent } from "./pump-events.js";
 import type { VerifiedPumpTransaction } from "./helius.js";
-import { isSolQuoteMint, SOL_QUOTE_MINT } from "./trade-flow.js";
+import { isSolQuoteMint } from "./trade-flow.js";
 
 export const PRICE_VOLUME_BUCKET_SECONDS = 5;
 export const PRICE_VOLUME_HORIZON_SECONDS = 10 * 60;
