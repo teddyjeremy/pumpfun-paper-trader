@@ -14,7 +14,7 @@
 - [ ] Verify Pump.fun official SDK/program interfaces and implement bonding-curve PDA/account decoder
 - [ ] Authoritative graduation detector and migrated-pool discovery
 - [ ] Helius backfill/reconciliation for missed provider events
-- [ ] Complete entry decision engine and explainable decisions (flow/price profiles exist, but volume-profile thresholds, signal-age confirmation, executable quotes, and ledger integration remain outstanding)
+- [ ] Complete entry decision engine and explainable decisions (strict per-rule evaluation and 1–2 second reclaim freshness confirmation are implemented; numeric volume-profile thresholds, executable quotes and automated ledger integration remain outstanding)
 - [x] Direct creator-sale screening, bounded wallet-funding linkage inspection, and observed individual/linked-cluster hard rejects
 - [ ] Complete wallet attribution and full holder census; current funding inspection is sampled and top-20 holder evidence is partial
 - [ ] Verified PumpSwap quote adapter with dynamic protocol/creator fee, network, priority, impact and slippage accounting
@@ -22,7 +22,7 @@
 - [ ] PostgreSQL migrations, append-only event/trade ledger, idempotency and worker leader lease
 - [ ] Deterministic paper executor and migration-aware position state machine
 - [ ] Dynamic exhaustion exit signal backtest/calibration; no maximum holding duration
-- [ ] Portfolio sizing/capacity policy and invariant tests
+- [x] Paper portfolio sizing/capacity policy and pure accounting invariant tests (Worker quote/executor integration remains outstanding)
 - [ ] Authenticated read-only Vercel dashboard backed by durable records
 - [ ] Historical replay and paper-forward validation before any strategy changes
 
