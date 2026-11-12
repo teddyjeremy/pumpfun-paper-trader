@@ -12,7 +12,7 @@
 - [ ] Add reconnect/backoff and provider-gap reconciliation
 - [x] Helius transaction verification adapter and bounded candidate-specific monitoring (10 slots, durable queue, event verification, and evidence-driven slot rotation)
 - [ ] Verify Pump.fun official SDK/program interfaces and implement bonding-curve PDA/account decoder
-- [ ] Authoritative graduation detector and migrated-pool discovery
+- [ ] Authoritative graduation detector and migrated-pool discovery\n- [x] Pure fail-closed market transition rules for live curve, migration pending, verified canonical pool and EXIT_BLOCKED (account decoder and Worker integration remain outstanding)
 - [ ] Helius backfill/reconciliation for missed provider events
 - [ ] Complete entry decision engine and explainable decisions (strict per-rule evaluation and 1–2 second reclaim freshness confirmation are implemented; numeric volume-profile thresholds, executable quotes and automated ledger integration remain outstanding)
 - [x] Exclude buy/sell spam at or below $0.01 from flow and price-volume evidence when a fresh SOL/USD price is supplied; pullback/reclaim volume ratios use buy-side quote volume only
