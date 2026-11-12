@@ -1,6 +1,6 @@
 import type { PumpTradeEvent } from "./pump-events.js";
 import type { VerifiedPumpTransaction } from "./helius.js";
-import { SOL_QUOTE_MINT } from "./trade-flow.js";
+import { isSolQuoteMint, SOL_QUOTE_MINT } from "./trade-flow.js";
 
 export const PRICE_VOLUME_BUCKET_SECONDS = 5;
 export const PRICE_VOLUME_HORIZON_SECONDS = 10 * 60;
@@ -82,7 +82,7 @@ interface MutableBucket {
 }
 
 function quoteAmount(event: PumpTradeEvent): bigint {
-  if (event.quoteMint === SOL_QUOTE_MINT) {
+  if (isSolQuoteMint(event.quoteMint)) {
     return event.quoteAmount > 0n ? event.quoteAmount : event.solAmount;
   }
   return event.quoteAmount;
@@ -99,7 +99,7 @@ function reservePrice(
 }
 
 function priceOf(event: PumpTradeEvent): number | null {
-  const quoteReserves = event.quoteMint === SOL_QUOTE_MINT
+  const quoteReserves = isSolQuoteMint(event.quoteMint)
     ? event.virtualSolReserves
     : event.virtualQuoteReserves;
   return reservePrice(quoteReserves, event.virtualTokenReserves);
@@ -228,7 +228,7 @@ export function buildCandidatePriceVolumeProfiles(
       const group = ensure(created.mint, created.quoteMint);
       if (group.launchTime === null || timestamp < group.launchTime) {
         group.launchTime = timestamp;
-        const quoteReserves = created.quoteMint === SOL_QUOTE_MINT
+        const quoteReserves = isSolQuoteMint(created.quoteMint)
           ? created.virtualSolReserves
           : created.virtualQuoteReserves;
         group.launchPrice = reservePrice(quoteReserves, created.virtualTokenReserves);
@@ -242,7 +242,7 @@ export function buildCandidatePriceVolumeProfiles(
       const price = priceOf(event);
       const amount = quoteAmount(event);
       if (price === null || amount <= 0n) continue;
-      if (event.quoteMint === SOL_QUOTE_MINT && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0) {
+      if (isSolQuoteMint(event.quoteMint) && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0) {
         const notionalUsd = Number(amount) / 1_000_000_000 * options.solUsdPriceUsd!;
         if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) {
           group.ignoredMicroTradeCount += 1;
@@ -377,7 +377,7 @@ export function buildCandidatePriceVolumeProfiles(
     output.push({
       mint: group.mint,
       quoteMint: group.quoteMint,
-      quoteUnit: group.quoteMint === null ? "UNKNOWN" : group.quoteMint === SOL_QUOTE_MINT ? "SOL" : "NON_SOL_RAW",
+      quoteUnit: group.quoteMint === null ? "UNKNOWN" : isSolQuoteMint(group.quoteMint) ? "SOL" : "NON_SOL_RAW",
       bucketSeconds: PRICE_VOLUME_BUCKET_SECONDS,
       horizonSeconds: horizon,
       baselinePrice: baseline,
@@ -394,9 +394,9 @@ export function buildCandidatePriceVolumeProfiles(
       impulseVolume,
       pullbackVolume,
       reclaimVolume,
-      pullbackVolumeVsImpulsePct: group.quoteMint === SOL_QUOTE_MINT && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
+      pullbackVolumeVsImpulsePct: isSolQuoteMint(group.quoteMint) && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
         ? volumeRatioPct(pullbackVolume, impulseVolume) : null,
-      reclaimVolumeVsPullbackPct: group.quoteMint === SOL_QUOTE_MINT && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
+      reclaimVolumeVsPullbackPct: isSolQuoteMint(group.quoteMint) && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
         ? volumeRatioPct(reclaimVolume, pullbackVolume) : null,
       buckets,
       profileStatus,
@@ -405,7 +405,7 @@ export function buildCandidatePriceVolumeProfiles(
         buckets.at(-1)?.endTime === Math.floor(now / PRICE_VOLUME_BUCKET_SECONDS) * PRICE_VOLUME_BUCKET_SECONDS,
       coverage: "OBSERVED_EVENTS_ONLY",
       entryEligible: false,
-      microTradeFilterStatus: group.quoteMint !== SOL_QUOTE_MINT
+      microTradeFilterStatus: !isSolQuoteMint(group.quoteMint)
         ? "UNSUPPORTED_QUOTE"
         : Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
           ? "APPLIED" : "UNAVAILABLE",
