@@ -37,6 +37,8 @@ export interface CandidateTradeFlow {
   coverage: "OBSERVED_EVENTS_ONLY";
   entryEligible: false;
   microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE";
+  ignoredMicroTradeCount: number;
+  ignoredMicroTradeQuoteVolume: string;
 }
 
 /**
@@ -74,13 +76,15 @@ export function buildCandidateTradeFlows(
     mint: string;
     quoteMint: string | null;
     windows: Map<number, PumpTradeEvent[]>;
+    ignoredMicroTradeCount: number;
+    ignoredMicroTradeQuoteVolume: bigint;
   }>();
 
   const ensureGroup = (mint: string, quoteMint: string | null) => {
     const key = `${mint}:${quoteMint ?? "UNKNOWN"}`;
     let group = groups.get(key);
     if (!group) {
-      group = { mint, quoteMint, windows: new Map() };
+      group = { mint, quoteMint, windows: new Map(), ignoredMicroTradeCount: 0, ignoredMicroTradeQuoteVolume: 0n };
       groups.set(key, group);
     }
     return group;
@@ -97,7 +101,15 @@ export function buildCandidateTradeFlows(
       if (trade.quoteMint === SOL_QUOTE_MINT && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0) {
         const rawAmount = trade.quoteAmount > 0n ? trade.quoteAmount : trade.solAmount;
         const notionalUsd = Number(rawAmount) / 1_000_000_000 * options.solUsdPriceUsd!;
-        if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) continue;
+        if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) {
+          group.ignoredMicroTradeCount += 1;
+          group.ignoredMicroTradeQuoteVolume += rawAmount;
+          const ignoredWindowStart = Math.floor(timestamp / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
+          if (ignoredWindowStart + TRADE_FLOW_WINDOW_SECONDS <= nowSeconds && !group.windows.has(ignoredWindowStart)) {
+            group.windows.set(ignoredWindowStart, []);
+          }
+          continue;
+        }
       }
       const windowStart = Math.floor(timestamp / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
       if (windowStart + TRADE_FLOW_WINDOW_SECONDS > nowSeconds) continue;
@@ -176,7 +188,9 @@ export function buildCandidateTradeFlows(
       dataComplete,
       coverage: "OBSERVED_EVENTS_ONLY",
       entryEligible: false,
-      microTradeFilterStatus
+      microTradeFilterStatus,
+      ignoredMicroTradeCount: group.ignoredMicroTradeCount,
+      ignoredMicroTradeQuoteVolume: group.ignoredMicroTradeQuoteVolume.toString()
     });
   }
   return output.sort((a, b) => a.mint.localeCompare(b.mint) ||
