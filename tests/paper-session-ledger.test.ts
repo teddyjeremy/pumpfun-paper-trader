@@ -55,4 +55,10 @@ describe("strict strategy audit", () => {
   const result=evaluateStrictStrategyAudit({...base,creatorRiskStatus:"REJECT_OBSERVED"});
   expect(result.decision).toBe("REJECT"); expect(result.rejectionReasons).toContain("CREATOR_SELL_RISK");
  });
+ it("accepts completed windows with zero sells when the source confirms the strict volume rule", () => {
+  const noSellFlow = {...base, flow:{...base.flow,
+    windows:[1,2,3].map(()=>({buySellRatio:null,flowWindowPass:true,uniqueBuyers:4,uniqueSellers:0}))}};
+  const result=evaluateStrictStrategyAudit(noSellFlow);
+  expect(result.rules.find(rule=>rule.rule==="THREE_FLOW_WINDOWS")?.status).toBe("PASS");
+ });
 });
