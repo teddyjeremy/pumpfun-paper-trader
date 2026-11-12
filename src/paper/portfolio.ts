@@ -73,7 +73,8 @@ export const PAPER_PORTFOLIO_POLICY = Object.freeze({
 const round = (value: number) => Math.round((value + Number.EPSILON) * 1e8) / 1e8;
 function quoteFeesUsd(quote: ExecutablePaperQuote): number {
   return quote.networkFeeUsd + quote.priorityFeeUsd + quote.providerFeeUsd +
-    quote.protocolFeeUsd + quote.creatorFeeUsd + quote.poolFeeUsd + quote.transferFeeUsd;
+    quote.protocolFeeUsd + quote.creatorFeeUsd + quote.poolFeeUsd +
+    (quote.pumpFeeUsd ?? 0) + quote.transferFeeUsd;
 }
 function validPositive(value: number): boolean { return Number.isFinite(value) && value > 0; }
 function humanTokenAmount(amountBaseUnits: string, decimals: number): number {
@@ -106,6 +107,7 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
       !Number.isFinite(quote.protocolFeeUsd) || quote.protocolFeeUsd < 0 ||
       !Number.isFinite(quote.creatorFeeUsd) || quote.creatorFeeUsd < 0 ||
       !Number.isFinite(quote.poolFeeUsd) || quote.poolFeeUsd < 0 ||
+      !Number.isFinite(quote.pumpFeeUsd ?? 0) || (quote.pumpFeeUsd ?? 0) < 0 ||
       !Number.isFinite(quote.transferFeeUsd) || quote.transferFeeUsd < 0) {
     throw new Error("Quote contains invalid amount or cost evidence.");
   }
