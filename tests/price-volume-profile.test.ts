@@ -50,7 +50,7 @@ describe("observed price and stage-volume profile", () => {
         trade(115n, 1_050n),   // 16% pullback low
         trade(120n, 1_200n)    // reclaim above previous 5s high
       ])
-    ], { nowSeconds: 125, horizonSeconds: 60, candidateMints: [mint] });
+    ], { solUsdPriceUsd: 100, minimumTradeUsd: 0, nowSeconds: 125, horizonSeconds: 60, candidateMints: [mint] });
 
     expect(profile).toMatchObject({
       mint, quoteUnit: "SOL", profileStatus: "RECLAIM_DETECTED",
@@ -71,6 +71,7 @@ describe("observed price and stage-volume profile", () => {
     const base = transaction([trade(105n, 1_250n), trade(110n, 1_300n)]);
     base.createEvents = [createEvent()];
     const [profile] = buildCandidatePriceVolumeProfiles([base], {
+      solUsdPriceUsd: 100, minimumTradeUsd: 0,
       nowSeconds: 115, horizonSeconds: 60, coverageStartByMint: { [mint]: 100 }
     });
     expect(profile?.baselinePrice).toBeCloseTo(1, 6);
