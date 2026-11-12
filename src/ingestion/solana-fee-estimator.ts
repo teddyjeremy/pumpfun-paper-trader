@@ -66,8 +66,8 @@ export async function estimateSolanaTransactionFees(
       !BASE64.test(config.messageBase64)) {
     return unavailable("A valid base64 compiled transaction message is required.");
   }
-  if (!messageOmitsComputeUnitPrice(config.messageBase64)) {
-    return unavailable("The compiled transaction message is malformed or already contains SetComputeUnitPrice.");
+  if (!messageHasSafeFeeInstructions(config.messageBase64, config.computeUnitLimit)) {
+    return unavailable("The compiled message must contain one matching SetComputeUnitLimit and omit SetComputeUnitPrice.");
   }
   if (!Array.isArray(config.writableAccountKeys) || config.writableAccountKeys.length < 1 ||
       config.writableAccountKeys.length > 128 ||
