@@ -311,7 +311,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }));
     const flows = buildCandidateTradeFlows(this.verifiedTransactions, {
       incompleteMints,
-      coverageStartByMint
+      coverageStartByMint,
+      candidateMints: this.discovery.candidates
+        .filter(candidate => candidate.status === "DISCOVERED")
+        .map(candidate => candidate.mint)
     });
     const rankedFlows = [...flows].sort((a, b) =>
       Number(b.dataComplete) - Number(a.dataComplete) ||
