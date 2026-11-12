@@ -88,13 +88,21 @@ export async function estimateSolanaTransactionFees(
     return unavailable("Solana RPC did not return all required transaction fee evidence.");
   }
 
-  const feeValue = asRecord(feeResponse.result)?.value;
+  const feeResult = asRecord(feeResponse.result);
+  const feeContext = asRecord(feeResult?.context);
+  const feeValue = feeResult?.value;
   if (typeof feeValue !== "number" || !Number.isSafeInteger(feeValue) || feeValue <= 0) {
     return unavailable("The exact transaction message has no valid base network fee estimate.");
   }
   const currentSlot = slotResponse.result;
   if (!Number.isSafeInteger(currentSlot) || (currentSlot as number) < 1) {
     return unavailable("Solana RPC returned an invalid confirmed slot.");
+  }
+  const feeContextSlot = feeContext?.slot;
+  if (!Number.isSafeInteger(feeContextSlot) ||
+      (feeContextSlot as number) > (currentSlot as number) ||
+      (currentSlot as number) - (feeContextSlot as number) > RECENT_SLOT_WINDOW) {
+    return unavailable("The exact-message base fee was returned from a stale or invalid confirmed slot.");
   }
   if (!Array.isArray(priorityResponse.result) ||
       priorityResponse.result.length < MIN_RECENT_FEE_SAMPLES ||
