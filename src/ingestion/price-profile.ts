@@ -119,10 +119,17 @@ function buildOneProfile(
 
   for (const point of points) {
     if (!impulseHigh || comparePrice(point, impulseHigh) > 0) {
-      impulseHigh = point;
-      impulseHighTimestamp = point.timestamp;
-      pullbackLow = null;
-      pullbackLowTimestamp = null;
+      const existingPullbackBps = impulseHigh && pullbackLow
+        ? priceDropBps(pullbackLow, impulseHigh)
+        : null;
+      const validPullbackAlreadyFormed = existingPullbackBps !== null &&
+        existingPullbackBps >= 1_000 && existingPullbackBps <= 4_000;
+      if (!validPullbackAlreadyFormed) {
+        impulseHigh = point;
+        impulseHighTimestamp = point.timestamp;
+        pullbackLow = null;
+        pullbackLowTimestamp = null;
+      }
       continue;
     }
     if (impulseHighTimestamp !== null && point.timestamp > impulseHighTimestamp &&
