@@ -91,6 +91,26 @@ describe("Solana transaction fee estimator", () => {
     expect(calls).toBe(0);
   });
 
+
+  it("rejects a compiled message whose explicit compute limit differs from the estimate", async () => {
+    const transactionMessage = new TransactionMessage({
+      payerKey: payer.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
+        SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: recipient, lamports: 1 })
+      ]
+    });
+    const messageBase64 = Buffer.from(transactionMessage.compileToLegacyMessage().serialize()).toString("base64");
+    let calls = 0;
+    const result = await estimateSolanaTransactionFees({
+      ...baseInput, messageBase64,
+      fetcher: async () => { calls += 1; return new Response("{}"); }
+    });
+    expect(result.status).toBe("UNAVAILABLE");
+    expect(calls).toBe(0);
+  });
+
   it("accepts a valid v0 message without SetComputeUnitPrice", async () => {
     const result = await estimateSolanaTransactionFees({
       ...baseInput, messageBase64: compiledMessageBase64(false, true),
