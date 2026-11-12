@@ -165,4 +165,75 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     }]);
     expect(next).toEqual({ inserted: 1, duplicates: 0, lastSequence: 2 });
   });
+  it("persists resumable Helius checkpoints and verified decoded transactions idempotently", async () => {
+    await ledgerPersistence!.persistPaperAuditEvents(sessionId, [entryEvent]);
+    const backfillMint = "So11111111111111111111111111111111111111112";
+    const createSignature = "5".repeat(64);
+    const state = {
+      bondingCurve: "11111111111111111111111111111111",
+      createSignature,
+      launchBlockTime: 1762941600,
+      horizonSeconds: 600,
+      maxSignatures: 120,
+      signatures: [{ signature: createSignature, slot: 123, blockTime: 1762941600, err: null }],
+      pagesScanned: 1,
+      scannedCount: 1,
+      before: null,
+      status: "COMPLETE" as const,
+      reason: null
+    };
+    const transaction = {
+      mint: backfillMint,
+      signature: createSignature,
+      slot: 123,
+      provider: "helius" as const,
+      commitment: "confirmed" as const,
+      receivedAt: "2026-11-12T10:00:03.000Z",
+      createEvents: [{ mint: backfillMint, bondingCurve: state.bondingCurve }],
+      tradeEvents: []
+    };
+    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction });
+    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction });
+
+    const archived = await inspector!.query(
+      `SELECT j.status,j.pages_scanned,j.signature_count,j.launch_block_time,
+        (SELECT COUNT(*)::int FROM helius_transaction_observations t
+          WHERE t.session_id=j.session_id AND t.mint=j.mint) AS transactions
+       FROM helius_backfill_jobs j WHERE j.session_id=$1 AND j.mint=$2`,
+      [sessionId, backfillMint]
+    );
+    expect(archived.rows[0]).toEqual({
+      status: "COMPLETE", pages_scanned: 1, signature_count: 1,
+      launch_block_time: "1762941600", transactions: 1
+    });
+
+    await expect(ledgerPersistence!.persistHeliusBackfillArchive({
+      sessionId, mint: backfillMint, state,
+      transaction: { ...transaction, slot: 124 }
+    })).rejects.toThrow(/verified signature evidence|conflicts/);
+
+    const incompleteMint = "11111111111111111111111111111111";
+    const incomplete = {
+      ...state,
+      createSignature: "6".repeat(64),
+      launchBlockTime: null,
+      signatures: [],
+      pagesScanned: 0,
+      scannedCount: 0,
+      status: "INCOMPLETE" as const,
+      reason: "Verified launch block time is unavailable."
+    };
+    await ledgerPersistence!.persistHeliusBackfillArchive({
+      sessionId, mint: incompleteMint, state: incomplete
+    });
+    const incompleteRow = await inspector!.query(
+      "SELECT status,launch_block_time,reason FROM helius_backfill_jobs WHERE session_id=$1 AND mint=$2",
+      [sessionId, incompleteMint]
+    );
+    expect(incompleteRow.rows[0]).toEqual({
+      status: "INCOMPLETE", launch_block_time: null,
+      reason: "Verified launch block time is unavailable."
+    });
+  });
+
 });
