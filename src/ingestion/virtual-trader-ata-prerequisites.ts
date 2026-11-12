@@ -5,10 +5,7 @@ import {
   TOKEN_PROGRAM_ID
 } from "@solana/spl-token";
 import { PublicKey, type TransactionInstruction } from "@solana/web3.js";
-import {
-  decodeSplTokenAccount,
-  type RawProgramAccount
-} from "./pump-account-decoder.js";
+import { decodeSplTokenAccount, type RawProgramAccount } from "./pump-account-decoder.js";
 import { fetchHeliusMultipleAccounts, type HeliusAccountReadConfig } from "./helius-accounts.js";
 import type { NonSigningVirtualTraderIdentity } from "./virtual-trader-identity.js";
 
@@ -32,6 +29,12 @@ export interface VirtualTraderAtaPrerequisites {
   accountsPresent: boolean;
   /** This module never grants paper-entry authorization. */
   paperEntryAuthorized: false;
+}
+
+interface AtaSpec {
+  role: "base" | "quote";
+  mint: PublicKey;
+  tokenProgram: PublicKey;
 }
 
 function assertIdentity(identity: NonSigningVirtualTraderIdentity): PublicKey {
@@ -94,28 +97,26 @@ export async function inspectVirtualTraderAtaPrerequisites(input: {
 }): Promise<VirtualTraderAtaPrerequisites> {
   const owner = assertIdentity(input.identity);
   const payer = input.payer ? new PublicKey(input.payer) : owner;
-  const baseMint = new PublicKey(input.baseMint);
-  const baseTokenProgram = new PublicKey(input.baseTokenProgram);
-  assertTokenProgram(baseTokenProgram);
-
-  const requirements = [{
-    role: "base" as const,
-    mint: baseMint,
-    tokenProgram: baseTokenProgram
+  const specs: AtaSpec[] = [{
+    role: "base",
+    mint: new PublicKey(input.baseMint),
+    tokenProgram: new PublicKey(input.baseTokenProgram)
   }];
+  for (const spec of specs) assertTokenProgram(spec.tokenProgram);
   if (input.quoteMint) {
     if (!input.quoteTokenProgram) throw new Error("A quote token program is required when quoteMint is supplied.");
-    const quoteMint = new PublicKey(input.quoteMint);
-    const quoteTokenProgram = new PublicKey(input.quoteTokenProgram);
-    assertTokenProgram(quoteTokenProgram);
-    requirements.push({ role: "quote" as const, mint: quoteMint, tokenProgram: quoteTokenProgram });
+    const quoteSpec: AtaSpec = {
+      role: "quote",
+      mint: new PublicKey(input.quoteMint),
+      tokenProgram: new PublicKey(input.quoteTokenProgram)
+    };
+    assertTokenProgram(quoteSpec.tokenProgram);
+    specs.push(quoteSpec);
   }
 
-  const derived = requirements.map(requirement => ({
-    ...requirement,
-    address: getAssociatedTokenAddressSync(
-      requirement.mint, owner, false, requirement.tokenProgram
-    )
+  const derived = specs.map(spec => ({
+    ...spec,
+    address: getAssociatedTokenAddressSync(spec.mint, owner, false, spec.tokenProgram)
   }));
   if (new Set(derived.map(item => item.address.toBase58())).size !== derived.length) {
     throw new Error("Virtual trader ATA requirements must resolve to unique addresses.");
