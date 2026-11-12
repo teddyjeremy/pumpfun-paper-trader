@@ -71,7 +71,7 @@ export async function collectWalletFundingEvidence(
     // The RPC returns newest first; inspect the oldest three in this bounded
     // recent sample to approximate initial funding without unbounded history.
     const sample = validSignatures.slice(-MAX_TRANSACTIONS_PER_WALLET);
-    const counts = new Map<string, number>();
+    const counts = new Map<string, Set<string>>();
     for (const signature of sample) {
       const tx = await rpc(fetcher, url, "getTransaction", [signature, {
         encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 0
@@ -83,7 +83,9 @@ export async function collectWalletFundingEvidence(
       transactionsChecked += 1;
       for (const transfer of parsedSystemTransfers(tx.result)) {
         if (transfer.destination !== wallet || transfer.source === wallet) continue;
-        counts.set(transfer.source, (counts.get(transfer.source) ?? 0) + 1);
+        const signaturesFromFunder = counts.get(transfer.source) ?? new Set<string>();
+        signaturesFromFunder.add(signature);
+        counts.set(transfer.source, signaturesFromFunder);
       }
     }
     funderCounts.set(wallet, counts);
@@ -91,8 +93,8 @@ export async function collectWalletFundingEvidence(
 
   const walletByFunder = new Map<string, string[]>();
   for (const [wallet, counts] of funderCounts) {
-    for (const [funder, count] of counts) {
-      if (count < 2) continue;
+    for (const [funder, fundingSignatures] of counts) {
+      if (fundingSignatures.size < 2) continue;
       const recipients = walletByFunder.get(funder) ?? [];
       recipients.push(wallet);
       walletByFunder.set(funder, recipients);
