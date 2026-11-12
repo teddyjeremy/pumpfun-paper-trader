@@ -35,9 +35,6 @@ if (!parsed.success) {
 if (Boolean(parsed.data.DASHBOARD_USERNAME) !== Boolean(parsed.data.DASHBOARD_PASSWORD)) {
   throw new Error("DASHBOARD_USERNAME and DASHBOARD_PASSWORD must both be configured.");
 }
-if (parsed.data.PAPER_EVENT_INGEST_TOKEN && parsed.data.PAPER_EVENT_INGEST_TOKEN.length < 32) {
-  throw new Error("PAPER_EVENT_INGEST_TOKEN must be at least 32 characters when configured.");
-}
 if (parsed.data.PAPER_WORKER_CONTROL_TOKEN && !parsed.data.PAPER_WORKER_URL) {
   throw new Error("PAPER_WORKER_URL is required when PAPER_WORKER_CONTROL_TOKEN is configured.");
 }
@@ -51,9 +48,6 @@ if (parsed.data.PAPER_WORKER_URL) {
   if (parsed.data.NODE_ENV === "production" && workerUrl.protocol !== "https:") {
     throw new Error("PAPER_WORKER_URL must use HTTPS in production.");
   }
-}
-if (parsed.data.PAPER_WORKER_CONTROL_TOKEN && parsed.data.PAPER_WORKER_CONTROL_TOKEN.length < 32) {
-  throw new Error("PAPER_WORKER_CONTROL_TOKEN must be at least 32 characters when configured.");
 }
 if (parsed.data.DASHBOARD_USERNAME.includes(":")) {
   throw new Error("DASHBOARD_USERNAME cannot contain a colon when using HTTP Basic authentication.");
