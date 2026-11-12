@@ -11,7 +11,7 @@
 - `GET /api/strategy/replay?sessionId=...`: chronological replay of archived, verified historical SOL-quoted trade events, with optional outcome labeling; explicit favorable/adverse thresholds and a round-trip cost are required to assign profitability labels.
 - `GET /`: operator dashboard.
 
-## How to interpret the results
+## Live monitor versus paper execution\n\nThe dashboard polls the authenticated Worker snapshot every five seconds. Configure `PAPER_WORKER_URL` and `PAPER_WORKER_CONTROL_TOKEN` on the dashboard server; the control token must match the Worker `CONTROL_TOKEN` secret and must never be exposed to browser JavaScript. The dashboard start button starts PumpPortal/Helius discovery and creates a paper session journal. It does **not** enable simulated entries or exits. The Worker still reports `tradingReady: false`; the reusable entry/exit lifecycle is not yet connected to the Worker scheduler. Do not describe a monitor-only session as live paper trading.\n\n## How to interpret the results
 
 | Observation | What it usually means | Next investigation |
 |---|---|---|
@@ -49,7 +49,7 @@ Every simulated fill should store raw SOL/token amounts, decimals, quote timesta
 3. Verify graduation detection and migrated-pool discovery against on-chain account state.
 4. Run quote-only mode on both bonding curve and migrated pool; verify fee accounting.
 5. Replay historical/recorded events and compare deterministic results.
-6. Enable paper execution only after readiness is true and all hard gates pass.
+6. Enable paper execution only after the complete Worker entry/exit integration, persistence and readiness gates are verified. The current dashboard control starts monitoring only.
 7. Review failure categories and rejected candidates before changing thresholds.
 
 A multi-hour test validates integration and operational behavior, not profitability.
