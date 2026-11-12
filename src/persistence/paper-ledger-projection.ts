@@ -81,7 +81,7 @@ function baseUnits(value: unknown, label: string): string {
   }
   return raw;
 }
-function projectPosition(value: unknown): PaperProjectionPosition {
+function projectPosition(value: unknown, fallbackClosedAt?: string): PaperProjectionPosition {
   const p = object(value);
   if (!p) throw new Error("Paper projection position payload is missing.");
   const positionId = text(p.positionId, "position id");
@@ -90,7 +90,7 @@ function projectPosition(value: unknown): PaperProjectionPosition {
   if (!["OPEN", "CLOSED", "EXIT_BLOCKED"].includes(status)) throw new Error("Paper projection position status is unsupported.");
   const openedAt = text(p.openedAt, "position openedAt");
   if (!Number.isFinite(Date.parse(openedAt))) throw new Error("Paper projection position openedAt is invalid.");
-  const closedAt = p.closedAt == null ? null : text(p.closedAt, "position closedAt");
+  const closedAt = p.closedAt == null ? (fallbackClosedAt ?? null) : text(p.closedAt, "position closedAt");
   if (closedAt !== null && !Number.isFinite(Date.parse(closedAt))) throw new Error("Paper projection position closedAt is invalid.");
   const tokenDecimals = finite(p.tokenDecimals, "token decimals");
   if (!Number.isInteger(tokenDecimals) || tokenDecimals > 18) throw new Error("Paper projection token decimals are invalid.");
