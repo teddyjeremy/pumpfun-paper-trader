@@ -54,6 +54,29 @@ Every simulated fill should store raw SOL/token amounts, decimals, quote timesta
 
 A multi-hour test validates integration and operational behavior, not profitability.
 
+## Executable quote and fee assumptions
+
+The exact-size round-trip quote service is a read-only validation component. It:
+- obtains an official Pump SDK offline buy quote,
+- requests a fresh sell quote for the exact net token output,
+- requires the same mint, venue and quote mint, with a non-older sell snapshot,
+- rejects stale quotes, excessive price impact, and unsupported transfer-tax evidence,
+- reports round-trip net economics after Pump fee buckets, base network fee, priority fee and caller-supplied provider cost.
+
+Fee model assumptions:
+- Pump protocol/creator/LP fees come from the official SDK quote.
+- The base network fee defaults to 5,000 lamports per signature; signature count is an explicit paper assumption until a real transaction message is built and passed to `getFeeForMessage`.
+- Priority fee is estimated from Helius `getRecentPrioritizationFees` samples (micro-lamports per CU) and a caller-supplied compute-unit limit. If writable accounts are supplied, the estimate is account-specific; otherwise it is cluster-wide.
+- Provider fee is caller-supplied. Fetch/compute latency is measured and combined with the configured paper execution delay.
+- Quote age/TTL is capped at two seconds. This is a paper quote check, not proof of a real fill or a guarantee of transaction inclusion.
+
+Transfer-fee limitations:
+- Current USD normalization supports native SOL and WSOL quote mints only.
+- Token-2022 base mints with transfer-fee or transfer-hook extensions remain fail-closed; the adapter does not invent a tax amount.
+- Non-SOL quote mints are rejected rather than incorrectly valued using SOL/USD. Taxed quote-mint support must use the official SDK's quote-transfer-fee inputs and a matching PumpSwap implementation before it can be enabled.
+
+The quote service returns `paperEntryAuthorized: false`. Strategy authorization, durable position transitions and the Worker scheduler remain separate gates.
+
 ## Historical replay
 
 Historical replay requires the additive PostgreSQL migrations through `0007_helius_decode_coverage`. After reviewing the SQL and taking a database backup, an operator may run `npm run db:migrate` explicitly. Application startup does not migrate automatically.
