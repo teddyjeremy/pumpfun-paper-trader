@@ -176,6 +176,7 @@ interface CensusTokenAccount {
 interface CensusScan {
   accounts: CensusTokenAccount[];
   supply: bigint;
+  decimals: number;
   startSlot: number;
   endSlot: number;
 }
@@ -189,11 +190,15 @@ async function readConfirmedSlot(fetcher: typeof fetch, url: string): Promise<nu
 
 async function readConfirmedSupply(
   fetcher: typeof fetch, url: string, mint: string
-): Promise<bigint | null> {
+): Promise<{ amount: bigint; decimals: number } | null> {
   const response = await rpcCall(fetcher, url, "getTokenSupply", [mint, { commitment: "confirmed" }]);
   if (!response.ok) return null;
   const value = record(record(response.result)?.value);
-  return parsePositiveInteger(value?.amount);
+  const amount = parsePositiveInteger(value?.amount);
+  const decimals = value?.decimals;
+  if (amount === null || !Number.isSafeInteger(decimals) ||
+      (decimals as number) < 0 || (decimals as number) > 18) return null;
+  return { amount, decimals: decimals as number };
 }
 
 function parseCensusAmount(value: unknown): bigint | null {
@@ -247,10 +252,11 @@ async function scanAllHolderTokenAccounts(
 
   const supplyAfter = await readConfirmedSupply(fetcher, url, mint);
   const endSlot = await readConfirmedSlot(fetcher, url);
-  if (supplyAfter === null || endSlot === null || supplyAfter !== supplyBefore ||
+  if (supplyAfter === null || endSlot === null || supplyAfter.amount !== supplyBefore.amount ||
+      supplyAfter.decimals !== supplyBefore.decimals ||
       endSlot < startSlot || endSlot - startSlot > HOLDER_CENSUS_MAX_SLOT_SPAN) return null;
 
-  return { accounts, supply: supplyAfter, startSlot, endSlot };
+  return { accounts, supply: supplyAfter.amount, decimals: supplyAfter.decimals, startSlot, endSlot };
 }
 
 /**
@@ -280,7 +286,7 @@ export async function fetchCompleteHolderConcentration(
     const canonical = (scan: CensusScan) => scan.accounts
       .map(account => `${account.address}:${account.owner}:${account.amount.toString()}`)
       .sort().join("\\n");
-    if (first.supply !== second.supply || canonical(first) !== canonical(second) ||
+    if (first.supply !== second.supply || first.decimals !== second.decimals || canonical(first) !== canonical(second) ||
         second.endSlot < first.startSlot ||
         second.endSlot - first.startSlot > HOLDER_CENSUS_MAX_SLOT_SPAN * 2) {
       return { status: "DATA_INCOMPLETE", mint, reason: "Repeated full holder-census passes did not produce the same stable account set and supply." };
@@ -315,7 +321,7 @@ export async function fetchCompleteHolderConcentration(
         commitment: "confirmed",
         mint,
         supply: second.supply.toString(),
-        decimals: 0,
+        decimals: second.decimals,
         observedTokenAccounts: positiveAccounts.length,
         observedOwners: ownerAmounts.size,
         largestObservedTokenAccountShareBps: toCeilingBps(largestAccount, second.supply),
