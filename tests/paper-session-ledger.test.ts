@@ -33,6 +33,27 @@ describe("candidate price follow-up ledger", () => {
   const first = updateCandidatePriceTracker(null, {mint:"mint",quoteMint:"SOL",quoteAmount:"100",tokenAmount:"1000",timestamp:"2026-11-12T12:00:00Z",signature:"sig1",isBuy:true});
   expect(() => updateCandidatePriceTracker(first, {mint:"mint",quoteMint:"USDC",quoteAmount:"300",tokenAmount:"1000",timestamp:"2026-11-12T12:01:00Z",signature:"sig2",isBuy:false})).toThrow();
  });
+ it("measures post-decision peaks from the decision baseline, not earlier highs", () => {
+  const beforeDecision = updateCandidatePriceTracker(null, {
+   mint:"mint-2",quoteMint:"SOL",quoteAmount:"400",tokenAmount:"1000",
+   timestamp:"2026-11-12T11:59:00Z",signature:"pre",isBuy:true,
+   decisionPriceQuotePerToken:0.2,decisionAt:"2026-11-12T12:00:00Z",
+   discoveryPriceQuotePerToken:0.1
+  });
+  const afterDecision = updateCandidatePriceTracker(beforeDecision, {
+   mint:"mint-2",quoteMint:"SOL",quoteAmount:"150",tokenAmount:"1000",
+   timestamp:"2026-11-12T12:01:00Z",signature:"post-1",isBuy:false
+  });
+  expect(afterDecision.maxMultipleFromDecision).toBe(1);
+  const laterPeak = updateCandidatePriceTracker(afterDecision, {
+   mint:"mint-2",quoteMint:"SOL",quoteAmount:"400",tokenAmount:"1000",
+   timestamp:"2026-11-12T12:02:00Z",signature:"post-2",isBuy:true
+  });
+  expect(laterPeak.maxMultipleFromDecision).toBe(2);
+  expect(laterPeak.reached2xFromDecision).toBe(true);
+  expect(laterPeak.reached2xFromDecisionAt).toBe("2026-11-12T12:02:00Z");
+  expect(laterPeak.maxMultipleFromDiscovery).toBe(4);
+ });
 });
 
 import { evaluateStrictStrategyAudit, calculateReclaimConfirmation } from "../src/paper/strategy-audit.js";
