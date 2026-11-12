@@ -50,6 +50,9 @@ describe("atomic paper portfolio transitions", () => {
     });
     expect(committed.status).toBe("APPLIED");
     expect(db.read<any>(`paper_portfolio:${sessionId}`)?.availableCashUsd).toBe(1.7);
+    expect(db.read<any>(`paper_bankroll:${sessionId}`)).toEqual(
+      db.read<any>(`paper_portfolio:${sessionId}`)?.bankroll
+    );
     expect(db.read<any>(`audit_session:${sessionId}`)?.eventCount).toBe(2);
     expect(db.read<any[]>(`audit_events:${sessionId}:00000000`)).toHaveLength(1);
     expect(db.read<any>(`paper_transition:${sessionId}:entry:mint:quote-1`)?.eventIds).toHaveLength(1);

@@ -581,20 +581,17 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await txn.put(key, topped.state);
       const portfolioKey = `paper_portfolio:${sessionId}`;
       const portfolio = await txn.get<PaperPortfolioState>(portfolioKey);
-      if (portfolio) {
-        const openValue = portfolio.positions.filter(position => position.status === "OPEN")
-          .reduce((sum, position) => sum + Number(BigInt(position.tokenAmountBaseUnits)) * position.latestPriceUsdPerToken, 0);
-        if (openValue > topped.state.currentEquityUsd + 0.00000001) {
-          throw new Error("Marked portfolio equity is below the recorded value of its open positions.");
-        }
-        await txn.put(portfolioKey, {
-          ...portfolio, bankroll: topped.state,
-          availableCashUsd: Math.round((topped.state.currentEquityUsd - openValue) * 1e8) / 1e8,
-          highWaterEquityUsd: Math.max(portfolio.highWaterEquityUsd,
-            Math.max(0, topped.state.currentEquityUsd - topped.state.totalTopUpsUsd)),
-          lastMarkedAt: occurredAt
-        });
+      if (!portfolio) throw new Error("Paper portfolio state is missing.");
+      if (portfolio.positions.some(position => position.status !== "CLOSED")) {
+        throw new Error("Manual equity marks are disabled while positions are open; use exact-size executable sell quotes.");
       }
+      await txn.put(portfolioKey, {
+        ...portfolio, bankroll: topped.state,
+        availableCashUsd: topped.state.currentEquityUsd,
+        highWaterEquityUsd: Math.max(portfolio.highWaterEquityUsd,
+          Math.max(0, topped.state.currentEquityUsd - topped.state.totalTopUpsUsd)),
+        lastMarkedAt: occurredAt
+      });
       await txn.put(metaKey, { ...meta, eventCount: count, topUpCount: topped.state.topUpCount,
         totalTopUpsUsd: topped.state.totalTopUpsUsd });
     });

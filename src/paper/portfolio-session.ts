@@ -107,6 +107,7 @@ export async function commitPaperPortfolioTransition<TResult>(
       eventIds.push(eventId);
     }
     await txn.put(portfolioKey, applied.state);
+    await txn.put(`paper_bankroll:${input.sessionId}`, applied.state.bankroll);
     await txn.put(markerKey, { eventIds, committedAt: input.occurredAt } satisfies PaperTransitionMarker);
     await txn.put(metaKey, {
       ...meta,
