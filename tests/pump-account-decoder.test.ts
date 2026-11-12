@@ -92,6 +92,15 @@ describe("IDL-aligned Pump account decoders", () => {
     });
   });
 
+  it("decodes pre-quote-mint bonding curves with the legacy default-key SOL sentinel", () => {
+    const legacy = curveData().slice(0, 82);
+    const decoded = decodeVerifiedPumpCurveAccount({
+      account: account("curve-pda", PUMP_PROGRAM_ID, legacy),
+      expectedMint: "mint", expectedCurveAddress: "curve-pda"
+    });
+    expect(decoded.quoteMint).toBe(ZERO_KEY);
+  });
+
   it("treats curve completion as terminal but not proof of a migrated pool", () => {
     const decoded = decodeVerifiedPumpCurveAccount({
       account: account("curve-pda", PUMP_PROGRAM_ID, curveData(true)),
