@@ -64,11 +64,10 @@ export function officialPumpSdkInstructionCapabilities(): PumpSdkInstructionCapa
     },
     pumpSwapV2: {
       buy: hasAnyMethod([PUMP_AMM_SDK, OnlinePumpAmmSdk.prototype], [
-        "ammBuyV2Instruction", "ammBuyExactQuoteInV2Instruction",
-        "buyV2Instruction", "buyExactQuoteInV2Instruction"
+        "buyV2Instructions", "buyExactQuoteInV2Instructions"
       ]),
       sell: hasAnyMethod([PUMP_AMM_SDK, OnlinePumpAmmSdk.prototype], [
-        "ammSellV2Instruction", "sellV2Instruction"
+        "sellV2Instructions"
       ])
     }
   };
@@ -91,8 +90,8 @@ export function officialPumpSdkMethodSurface(): {
 
 /**
  * Verifies offline pricing and account-decoding APIs are bundled. Builder
- * capabilities are reported separately because the SDK exposes some methods
- * on its online class rather than its static offline decoder object.
+ * capabilities are reported separately because the pinned package exposes
+ * these instruction builders on its static SDK objects.
  */
 export function officialPumpSdkModulesAvailable(): { curve: boolean; pumpSwap: boolean } {
   return {
