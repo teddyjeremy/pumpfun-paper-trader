@@ -337,11 +337,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private async flushAllHeliusBackfillArchivesToPostgres(): Promise<void> {
-    if (!this.postgresIngestConfigured) return;
-    const sessions = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
-    for (const sessionId of sessions) {
-      await this.flushHeliusBackfillArchivesToPostgres(sessionId);
-    }
+    // The bounded verifiedTransactions snapshot belongs only to the active
+    // session. Older sessions are flushed when stopped; never attribute the
+    // current session's transactions to a previous session's backfill job.
+    if (!this.activeSessionId) return;
+    await this.flushHeliusBackfillArchivesToPostgres(this.activeSessionId);
   }
 
   private async flushAllAuditSessionsToPostgres(): Promise<void> {
