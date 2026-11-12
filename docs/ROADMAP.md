@@ -18,7 +18,7 @@
 - [x] Direct creator-sale screening, bounded wallet-funding linkage inspection, and observed individual/linked-cluster hard rejects
 - [ ] Complete wallet attribution and full holder census; current funding inspection is sampled and top-20 holder evidence is partial
 - [ ] Verified PumpSwap quote adapter with dynamic protocol/creator fee, network, priority, impact and slippage accounting
-- [ ] Durable session journal integration (append-only pages, idempotency, restart recovery, export and six-hour retention); pure bankroll/outcome primitives added in docs/PAPER_SESSION_RECORDING.md
+- [x] Durable session journal core (append-only pages, idempotency, atomic session lifecycle, restart markers, pagination and JSON export); Durable Object runtime acceptance tests and six-hour soak remain outstanding
 - [ ] PostgreSQL migrations, append-only event/trade ledger, idempotency and worker leader lease
 - [ ] Deterministic paper executor and migration-aware position state machine
 - [ ] Dynamic exhaustion exit signal backtest/calibration; no maximum holding duration

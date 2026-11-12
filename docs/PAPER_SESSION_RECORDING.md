@@ -33,17 +33,20 @@ Each session needs a unique ID, UTC start/end, strategy/config version and durab
 The journal must be append-only, paginated, restart-safe, exportable and retained beyond the run. A rolling latest-N array is insufficient. Use partitioned durable pages or a database event table, idempotent event IDs and monotonic sequence numbers. Test restart during append, duplicate delivery, pagination boundaries, quota failures and export/replay.
 
 ## Implemented in the current draft PR
-- Cloudflare Durable Object session creation/closure, session index, per-session bankroll persistence and restart markers.
-- Append-only paginated event pages (100 events/page), monotonically increasing per-session sequence, idempotency-key index, and session-selectable audit reads.
-- Discovery events, verified Helius transaction observations, selected provider status/error/gap events, equity marks and top-ups are connected to the journal.
-- `GET /audit/sessions`, `GET /audit?sessionId=...&after=...&limit=...`, `GET /paper-bankroll`, and `POST /paper-equity` are protected by the Worker control token.
+- Durable Object session creation/closure is atomic. Session IDs, per-session bankroll and paper portfolio are persisted. Restart markers and minute heartbeats are recorded.
+- Append-only paginated event pages (100 events/page), monotonic per-session sequences and idempotency-key indexes. Event pages are retained in Durable Object storage without a session TTL.
+- Discovery, verified Helius observations, selected provider connections/disconnections/reconnects, queue/data gaps, candidate expiry, holder/funding risk evidence, feature snapshots, per-rule PASS/FAIL/UNKNOWN evaluations, strategy decisions, equity marks and top-ups are journaled.
+- The paper portfolio module enforces one-time mint entry, one initial concurrent position, stake scaling by 50% per portfolio doubling (capped at $100), additional slots per doubling, fresh exact-size quote evidence, per-side impact/tax limits and the 4% round-trip cost cap. It is a tested accounting primitive, not an automatically operated Worker executor.
+- Candidate outcome tracking is session-scoped. It stores the discovery reserve-price baseline where available, first observed trade baseline, first terminal rejection-time price, post-rejection peak and 1.5x/2x/3x milestone timestamps. Prices are quote-mint ratios, not USD prices. Pre-rejection peaks are not counted as post-rejection performance.
+- Read APIs (all control-token protected): `GET /audit/sessions`, paginated `GET /audit`, paginated JSON download `GET /audit/export`, `GET /paper-bankroll`, `GET /paper-portfolio`, `POST /paper-equity`, and `GET /candidate-outcomes`.
 
 ## Still blocked / not yet implemented
-- No executable quote adapter is connected. The paper portfolio engine accepts verified quote evidence, but there is no production source currently supplying those quotes.
-- The strategy evaluator does not yet trigger paper entries/exits. The portfolio primitives are not yet wired into an automated order/position lifecycle; `POST /paper-equity` remains a manual equity-mark endpoint.
-- The exit policy module exists, but dynamic exit-window aggregation, quote-gated exit execution, migration-aware position handling and end-to-end realized/unrealized PnL journaling are not integrated with the Worker.
-- Candidate outcome tracking uses the first observed verified trade as its baseline. It is not yet a discovery-time or decision-time USD baseline, nor continuous price coverage for every rejected candidate. Outcome coverage remains PARTIAL/MISSING where appropriate.
-- Full provider outage/reconnect/queue-overflow and persistence-failure audit coverage remains incomplete.
-- Automated Durable Object runtime tests for restart during append, duplicate delivery, pagination boundaries, storage quota failures and export/replay are still required.
+- There is no production executable quote adapter. The portfolio engine accepts verified quote evidence, but no trusted quote source supplies it.
+- The Worker does not yet invoke paper entry/exit automatically. `POST /paper-equity` is a manual equity-mark endpoint; there are no connected quote/order/fill endpoints.
+- Dynamic exit-window aggregation, quote-gated exits, migration-aware market transitions and realized/unrealized PnL event journaling are not connected to the Worker.
+- Strategy signal freshness/next-observation confirmation remains UNKNOWN. Pullback-volume contraction and reclaim-volume expansion are measured but their numeric thresholds have not been agreed. Missing quote economics are always UNKNOWN, so decisions remain WATCH/REJECT and `buyAllowed=false`.
+- Candidate follow-up is limited to observed verified trades on monitored candidates. Ten Helius slots do not provide complete continuous follow-up for every discovery; unobserved outcomes remain MISSING and observed-but-incomplete outcomes PARTIAL. No USD oracle is connected.
+- Provider outage/reconnect/queue-overflow and persistence-failure audit coverage is improved but not exhaustive.
+- Durable Object runtime tests for restart during append, duplicate delivery, pagination boundaries, storage quota failures and export/replay are still required, followed by a real six-hour soak test.
 
-The six-hour paper session remains blocked until those remaining integrations and acceptance tests pass. No claim of complete market-wide follow-up coverage is made.
+The six-hour paper session remains blocked until the missing quote source, executor/exit integration and runtime acceptance tests pass. No claim of complete market-wide follow-up coverage is made.
