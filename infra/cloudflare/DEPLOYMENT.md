@@ -12,7 +12,7 @@ The Durable Object subscribes to Pump.fun program logs through Helius. A one-min
 
 ## Important: transport scaffold only
 
-The current implementation only establishes the Helius WebSocket subscription and counts log notifications. It does not:
+The current implementation establishes PumpPortal launch discovery, selective Helius monitoring, verified transaction decoding, feature/risk audits and candidate tracking. It does not:
 - decode Pump.fun instructions or transaction token/SOL flows;
 - build the impulse, pullback, reclaim, or 2-second confirmation windows;
 - calculate creator, linked-wallet, or cluster risk;
@@ -20,7 +20,7 @@ The current implementation only establishes the Helius WebSocket subscription an
 - evaluate the existing entry and dynamic-exit rules;
 - write positions, trades, or PnL to Neon.
 
-The Worker deliberately reports ready=false. It cannot place paper entries or exits. Do not mark the bot operational until those missing components are implemented, tested, and connected to the ledger. No wallet signer or transaction-submission key belongs in this Worker.
+The Worker deliberately reports `tradingReady: false`. It cannot place paper entries or exits. Do not mark the bot operational until those missing components are implemented, tested, and connected to the ledger. No wallet signer or transaction-submission key belongs in this Worker.
 
 ## Free-plan limits and capacity check
 
@@ -43,7 +43,7 @@ Cloudflare can restart Durable Objects and does not provide a dedicated-VM uptim
 3. Confirm the account is on the Free plan. Do not enable paid Workers, add-ons, or usage-based products.
 4. Copy the Cloudflare Account ID from the account overview.
 
-## Configure Worker secrets
+## Connect the operator dashboard\n\nThe Fastify dashboard proxies Worker status and start/stop controls server-side. After the Worker is deployed, set these environment variables on the dashboard host (for example Vercel):\n\n- `PAPER_WORKER_URL`: the deployed Worker base URL, such as `https://pumpfun-paper-worker.YOUR_SUBDOMAIN.workers.dev`.\n- `PAPER_WORKER_CONTROL_TOKEN`: the same long random value configured as the Worker `CONTROL_TOKEN` secret.\n- `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD`: operator-only HTTP Basic credentials.\n\nNever put the Worker control token in browser code or a `NEXT_PUBLIC_` variable. The dashboard start/stop buttons control live discovery monitoring only; they do not authorize simulated fills. The Worker remains `tradingReady: false` until strategy, executable quote, entry/exit scheduler and durable ledger integration are complete.\n\n## Configure Worker secrets
 
 From the repository root, set the secrets using Wrangler. Never paste these values into GitHub issues, source files, or ChatGPT.
 
