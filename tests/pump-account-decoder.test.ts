@@ -29,13 +29,22 @@ function curveData(complete = false): Uint8Array {
   writeU64(data, 32, 1_500n);
   writeU64(data, 40, 1_000_000n);
   data[48] = complete ? 1 : 0;
-  data[81] = 0;
-  data[82] = 0;
+  data[81] = 1;
+  data[82] = 1;
+  writeU64(data, 115, 75n);
+  data[123] = 1;
+  data[124] = 1;
+  writeU64(data, 125, 10n);
+  writeU64(data, 133, 20n);
+  data[141] = 2;
+  writeU64(data, 142, 30n);
+  writeU64(data, 150, 40n);
+  writeU64(data, 158, 50n);
   data.set(new PublicKey(USDC_MINT).toBytes(), 83);
   return data;
 }
 function poolData(creator = ZERO_KEY, baseMint = ZERO_KEY, quoteMint = ZERO_KEY, baseVault = ZERO_KEY, quoteVault = ZERO_KEY): Uint8Array {
-  const data = new Uint8Array(271);
+  const data = new Uint8Array(287);
   data.set([241, 154, 109, 4, 17, 177, 109, 188], 0);
   data[8] = 254;
   data[9] = 0; data[10] = 0; // canonical pool index 0
@@ -65,7 +74,10 @@ describe("IDL-aligned Pump account decoders", () => {
       mint: "mint", complete: false, migrated: false,
       virtualTokenReserves: "1000", virtualQuoteReserves: "2000",
       realTokenReserves: "700", realQuoteReserves: "1500",
-      tokenTotalSupply: "1000000", creator: ZERO_KEY
+      tokenTotalSupply: "1000000", creator: ZERO_KEY, quoteMint: USDC_MINT, creatorFeeBps: "75",
+      creatorFeeBaseUnits: "10", protocolFeesBaseUnits: "20", isMayhemMode: true,
+      isCashbackCoin: true, canEditCreatorFee: true, isHolderReward: true,
+      depth: 2, initialVirtualQuoteReserves: "30", postCompleteBaseOut: "40", postCompleteQuoteIn: "50"
     });
   });
 
@@ -99,7 +111,8 @@ describe("IDL-aligned Pump account decoders", () => {
     expect(decoded).toMatchObject({
       index: 0, creator: ZERO_KEY, baseMint: ZERO_KEY, quoteMint: ZERO_KEY,
       baseVault: ZERO_KEY, quoteVault: ZERO_KEY, virtualQuoteReserves: "0",
-      creatorFeeBps: "0"
+      creatorFeeBps: "0", protocolFeesBaseUnits: "0", creatorFeesBaseUnits: "0",
+      isMayhemMode: false, isCashbackCoin: false, canEditCreatorFee: false, isHolderReward: false
     });
     const legacy = poolData().slice(0, 245);
     expect(decodePumpSwapPoolAccount(account("pool", PUMP_AMM_PROGRAM_ID, legacy)).virtualQuoteReserves).toBe("0");
