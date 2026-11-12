@@ -49,7 +49,7 @@ const MAX_QUOTE_TTL_MS = 2_000;
 const MAX_SOL_USD_AGE_MS = 10_000;
 
 function assertBaseUnits(value: string, label: string, allowZero = false): bigint {
-  if (!/^\\d+$/.test(value) || value.length > 20) {
+  if (!/^\d+$/.test(value) || value.length > 20) {
     throw new Error(`${label} must be an unsigned base-unit integer.`);
   }
   const amount = BigInt(value);
