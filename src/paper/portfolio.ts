@@ -8,6 +8,7 @@ export interface ExecutablePaperQuote {
   observedAt: string;
   expiresAt: string;
   requestedUsd: number;
+  inputAmountBaseUnits: string;
   outputAmountBaseUnits: string;
   outputUsd: number;
   priceImpactPct: number;
@@ -103,8 +104,8 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   assertQuote(input.buyQuote, now, "BUY", input.mint);
   assertQuote(input.sellQuote, now, "SELL", input.mint);
   if (Math.abs(input.buyQuote.requestedUsd - stake) > 0.00000001 ||
-      Math.abs(input.sellQuote.requestedUsd - stake) > 0.00000001) {
-    throw new Error("Quotes must be size-specific for the exact planned stake.");
+      BigInt(input.sellQuote.inputAmountBaseUnits) !== BigInt(input.buyQuote.outputAmountBaseUnits)) {
+    throw new Error("Quotes must be size-specific for the exact planned stake and resulting token balance.");
   }
   const roundTripPct = input.buyQuote.priceImpactPct + input.sellQuote.priceImpactPct +
     input.buyQuote.taxPct + input.sellQuote.taxPct +
@@ -176,8 +177,8 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
   const previous = state.positions[index];
   if (!previous || previous.status !== "OPEN") throw new Error("Open paper position not found.");
   assertQuote(input.sellQuote, input.nowMs ?? Date.now(), "SELL", previous.mint);
-  if (BigInt(input.sellQuote.outputAmountBaseUnits) !== BigInt(previous.tokenAmountBaseUnits)) {
-    throw new Error("Exit quote must cover the entire remaining token balance.");
+  if (BigInt(input.sellQuote.inputAmountBaseUnits) !== BigInt(previous.tokenAmountBaseUnits)) {
+    throw new Error("Exit quote must consume the entire remaining token balance.");
   }
   const sellCosts = input.sellQuote.networkFeeUsd + input.sellQuote.providerFeeUsd;
   const netProceeds = input.sellQuote.outputUsd - sellCosts;

@@ -3,7 +3,7 @@ import { createPaperPortfolio, openPaperPosition, markPaperPosition, closePaperP
 const now = "2026-11-12T12:00:00.000Z";
 function quote(mint:string,side:"BUY"|"SELL",amount="1000000",outputUsd=1):ExecutablePaperQuote {
  return {quoteId:side+mint,provider:"test-adapter",mint,side,observedAt:now,expiresAt:"2026-11-12T12:00:02.000Z",
- requestedUsd:1,outputAmountBaseUnits:amount,outputUsd,priceImpactPct:0.5,taxPct:0.5,
+ requestedUsd:1,inputAmountBaseUnits:side==="SELL"?amount:"1000000",outputAmountBaseUnits:side==="BUY"?amount:"1000000",outputUsd,priceImpactPct:0.5,taxPct:0.5,
  networkFeeUsd:0.001,providerFeeUsd:0.001,routeId:"verified-route",executable:true};
 }
 describe("paper portfolio accounting",()=>{
