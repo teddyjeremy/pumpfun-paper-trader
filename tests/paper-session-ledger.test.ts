@@ -61,7 +61,7 @@ describe("strict strategy audit", () => {
  const base = {
   candidateAgeSeconds: 25,
   profile: {impulsePriceChangePct:25,pullbackPct:20,reclaimDetected:true,reclaimAbovePreviousFiveSecondHighPct:1.4,pullbackVolumeVsImpulsePct:35,reclaimVolumeVsPullbackPct:180,dataComplete:true,microTradeFilterStatus:"APPLIED"},
-  flow: {dataComplete:true,latestThreeWindowFlowPass:true,windows:[1,2,3].map(()=>({buySellRatio:4,flowWindowPass:true,uniqueBuyers:4,uniqueSellers:1})),distinctBuyersAcrossLatestThree:7,largestBuyerShareAcrossLatestThreeBps:6500,microTradeFilterStatus:"APPLIED"},
+  flow: {dataComplete:true,latestThreeWindowFlowPass:true,sampleIntervalSeconds:1,windows:[1,2,3].map(startTime=>({startTime,buySellRatio:4,flowWindowPass:true,uniqueBuyers:4,uniqueSellers:1})),distinctBuyersAcrossLatestThree:7,largestBuyerShareAcrossLatestThreeBps:6500,microTradeFilterStatus:"APPLIED"},
   creatorRiskStatus:"PASS_COMPLETE",walletClusterRiskStatus:"WATCH",attributionConfidenceBps:7500,
   signalAgeSeconds:1.5,nextObservationConfirmed:true,executableQuoteAvailable:false
  };
@@ -95,7 +95,7 @@ describe("strict strategy audit", () => {
  });
  it("accepts completed windows with zero sells when the source confirms the strict volume rule", () => {
   const noSellFlow = {...base, flow:{...base.flow,
-    windows:[1,2,3].map(()=>({buySellRatio:null,flowWindowPass:true,uniqueBuyers:4,uniqueSellers:0}))}};
+    windows:[1,2,3].map(startTime=>({startTime,buySellRatio:null,flowWindowPass:true,uniqueBuyers:4,uniqueSellers:0}))}};
   const result=evaluateStrictStrategyAudit(noSellFlow);
   expect(result.rules.find(rule=>rule.rule==="THREE_FLOW_WINDOWS")?.status).toBe("PASS");
  });
