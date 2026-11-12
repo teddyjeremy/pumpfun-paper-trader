@@ -1830,7 +1830,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       // Only remove the item that actually failed. A storage failure after a
       // successful dequeue must never discard the next candidate's work.
       if (activeWork) {
-        if (this.heliusState.queue[0]?.signature === activeWork.signature) {
+        const queuedActive = this.heliusState.queue.find(item => item.signature === activeWork.signature);
+        if (this.heliusState.queue[0]?.signature === activeWork.signature &&
+            (this.heliusState.queue[0]?.retryAttempt ?? 0) === (activeWork.retryAttempt ?? 0)) {
           this.heliusState = takeHeliusWork(this.heliusState).state;
         }
         if (!this.heliusState.queue.some(item => item.signature === activeWork.signature)) {
