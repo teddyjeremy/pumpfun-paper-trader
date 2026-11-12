@@ -95,7 +95,8 @@ describe("strict strategy audit", () => {
  });
  it("accepts completed windows with zero sells when the source confirms the strict volume rule", () => {
   const noSellFlow = {...base, flow:{...base.flow,
-    windows:[1,2,3].map(()=>({buySellRatio:null,flowWindowPass:true,uniqueBuyers:4,uniqueSellers:0}))}};
+    sampleIntervalSeconds:1,
+    windows:[1,2,3].map(startTime=>({startTime,buySellRatio:null,flowWindowPass:true,uniqueBuyers:4,uniqueSellers:0}))}};
   const result=evaluateStrictStrategyAudit(noSellFlow);
   expect(result.rules.find(rule=>rule.rule==="THREE_FLOW_WINDOWS")?.status).toBe("PASS");
  });
