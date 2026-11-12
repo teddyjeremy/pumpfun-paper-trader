@@ -170,9 +170,14 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedSwapContext 
     throw new Error("Vault token programs do not match their mint owners.");
   }
 
-  const baseMintAccount = unpackMint(mint, accountInfo(baseMintRaw), new PublicKey(baseMintRaw.owner));
+  const unpackedBaseMint = unpackMint(mint, accountInfo(baseMintRaw), new PublicKey(baseMintRaw.owner));
   const quoteMintAccount = unpackMint(quoteMint, accountInfo(quoteMintRaw), new PublicKey(quoteMintRaw.owner));
-  if (getTransferFeeConfig(baseMintAccount) || getTransferFeeConfig(quoteMintAccount)) {
+  const baseMintAccount: RawMint = {
+    ...unpackedBaseMint,
+    mintAuthorityOption: unpackedBaseMint.mintAuthority ? 1 : 0,
+    freezeAuthorityOption: unpackedBaseMint.freezeAuthority ? 1 : 0
+  };
+  if (getTransferFeeConfig(unpackedBaseMint) || getTransferFeeConfig(quoteMintAccount)) {
     throw new Error("Token-2022 transfer-fee mints are not supported by this quote adapter.");
   }
 
@@ -205,7 +210,7 @@ function decodeContext(snapshot: VerifiedPumpQuoteSnapshot): DecodedSwapContext 
 }
 
 function feeRates(context: DecodedSwapContext) {
-  return computeFeesBps({
+  const rates = computeFeesBps({
     globalConfig: context.globalConfig,
     feeConfig: context.feeConfig,
     creator: context.pool.creator,
@@ -217,6 +222,9 @@ function feeRates(context: DecodedSwapContext) {
     isMayhemMode: context.pool.isMayhemMode,
     creatorFeeBps: context.pool.creatorFeeBps
   });
+  return PublicKey.default.equals(context.pool.coinCreator)
+    ? { ...rates, creatorFeeBps: new BN(0) }
+    : rates;
 }
 
 /**
@@ -249,11 +257,16 @@ export function quotePumpSwapBuyFromSnapshot(
     creatorFeeBps: context.pool.creatorFeeBps
   });
   const rates = feeRates(context);
-  const fees = feeBreakdown(result.internalQuoteWithoutFees, rates);
-  if (result.internalQuoteWithoutFees.add(fees.total).gt(quote)) {
-    throw new Error("SDK exact-input fee breakdown exceeds the quote budget.");
+  const totalFeeBps = rates.lpFeeBps.add(rates.protocolFeeBps).add(rates.creatorFeeBps);
+  const preAdjustmentNet = quote.mul(BPS).div(BPS.add(totalFeeBps));
+  const fees = feeBreakdown(preAdjustmentNet, rates);
+  const excess = preAdjustmentNet.add(fees.total).sub(quote);
+  const expectedNet = excess.gtn(0) ? preAdjustmentNet.sub(excess) : preAdjustmentNet;
+  if (!expectedNet.eq(result.internalQuoteWithoutFees) ||
+      expectedNet.add(fees.total).gt(quote)) {
+    throw new Error("Official SDK exact-input quote and fee split do not reconcile.");
   }
-  const unspent = quote.sub(result.internalQuoteWithoutFees).sub(fees.total);
+  const unspent = quote.sub(expectedNet).sub(fees.total);
   const impact = impactPct(result.internalQuoteWithoutFees, result.base,
     context.effectiveQuoteReserve, context.baseReserve, "BUY");
   return {
