@@ -41,6 +41,22 @@ export interface DecodedPumpCurveAccount {
   observedAt: string;
 }
 
+
+export function toVerifiedPumpCurveEvidence(curve: DecodedPumpCurveAccount) {
+  return {
+    source: "verified-pump-curve-account" as const,
+    verified: true as const,
+    mint: curve.mint,
+    curveAddress: curve.address,
+    complete: curve.complete,
+    migrated: false,
+    tokenReserveBaseUnits: curve.realTokenReserves,
+    quoteReserveBaseUnits: curve.realQuoteReserves,
+    slot: curve.slot,
+    observedAt: curve.observedAt
+  };
+}
+
 export interface DecodedPumpSwapPoolAccount {
   address: string;
   index: number;
