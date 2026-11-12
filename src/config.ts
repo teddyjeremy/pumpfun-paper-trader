@@ -16,6 +16,7 @@ const EnvSchema = z.object({
   PAPER_MAX_OPEN_POSITIONS: z.coerce.number().int().min(1).max(3).default(1),
   DYNAMIC_EXIT_ENABLED: z.enum(["true", "false"]).default("true").transform(value => value === "true"),
   DYNAMIC_EXIT_CONFIRMATION_WINDOWS: z.coerce.number().int().min(2).max(5).default(2),
+  DYNAMIC_EXIT_SINGLE_FAMILY_CONFIRMATION_WINDOWS: z.coerce.number().int().min(3).max(5).default(3),
   DYNAMIC_EXIT_MIN_BEARISH_SIGNALS: z.coerce.number().int().min(2).max(7).default(2),
   DYNAMIC_EXIT_BUY_SELL_RATIO_BELOW: z.coerce.number().positive().default(1),
   DYNAMIC_EXIT_BUY_VOLUME_DECLINE_PCT: z.coerce.number().positive().max(100).default(40),
@@ -49,6 +50,7 @@ export const config = Object.freeze(parsed.data);
 export const dynamicExitConfig = Object.freeze({
   enabled: config.DYNAMIC_EXIT_ENABLED,
   confirmationWindows: config.DYNAMIC_EXIT_CONFIRMATION_WINDOWS,
+  singleFamilyConfirmationWindows: config.DYNAMIC_EXIT_SINGLE_FAMILY_CONFIRMATION_WINDOWS,
   minBearishSignalsPerWindow: config.DYNAMIC_EXIT_MIN_BEARISH_SIGNALS,
   buySellRatioBelow: config.DYNAMIC_EXIT_BUY_SELL_RATIO_BELOW,
   buyVolumeDeclinePct: config.DYNAMIC_EXIT_BUY_VOLUME_DECLINE_PCT,
