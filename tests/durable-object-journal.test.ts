@@ -46,6 +46,7 @@ function harness(storage = new MemoryDurableStorage()) {
 function seedSession(storage: MemoryDurableStorage, enabled = false): void {
   const sessionId = "runtime-test-session";
   storage.seed("active_audit_session_id", sessionId);
+  storage.seed("audit_session_ids", [sessionId]);
   storage.seed("latest_audit_session_id", sessionId);
   storage.seed("enabled", enabled);
   storage.seed("status", { enabled, connected: false, subscriptionsSent: false, heliusConnected: false });
