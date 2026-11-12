@@ -176,10 +176,10 @@ app.get("/api/strategy/replay", async (request, reply) => {
   if ((query.minFavorableExcursionPct !== undefined && minFavorableExcursionPct === undefined) ||
       (query.maxAdverseExcursionPct !== undefined && maxAdverseExcursionPct === undefined) ||
       (query.roundTripCostPct !== undefined && roundTripCostPct === undefined) ||
-      (anyOutcomeThreshold && (minFavorableExcursionPct === undefined || maxAdverseExcursionPct === undefined)) ||
+      (anyOutcomeThreshold && (minFavorableExcursionPct === undefined || maxAdverseExcursionPct === undefined || roundTripCostPct === undefined)) ||
       (minFavorableExcursionPct !== undefined && minFavorableExcursionPct <= 0) ||
       (roundTripCostPct !== undefined && !anyOutcomeThreshold)) {
-    return reply.code(400).send({ error: "Supply both valid outcome excursion thresholds; round-trip cost is optional and only applies with both thresholds." });
+    return reply.code(400).send({ error: "Supply both valid outcome excursion thresholds and an explicit round-trip cost to assign profitability labels." });
   }
   try {
     const price = await fetchSolUsdPrice();
