@@ -158,7 +158,7 @@ export function decodeVerifiedPumpCurveAccount(input: {
   const quoteMint = data.length >= 115 ? readPubkey(data, 83) : NATIVE_SOL_MINT;
   return {
     address: account.address, mint, creator: readPubkey(data, 49), quoteMint,
-    complete: readBool(data, 48), migrated: readBool(data, 48),
+    complete: readBool(data, 48), migrated: false,
     virtualTokenReserves: readUnsigned(data, 8, 8).toString(),
     virtualQuoteReserves: readUnsigned(data, 16, 8).toString(),
     realTokenReserves: readUnsigned(data, 24, 8).toString(),
@@ -223,6 +223,8 @@ export function verifyCanonicalPumpSwapPoolSnapshot(input: {
   expectedMint: string;
   expectedPoolAddress: string;
   expectedPoolCreatorAuthority: string;
+  expectedPoolAuthority: string;
+  nowMs?: number;
 }): VerifiedPumpSwapPoolSnapshot {
   const pool = decodePumpSwapPoolAccount(input.poolAccount);
   const baseVault = decodeSplTokenAccount(input.baseVaultAccount);
@@ -233,23 +235,29 @@ export function verifyCanonicalPumpSwapPoolSnapshot(input: {
   }
   if (pool.baseMint !== input.expectedMint || baseVault.mint !== input.expectedMint ||
       baseVault.address !== pool.baseVault || quoteVault.address !== pool.quoteVault ||
-      quoteVault.mint !== pool.quoteMint) {
+      quoteVault.mint !== pool.quoteMint || baseVault.tokenAuthority !== input.expectedPoolAuthority ||
+      quoteVault.tokenAuthority !== input.expectedPoolAuthority) {
     throw new Error("PumpSwap pool mint or vault accounts do not match the canonical pool.");
   }
   if (BigInt(baseVault.amountBaseUnits) <= 0n || BigInt(quoteVault.amountBaseUnits) <= 0n) {
     throw new Error("PumpSwap pool has no non-zero token and quote liquidity.");
   }
-  if (input.baseVaultAccount.slot < input.poolAccount.slot ||
-      input.quoteVaultAccount.slot < input.poolAccount.slot) {
-    throw new Error("Vault balances are older than the pool account snapshot.");
+  if (input.baseVaultAccount.slot !== input.poolAccount.slot ||
+      input.quoteVaultAccount.slot !== input.poolAccount.slot) {
+    throw new Error("Pool and vault accounts must come from the same RPC context slot.");
   }
+  const nowMs = input.nowMs ?? Date.now();
+  const observations = [input.poolAccount.observedAt, input.baseVaultAccount.observedAt, input.quoteVaultAccount.observedAt];
+  if (!Number.isFinite(nowMs) || observations.some(value => {
+    const timestamp = Date.parse(value);
+    return !Number.isFinite(timestamp) || timestamp > nowMs || nowMs - timestamp > 2_000;
+  })) throw new Error("Pool or vault account evidence is stale.");
   return {
     source: "verified-canonical-pumpswap-pool", verified: true, canonical: true,
     mint: pool.baseMint, quoteMint: pool.quoteMint, poolAddress: pool.address,
     baseReserveBaseUnits: baseVault.amountBaseUnits,
     quoteReserveBaseUnits: (BigInt(quoteVault.amountBaseUnits) + BigInt(pool.virtualQuoteReserves)).toString(),
     slot: Math.min(input.poolAccount.slot, input.baseVaultAccount.slot, input.quoteVaultAccount.slot),
-    observedAt: [input.poolAccount.observedAt, input.baseVaultAccount.observedAt, input.quoteVaultAccount.observedAt]
-      .sort().at(-1)!
+    observedAt: observations.sort().at(-1)!
   };
 }
