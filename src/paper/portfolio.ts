@@ -10,6 +10,8 @@ export interface ExecutablePaperQuote {
   requestedUsd: number;
   inputAmountBaseUnits: string;
   outputAmountBaseUnits: string;
+  /** Number of decimal places on the token side of this quote. */
+  tokenDecimals: number;
   /** Gross output value before protocol, creator, pool, transfer and network fees. */
   outputUsd: number;
   priceImpactPct: number;
@@ -30,6 +32,7 @@ export interface PaperPosition {
   openedAt: string;
   stakeUsd: number;
   tokenAmountBaseUnits: string;
+  tokenDecimals: number;
   buyQuoteId: string;
   entryPriceUsdPerToken: number;
   buyCostsUsd: number;
@@ -66,6 +69,11 @@ function quoteFeesUsd(quote: ExecutablePaperQuote): number {
     quote.protocolFeeUsd + quote.creatorFeeUsd + quote.poolFeeUsd + quote.transferFeeUsd;
 }
 function validPositive(value: number): boolean { return Number.isFinite(value) && value > 0; }
+function humanTokenAmount(amountBaseUnits: string, decimals: number): number {
+  const amount = Number(BigInt(amountBaseUnits)) / Math.pow(10, decimals);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Token amount cannot be represented safely for USD accounting.");
+  return amount;
+}
 function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL", mint: string): void {
   if (!quote.executable || quote.side !== side || quote.mint !== mint ||
       !quote.quoteId || !quote.provider || !quote.routeId) throw new Error("Executable quote identity or status is invalid.");
@@ -128,6 +136,7 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   assertQuote(input.buyQuote, now, "BUY", input.mint);
   assertQuote(input.sellQuote, now, "SELL", input.mint);
   if (Math.abs(input.buyQuote.requestedUsd - stake) > 0.00000001 ||
+      input.buyQuote.tokenDecimals !== input.sellQuote.tokenDecimals ||
       BigInt(input.sellQuote.inputAmountBaseUnits) !== BigInt(input.buyQuote.outputAmountBaseUnits)) {
     throw new Error("Quotes must be size-specific for the exact planned stake and resulting token balance.");
   }
@@ -143,11 +152,15 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   }
   const buyCosts = quoteFeesUsd(input.buyQuote);
   const tokens = BigInt(input.buyQuote.outputAmountBaseUnits);
-  const entryPrice = stake / Number(tokens);
+  const tokenDecimals = input.buyQuote.tokenDecimals;
+  const humanTokens = humanTokenAmount(tokens.toString(), tokenDecimals);
+  // The quote's gross output value captures price impact; do not assume the
+  // received tokens are worth the full USD amount spent.
+  const entryPrice = input.buyQuote.outputUsd / humanTokens;
   if (!validPositive(entryPrice)) throw new Error("Buy quote produced an invalid entry price.");
   const position: PaperPosition = {
     positionId: input.positionId, mint: input.mint, openedAt: input.occurredAt,
-    stakeUsd: stake, tokenAmountBaseUnits: tokens.toString(), buyQuoteId: input.buyQuote.quoteId,
+    stakeUsd: stake, tokenAmountBaseUnits: tokens.toString(), tokenDecimals, buyQuoteId: input.buyQuote.quoteId,
     entryPriceUsdPerToken: entryPrice, buyCostsUsd: round(buyCosts),
     highWaterPriceUsdPerToken: entryPrice, latestPriceUsdPerToken: entryPrice,
     realizedPnlUsd: null, status: "OPEN", exitReason: null
@@ -156,7 +169,7 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   if (availableCashUsd < 0) throw new Error("Buy fees exceed available paper cash.");
   const positions = [...state.positions, position];
   const equity = round(availableCashUsd + positions.reduce((sum, p) =>
-    sum + (p.status === "OPEN" ? p.stakeUsd : 0), 0));
+    sum + (p.status === "OPEN" ? input.buyQuote.outputUsd : 0), 0));
   const bankroll = markPaperEquity(state.bankroll, equity);
   const topped = replenishPaperBankroll(bankroll, input.occurredAt,
     PAPER_PORTFOLIO_POLICY.topUpUsd, PAPER_PORTFOLIO_POLICY.topUpBelowUsd);
@@ -181,7 +194,7 @@ export function markPaperPosition(state: PaperPortfolioState, input: {
   positions[index] = { ...previous, latestPriceUsdPerToken: input.priceUsdPerToken,
     highWaterPriceUsdPerToken: Math.max(previous.highWaterPriceUsdPerToken, input.priceUsdPerToken) };
   const markedValue = (position: PaperPosition) => position.status === "OPEN"
-    ? Number(BigInt(position.tokenAmountBaseUnits)) * position.latestPriceUsdPerToken : 0;
+    ? humanTokenAmount(position.tokenAmountBaseUnits, position.tokenDecimals) * position.latestPriceUsdPerToken : 0;
   const equity = round(state.availableCashUsd + positions.reduce((sum, position) => sum + markedValue(position), 0));
   const bankroll = markPaperEquity(state.bankroll, equity);
   const topped = replenishPaperBankroll(bankroll, input.markedAt,
@@ -203,7 +216,8 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
   const previous = state.positions[index];
   if (!previous || previous.status !== "OPEN") throw new Error("Open paper position not found.");
   assertQuote(input.sellQuote, input.nowMs ?? Date.now(), "SELL", previous.mint);
-  if (BigInt(input.sellQuote.inputAmountBaseUnits) !== BigInt(previous.tokenAmountBaseUnits)) {
+  if (input.sellQuote.tokenDecimals !== previous.tokenDecimals ||
+      BigInt(input.sellQuote.inputAmountBaseUnits) !== BigInt(previous.tokenAmountBaseUnits)) {
     throw new Error("Exit quote must consume the entire remaining token balance.");
   }
   const sellCosts = quoteFeesUsd(input.sellQuote);
@@ -213,11 +227,11 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
   }
   const pnl = round(netProceeds - previous.stakeUsd - previous.buyCostsUsd);
   const position: PaperPosition = { ...previous, latestPriceUsdPerToken: input.sellQuote.outputUsd /
-      Number(BigInt(previous.tokenAmountBaseUnits)), realizedPnlUsd: pnl, status: "CLOSED", exitReason: input.exitReason };
+      humanTokenAmount(previous.tokenAmountBaseUnits, previous.tokenDecimals), realizedPnlUsd: pnl, status: "CLOSED", exitReason: input.exitReason };
   const positions = [...state.positions]; positions[index] = position;
   const availableCashUsd = round(state.availableCashUsd + netProceeds);
   const equity = round(availableCashUsd + positions.filter(p => p.status === "OPEN")
-    .reduce((sum, p) => sum + Number(BigInt(p.tokenAmountBaseUnits)) * p.latestPriceUsdPerToken, 0));
+    .reduce((sum, p) => sum + humanTokenAmount(p.tokenAmountBaseUnits, p.tokenDecimals) * p.latestPriceUsdPerToken, 0));
   const bankroll = markPaperEquity(state.bankroll, equity);
   const topped = replenishPaperBankroll(bankroll, input.closedAt,
     PAPER_PORTFOLIO_POLICY.topUpUsd, PAPER_PORTFOLIO_POLICY.topUpBelowUsd);
