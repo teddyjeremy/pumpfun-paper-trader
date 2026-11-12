@@ -44,6 +44,15 @@ describe("wallet cluster risk", () => {
     expect(result.status).toBe("REJECT_OBSERVED");
     expect(result.linkedWalletSellShareBps).toBe(26);
   });
+
+  it("rejects any high-confidence linked cluster selling more than 0.25% supply", () => {
+    const result = evaluateWalletClusterRisk([tx([trade("w2", false, 1n, 251n)])], {
+      mint, creator: "unlinked-creator", totalSupply: "100000",
+      links: [link("w1", "w2")]
+    });
+    expect(result.status).toBe("REJECT_OBSERVED");
+    expect(result.largestLinkedClusterSellShareBps).toBe(26);
+  });
   it("rejects a linked cluster responsible for more than 35% of buy volume", () => {
     const result = evaluateWalletClusterRisk([tx([
       trade("w1", true, 36n), trade("independent", true, 64n)
