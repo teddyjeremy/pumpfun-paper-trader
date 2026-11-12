@@ -98,12 +98,10 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
   rules.push(result("EXECUTABLE_QUOTE", input.executableQuoteAvailable ? "PASS" : "UNKNOWN",
     input.executableQuoteAvailable, "Fresh size-specific executable quote", "No quote adapter is connected; reserve prices are not executable quotes."));
   rules.push(result("ROUND_TRIP_COST", "UNKNOWN", null, "Impact <=2% each side, taxes <=2% each side, total <=4%", "Fees, impact and taxes cannot be verified without executable quotes."));
-  const rejectionReasons = rules.filter(rule => rule.status === "FAIL" &&
-    ["ENTRY_WINDOW", "CREATOR_SELL_RISK", "WALLET_CLUSTER_RISK"].includes(rule.rule))
-    .map(rule => rule.rule);
-  const watchReasons = rules.filter(rule => rule.status === "FAIL" &&
-    !["ENTRY_WINDOW", "CREATOR_SELL_RISK", "WALLET_CLUSTER_RISK"].includes(rule.rule))
-    .map(rule => rule.rule);
+  // A known failure of any mandatory entry rule rejects the candidate.
+  // Missing evidence remains UNKNOWN/WATCH and is never silently treated as a pass.
+  const rejectionReasons = rules.filter(rule => rule.status === "FAIL").map(rule => rule.rule);
+  const watchReasons: string[] = [];
   const blockingUnknownRules = rules.filter(rule => rule.status === "UNKNOWN").map(rule => rule.rule);
   return {
     decision: rejectionReasons.length > 0 ? "REJECT" : "WATCH",
