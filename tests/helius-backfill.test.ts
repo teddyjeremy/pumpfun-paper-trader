@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  emptyHeliusMonitorState,
+  enqueueHeliusSignatureWork,
+  takeHeliusWork
+} from "../src/ingestion/helius-monitor.js";
+import { enqueueHistoricalBackfillSignatures } from "../src/ingestion/helius-backfill-queue.js";
+import {
   applyAddressSignaturesPage,
   buildAddressSignaturesRequest,
   createHistoricalBackfillState,
@@ -155,6 +161,64 @@ describe("bounded Helius historical backfill", () => {
     expect(second.status).toBe("COMPLETE");
     expect(second.state.scannedCount).toBe(120);
     expect(second.signaturesToFetch).toHaveLength(120);
+  });
+
+
+  it("resumes a completed backfill after queue overflow without losing signatures", () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const completed = applyAddressSignaturesPage(initial, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null },
+      { signature: create, slot: 10, blockTime: 1000, err: null }
+    ]);
+    expect(completed.status).toBe("COMPLETE");
+
+    let monitor = emptyHeliusMonitorState();
+    const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    for (let i = 0; i < 199; i += 1) {
+      const signature = "1".repeat(62) + alphabet[Math.floor(i / alphabet.length)] + alphabet[i % alphabet.length];
+      const queued = enqueueHeliusSignatureWork(monitor, { signature, mint, slot: i + 1 });
+      expect(queued.outcome).toBe("QUEUED");
+      monitor = queued.state;
+    }
+
+    const blocked = enqueueHistoricalBackfillSignatures(monitor, completed.state, 0, "2026-11-12T10:01:00.000Z");
+    expect(blocked.cursor).toBe(1);
+    expect(blocked.queued).toBe(1);
+    expect(blocked.overflow).toBe(true);
+    expect(blocked.state.seenSignatures).not.toContain(create);
+
+    const afterDrain = takeHeliusWork(blocked.state).state;
+    const resumed = enqueueHistoricalBackfillSignatures(afterDrain, completed.state, blocked.cursor, "2026-11-12T10:01:01.000Z");
+    expect(resumed.cursor).toBe(2);
+    expect(resumed.queued).toBe(1);
+    expect(resumed.overflow).toBe(false);
+    expect(resumed.state.queue.some(item => item.signature === create)).toBe(true);
+  });
+
+  it("makes a crash between queue persistence and cursor persistence safely replayable", () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const completed = applyAddressSignaturesPage(initial, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null },
+      { signature: create, slot: 10, blockTime: 1000, err: null }
+    ]);
+    expect(completed.status).toBe("COMPLETE");
+
+    const firstAttempt = enqueueHistoricalBackfillSignatures(
+      emptyHeliusMonitorState(), completed.state, 0, "2026-11-12T10:01:00.000Z"
+    );
+    // Simulate a restart after the monitor state was persisted but before its
+    // cursor write: replay begins at zero and must recognize both queue items.
+    const replay = enqueueHistoricalBackfillSignatures(
+      firstAttempt.state, completed.state, 0, "2026-11-12T10:01:01.000Z"
+    );
+    expect(replay.cursor).toBe(2);
+    expect(replay.duplicates).toBe(2);
+    expect(replay.queued).toBe(0);
+    expect(replay.state.queue.map(item => item.signature)).toEqual([newer, create]);
   });
 
   it("rejects invalid verified launch timestamps", () => {
