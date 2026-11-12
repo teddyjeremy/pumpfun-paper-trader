@@ -224,7 +224,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
 
     await expect(ledgerPersistence!.persistHeliusBackfillArchive({
       sessionId, mint: backfillMint, state,
-      transaction: { ...transaction, slot: 124 }
+      transaction: { ...transaction, slot: 124 }, decodeCoverage: pendingDecode
     })).rejects.toThrow(/verified signature evidence|conflicts/);
 
     const incompleteMint = "11111111111111111111111111111111";
