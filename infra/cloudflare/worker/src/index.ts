@@ -798,6 +798,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return { ...this.status };
   }
 
+  /** Single authenticated snapshot for the operator dashboard; read-only. */
+  async getOperatorDashboardSnapshot(): Promise<unknown> {
+    await this.hydrate();
+    const [status, portfolio, bankroll] = await Promise.all([
+      this.getStatus(), this.getPaperPortfolio(), this.getPaperBankroll()
+    ]);
+    return {
+      generatedAt: new Date().toISOString(),
+      status,
+      sessionId: this.activeSessionId,
+      portfolio,
+      bankroll,
+      candidates: this.discovery.candidates.slice(-30).reverse().map(candidate => ({
+        mint: candidate.mint, status: candidate.status, firstSeenAt: candidate.firstSeenAt,
+        lastSeenAt: candidate.lastSeenAt
+      }))
+    };
+  }
+
   private auditInBackground(kind: AuditKind, mint: string | null, data: unknown, idempotencyKey?: string): void {
     // Capture the session before asynchronous work: stop() clears the active
     // pointer after its final transaction, but this event still belongs to it.
@@ -2381,6 +2400,11 @@ export default {
     }
     if (url.pathname === "/status" && request.method === "GET") {
       return Response.json(await coordinator.getStatus());
+    }
+    if (url.pathname === "/dashboard" && request.method === "GET") {
+      return Response.json(await coordinator.getOperatorDashboardSnapshot(), {
+        headers: { "cache-control": "no-store" }
+      });
     }
     if (url.pathname === "/candidates" && request.method === "GET") {
       return Response.json(await coordinator.listCandidates());
