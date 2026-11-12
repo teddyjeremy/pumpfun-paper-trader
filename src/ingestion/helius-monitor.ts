@@ -3,6 +3,16 @@ import type { DiscoveryCandidate } from "./discovery-store.js";
 export const MAX_HELIUS_CANDIDATES = 10;
 export const MAX_HELIUS_SIGNATURE_QUEUE = 100;
 export const MAX_HELIUS_SEEN_SIGNATURES = 5_000;
+export const FRESH_LAUNCH_SLOT_RESERVE = 4;
+export const FRESH_LAUNCH_WINDOW_MS = 60_000;
+
+export interface CandidateMonitoringEvidence {
+  score: number;
+  hardRejected?: boolean;
+  creatorClearanceComplete?: boolean;
+  flowConfirmed?: boolean;
+  dataComplete?: boolean;
+}
 
 export interface HeliusCandidateSubscription {
   requestId: number;
@@ -57,37 +67,60 @@ export function normalizeHeliusMonitorState(value?: Partial<HeliusMonitorState> 
 /** Select only active, non-migrated candidates with a valid bonding-curve address. */
 export function selectHeliusCandidates(
   candidates: readonly DiscoveryCandidate[],
-  limit = MAX_HELIUS_CANDIDATES
+  limit = MAX_HELIUS_CANDIDATES,
+  evidenceByMint: Readonly<Record<string, CandidateMonitoringEvidence>> = {},
+  now = Date.now()
 ): Array<{ mint: string; bondingCurve: string }> {
   if (!Number.isInteger(limit) || limit < 0 || limit > MAX_HELIUS_CANDIDATES) {
     throw new Error("Helius candidate limit must be between zero and ten.");
   }
   const selected: Array<{ mint: string; bondingCurve: string }> = [];
   const seen = new Set<string>();
-  // This is a monitoring-priority order, not a trading-quality score.
-  // The discovery feed does not contain trade flow, wallet concentration,
-  // creator sells, liquidity, or executable quotes, so those must not be
-  // fabricated here. Prefer candidates with more complete identity evidence,
-  // then repeated observations, then freshness. Unknown creator data remains
-  // eligible for WATCH/monitoring rather than being treated as a safety pass.
-  const priorityOrder = [...candidates].sort((a, b) => {
-    const creatorA = a.creator && ADDRESS.test(a.creator) ? 1 : 0;
-    const creatorB = b.creator && ADDRESS.test(b.creator) ? 1 : 0;
-    if (creatorA !== creatorB) return creatorB - creatorA;
-    if (a.observations !== b.observations) return b.observations - a.observations;
-    const lastSeenA = Date.parse(a.lastSeenAt);
-    const lastSeenB = Date.parse(b.lastSeenAt);
-    if (lastSeenA !== lastSeenB) return lastSeenB - lastSeenA;
-    return Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt);
-  });
-  for (const candidate of priorityOrder) {
-    if (selected.length >= limit) break;
-    if (candidate.status !== "DISCOVERED" || !ADDRESS.test(candidate.mint) ||
-        !candidate.bondingCurve || !ADDRESS.test(candidate.bondingCurve) ||
-        seen.has(candidate.mint)) continue;
+  const eligible = candidates.filter(candidate =>
+    candidate.status === "DISCOVERED" && ADDRESS.test(candidate.mint) &&
+    Boolean(candidate.bondingCurve && ADDRESS.test(candidate.bondingCurve))
+  );
+  const fresh = eligible.filter(candidate => {
+    const age = now - Date.parse(candidate.firstSeenAt);
+    return Number.isFinite(age) && age >= 0 && age <= FRESH_LAUNCH_WINDOW_MS &&
+      !evidenceByMint[candidate.mint]?.hardRejected;
+  }).sort((a, b) => Date.parse(a.firstSeenAt) - Date.parse(b.firstSeenAt));
+  const followUp = eligible.filter(candidate => !fresh.some(item => item.mint === candidate.mint))
+    .filter(candidate => !evidenceByMint[candidate.mint]?.hardRejected)
+    .sort((a, b) => {
+      const ea = evidenceByMint[a.mint];
+      const eb = evidenceByMint[b.mint];
+      const scoreA = Number.isFinite(ea?.score) ? ea!.score : 0;
+      const scoreB = Number.isFinite(eb?.score) ? eb!.score : 0;
+      if (scoreA !== scoreB) return scoreB - scoreA;
+      const completeA = Number(Boolean(ea?.dataComplete));
+      const completeB = Number(Boolean(eb?.dataComplete));
+      if (completeA !== completeB) return completeB - completeA;
+      const creatorA = Number(Boolean(ea?.creatorClearanceComplete));
+      const creatorB = Number(Boolean(eb?.creatorClearanceComplete));
+      if (creatorA !== creatorB) return creatorB - creatorA;
+      const flowA = Number(Boolean(ea?.flowConfirmed));
+      const flowB = Number(Boolean(eb?.flowConfirmed));
+      if (flowA !== flowB) return flowB - flowA;
+      if (a.observations !== b.observations) return b.observations - a.observations;
+      const lastSeenA = Date.parse(a.lastSeenAt);
+      const lastSeenB = Date.parse(b.lastSeenAt);
+      if (lastSeenA !== lastSeenB) return lastSeenB - lastSeenA;
+      return Date.parse(a.firstSeenAt) - Date.parse(b.firstSeenAt);
+    });
+
+  // Reserve four slots for candidates still inside the initial 60-second
+  // observation window. The other six slots follow evidence ranking. If one
+  // pool is under-filled, the other pool may use the spare capacity.
+  const freshLimit = Math.min(limit, FRESH_LAUNCH_SLOT_RESERVE);
+  const add = (candidate: DiscoveryCandidate) => {
+    if (selected.length >= limit || seen.has(candidate.mint)) return;
     seen.add(candidate.mint);
-    selected.push({ mint: candidate.mint, bondingCurve: candidate.bondingCurve });
-  }
+    selected.push({ mint: candidate.mint, bondingCurve: candidate.bondingCurve! });
+  };
+  for (const candidate of fresh.slice(0, freshLimit)) add(candidate);
+  for (const candidate of followUp) add(candidate);
+  for (const candidate of fresh.slice(freshLimit)) add(candidate);
   return selected;
 }
 
@@ -95,9 +128,10 @@ export function selectHeliusCandidates(
 export function reconcileHeliusSubscriptions(
   state: HeliusMonitorState,
   candidates: readonly DiscoveryCandidate[],
-  now = new Date().toISOString()
+  now = new Date().toISOString(),
+  evidenceByMint: Readonly<Record<string, CandidateMonitoringEvidence>> = {}
 ): HeliusMonitorState {
-  const selected = selectHeliusCandidates(candidates);
+  const selected = selectHeliusCandidates(candidates, MAX_HELIUS_CANDIDATES, evidenceByMint, Date.parse(now));
   const byMint = new Map(state.subscriptions.map(item => [item.mint, item]));
   const subscriptions = selected.map(candidate => {
     const existing = byMint.get(candidate.mint);
