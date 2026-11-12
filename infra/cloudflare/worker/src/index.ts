@@ -1618,32 +1618,41 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const create = transaction.createEvents.find(event => event.mint === transaction.mint);
     if (!create) return;
     const key = `helius_backfill:${sessionId}:${transaction.mint}`;
-    if (await this.ctx.storage.get<HistoricalBackfillState>(key)) return;
-    const launchBlockTime = Number(create.timestamp);
-    let state: HistoricalBackfillState;
-    try {
-      state = createHistoricalBackfillState({
-        mint: transaction.mint,
-        bondingCurve: create.bondingCurve,
-        createSignature: transaction.signature,
-        launchBlockTime,
-        horizonSeconds: 600,
-        maxSignatures: 120
-      });
-    } catch (error) {
-      await this.appendAudit("DATA_GAP", transaction.mint, {
-        reason: "HISTORICAL_BACKFILL_INITIALIZATION_FAILED",
-        message: error instanceof Error ? error.message : "Invalid create-event history anchor."
-      }, `backfill-init-failed:${transaction.signature}`);
-      return;
+    const existing = await this.ctx.storage.get<HistoricalBackfillState>(key);
+    let state = existing;
+    if (!state) {
+      const launchBlockTime = Number(create.timestamp);
+      try {
+        state = createHistoricalBackfillState({
+          mint: transaction.mint,
+          bondingCurve: create.bondingCurve,
+          createSignature: transaction.signature,
+          launchBlockTime,
+          horizonSeconds: 600,
+          maxSignatures: 120
+        });
+      } catch (error) {
+        await this.appendAudit("DATA_GAP", transaction.mint, {
+          reason: "HISTORICAL_BACKFILL_INITIALIZATION_FAILED",
+          message: error instanceof Error ? error.message : "Invalid create-event history anchor."
+        }, `backfill-init-failed:${transaction.signature}`);
+        return;
+      }
     }
-    await this.ctx.storage.put(key, state);
+
+    // Register the mint before its state. If eviction happens after the list
+    // write, replaying the still-queued create transaction can finish setup.
     const listKey = `helius_backfill_mints:${sessionId}`;
     const mints = await this.ctx.storage.get<string[]>(listKey) ?? [];
-    await this.ctx.storage.put(listKey, [...new Set([...mints, transaction.mint])].slice(-100));
+    if (!mints.includes(transaction.mint)) {
+      await this.ctx.storage.put(listKey, [...mints, transaction.mint].slice(-100));
+    }
+    if (existing) return;
+
+    await this.ctx.storage.put(key, state!);
     await this.appendAudit("OBSERVATION", transaction.mint, {
-      historicalBackfill: "STARTED", horizonSeconds: state.horizonSeconds,
-      maxSignatures: state.maxSignatures, launchBlockTime
+      historicalBackfill: "STARTED", horizonSeconds: state!.horizonSeconds,
+      maxSignatures: state!.maxSignatures, launchBlockTime: state!.launchBlockTime
     }, `backfill-start:${transaction.signature}`);
   }
 
