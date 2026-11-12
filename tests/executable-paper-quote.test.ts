@@ -106,6 +106,13 @@ describe("executable paper quote adapter", () => {
     })).toThrow(/expire before the simulated fill/);
   });
 
+  it("rejects non-SOL quote mints instead of mispricing them with SOL/USD", () => {
+    expect(() => buildExecutablePaperQuote({
+      quote: { ...curveQuote(), quoteMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" },
+      solUsd, costs, nowMs: now
+    })).toThrow(/Only SOL and WSOL quote mints/);
+  });
+
   it("rejects unsupported transfer-tax evidence and invalid fee estimates", () => {
     expect(() => buildExecutablePaperQuote({
       quote: { ...curveQuote(), transferTaxVerifiedZero: false } as PumpSdkCurveQuote,
