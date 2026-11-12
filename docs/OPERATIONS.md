@@ -7,6 +7,8 @@
 - `GET /api/diagnostics`: counters, categorized recent failures, readiness blockers, uptime and memory.
 - `GET /api/results/summary`: portfolio configuration, activity counts and diagnosis.
 - `GET /api/tracking`: candidate funnel, rejection reasons, quote outcomes, latency, provider health, graduation and position telemetry.
+- `GET /api/helius/backfills?sessionId=...`: per-mint address-history and transaction-decoding coverage.
+- `GET /api/strategy/replay?sessionId=...`: chronological replay of archived, verified historical SOL-quoted trade events, with optional explicit outcome excursion thresholds and round-trip cost.
 - `GET /`: operator dashboard.
 
 ## How to interpret the results
@@ -51,6 +53,18 @@ Every simulated fill should store raw SOL/token amounts, decimals, quote timesta
 7. Review failure categories and rejected candidates before changing thresholds.
 
 A multi-hour test validates integration and operational behavior, not profitability.
+
+## Historical replay
+
+Historical replay requires the additive PostgreSQL migrations through `0007_helius_decode_coverage`. Apply migrations only through the documented operator migration command after reviewing the SQL and taking a database backup; application startup does not migrate automatically.
+
+The replay endpoint excludes live-monitor-only observations and only labels outcomes when:
+- address-history coverage is complete,
+- every scanned signature has a verified or confirmed-failed terminal outcome,
+- every verified historical transaction is durably archived,
+- explicit favorable/adverse excursion thresholds are supplied.
+
+The replay uses SOL-quoted reserve observations and current SOL/USD normalization. It is not an executable SDK fill simulation, does not model the complete dynamic exit lifecycle, and must not be interpreted as realized PnL. Calibration recommendations remain advisory and require a separate chronological holdout review.
 
 ## Instrumentation contract
 
