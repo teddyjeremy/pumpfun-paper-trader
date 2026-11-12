@@ -107,7 +107,7 @@ export async function compileUnsignedFeeMessage(
   for (const byte of bytes) binary += String.fromCharCode(byte);
   const messageBase64 = btoa(binary);
   const digestBytes = new Uint8Array(await crypto.subtle.digest(
-    "SHA-256", bytes
+    "SHA-256", new Uint8Array(bytes)
   ));
   return {
     messageBase64,
