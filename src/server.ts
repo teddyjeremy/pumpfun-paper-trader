@@ -187,11 +187,9 @@ app.get("/api/strategy/replay", async (request, reply) => {
       return reply.code(503).send({ error: "Fresh SOL/USD reference unavailable; replay micro-trade filtering is blocked." });
     }
     const rows = await getHeliusBackfillReplayDataset(sessionId);
-    const label = minFavorableExcursionPct !== undefined && maxAdverseExcursionPct !== undefined
-      ? {
-          minFavorableExcursionPct, maxAdverseExcursionPct,
-          ...(roundTripCostPct === undefined ? {} : { roundTripCostPct })
-        }
+    const label = minFavorableExcursionPct !== undefined &&
+      maxAdverseExcursionPct !== undefined && roundTripCostPct !== undefined
+      ? { minFavorableExcursionPct, maxAdverseExcursionPct, roundTripCostPct }
       : undefined;
     const replays = rows.map(row => {
       if (row.launchBlockTime === null) {
