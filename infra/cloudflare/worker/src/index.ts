@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "../../../../src/paper/session-ledger.js";
 import { updateCandidatePriceTracker, type CandidatePriceTracker } from "../../../../src/paper/candidate-price-ledger.js";
 
-type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "WORKER_RESTARTED" | "DISCOVERY" |
+type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "SESSION_HEARTBEAT" | "WORKER_RESTARTED" | "DISCOVERY" |
   "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "CANDIDATE_EXPIRED" | "OBSERVATION" |
   "FEATURE_SNAPSHOT" | "STRATEGY_DECISION" | "REJECTION_REASON" | "QUOTE_REQUESTED" |
   "QUOTE_RESULT" | "PAPER_ENTRY" | "PAPER_EXIT" | "POSITION_MARK" | "DATA_GAP" |
@@ -280,6 +280,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async ensureRunning(): Promise<CoordinatorStatus> {
     await this.hydrate();
+    if (this.activeSessionId) {
+      await this.appendAudit("SESSION_HEARTBEAT", null, {
+        enabled: this.status.enabled, pumpPortalConnected: this.status.connected,
+        heliusConnected: this.status.heliusConnected, candidates: this.discovery.candidates.length,
+        monitoredCandidates: this.heliusState.subscriptions.length,
+        queuedSignatures: this.heliusState.queue.length,
+        droppedSignatures: this.heliusState.droppedSignatures
+      }, `heartbeat:${Math.floor(Date.now() / 60_000)}`);
+    }
     if (!this.status.enabled) {
       if (this.socket) {
         const socket = this.socket;
@@ -299,9 +308,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
 
     // Expire stale candidates even if the provider is quiet, then flush state.
-    const beforeExpiry = this.discovery.candidates.length;
+    const previousCandidates = this.discovery.candidates;
+    const beforeExpiry = previousCandidates.length;
     this.discovery = pruneExpiredCandidates(this.discovery, new Date().toISOString());
     if (this.discovery.candidates.length !== beforeExpiry) {
+      const retainedMints = new Set(this.discovery.candidates.map(candidate => candidate.mint));
+      const expiredMints = previousCandidates.filter(candidate => !retainedMints.has(candidate.mint)).map(candidate => candidate.mint);
+      await this.appendAudit("CANDIDATE_EXPIRED", null, { expiredMints, count: expiredMints.length });
       this.reconcileHelius();
       this.pendingWrites += 1;
     }
@@ -669,9 +682,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async listCandidates(): Promise<DiscoveryStoreState> {
     await this.hydrate();
-    const beforeExpiry = this.discovery.candidates.length;
+    const previousCandidates = this.discovery.candidates;
+    const beforeExpiry = previousCandidates.length;
     this.discovery = pruneExpiredCandidates(this.discovery, new Date().toISOString());
     if (this.discovery.candidates.length !== beforeExpiry) {
+      const retainedMints = new Set(this.discovery.candidates.map(candidate => candidate.mint));
+      const expiredMints = previousCandidates.filter(candidate => !retainedMints.has(candidate.mint)).map(candidate => candidate.mint);
+      await this.appendAudit("CANDIDATE_EXPIRED", null, { expiredMints, count: expiredMints.length });
       this.pendingWrites += 1;
       await this.persist();
     }
@@ -793,6 +810,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.status.subscriptionsSent = false;
       this.connectingSinceMs = 0;
       this.status.lastError = "Unable to create the PumpPortal WebSocket connection.";
+      void this.appendAudit("ERROR", null, { subsystem: "PUMPPORTAL_CONNECT", message: this.status.lastError }).catch(() => undefined);
       if (this.status.enabled) this.scheduleReconnect();
     }
   }
@@ -921,6 +939,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
               incompleteMints: [...new Set([...this.heliusState.incompleteMints, failed.mint])].slice(-10)
             };
             this.status.incompleteHeliusTransactions += 1;
+            void this.appendAudit("DATA_GAP", failed?.mint ?? null, {
+              provider: "helius", reason: "SUBSCRIPTION_REJECTED", requestId: record.id,
+              error: jsonSafe(record.error)
+            }).catch(() => undefined);
           }
           void this.persist().catch(() => undefined);
           return;
@@ -962,6 +984,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.heliusConnectedAtMs = 0;
       this.heliusConnectingSinceMs = 0;
       this.status.lastError = "Unable to create the Helius WebSocket connection.";
+      void this.appendAudit("ERROR", null, { subsystem: "HELIUS_CONNECT", message: this.status.lastError }).catch(() => undefined);
     }
   }
 
