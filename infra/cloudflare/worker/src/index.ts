@@ -285,7 +285,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
-  private async markHistoricalDecodeIncomplete(work: HeliusSignatureWork, reason: string): Promise<void> {
+  private async markHistoricalDecodeIncomplete(work: Pick<HeliusSignatureWork, "signature" | "mint">, reason: string): Promise<void> {
     const sessionId = this.activeSessionId;
     if (!sessionId) return;
     const state = await this.ctx.storage.get<HistoricalBackfillState>(
@@ -376,8 +376,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (!state || !historicalSignature) return;
     if (historicalSignature.slot !== transaction.slot) {
       await this.markHistoricalDecodeIncomplete({
-        signature: transaction.signature, mint: transaction.mint, slot: transaction.slot
-      } as HeliusSignatureWork, "Verified transaction slot conflicts with historical signature evidence.");
+        signature: transaction.signature, mint: transaction.mint
+      }, "Verified transaction slot conflicts with historical signature evidence.");
       return;
     }
     try {
