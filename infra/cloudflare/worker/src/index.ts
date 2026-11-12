@@ -525,7 +525,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const report = await this.listTradeFlows() as {
       solUsdPrice?: Awaited<ReturnType<typeof fetchSolUsdPrice>>;
       flows: Array<{ mint: string; quoteMint: string | null; microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE"; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
-      priceVolumeProfiles: Array<{ mint:string; quoteMint:string|null; baselinePrice:number|null; reclaimTime:number|null; buckets:Array<{closePrice:number;highPrice:number;endTime:number}>; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
+      priceVolumeProfiles: Array<{ mint:string; quoteMint:string|null; baselinePrice:number|null; reclaimTime:number|null; buckets:Array<{closePrice:number;highPrice:number;endTime:number}>; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean; microTradeFilterStatus:"APPLIED"|"UNAVAILABLE"|"UNSUPPORTED_QUOTE" }>;
       creatorSellRisk: Array<{mint:string;status:string}>;
       walletClusterRisk: Array<{mint:string;status:string}>;
     };
@@ -569,7 +569,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           reclaimDetected: profile.reclaimDetected,
           reclaimAbovePreviousFiveSecondHighPct: profile.reclaimAbovePreviousFiveSecondHighPct,
           pullbackVolumeVsImpulsePct: profile.pullbackVolumeVsImpulsePct,
-          reclaimVolumeVsPullbackPct: profile.reclaimVolumeVsPullbackPct, dataComplete: profile.dataComplete
+          reclaimVolumeVsPullbackPct: profile.reclaimVolumeVsPullbackPct, dataComplete: profile.dataComplete,
+          microTradeFilterStatus: profile.microTradeFilterStatus
         } : null,
         flow: flow ? {
           dataComplete: flow.dataComplete, latestThreeWindowFlowPass: flow.latestThreeWindowFlowPass, windows: flow.windows.map(window => ({...window, flowWindowPass: window.flowWindowPass})),
