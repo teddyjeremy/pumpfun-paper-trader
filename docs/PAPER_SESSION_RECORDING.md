@@ -68,3 +68,11 @@ The six-hour paper session remains blocked until the missing quote source, execu
 - Stale, mismatched, non-canonical or empty pool evidence moves the state to EXIT_BLOCKED. Missing fresh evidence also blocks quote requests.
 - LIVE_CURVE and MIGRATED_POOL_VERIFIED only permit requesting a fresh size-specific sell quote. They do not create fills, execute sells or bypass impact, tax, fee, slippage or balance checks.
 - This is currently a pure tested policy module. The authoritative on-chain account decoder, canonical pool discovery and Durable Object integration are still outstanding.
+
+## Official Pump account decoding (current PR addition)
+- Account layouts are pinned to the official `pump-fun/pump-public-docs` IDLs: Pump bonding curve discriminator `[23,183,248,55,96,216,172,96]`; PumpSwap pool discriminator `[241,154,109,4,17,177,109,188]`.
+- Curve decoding checks Pump program ownership, the expected curve PDA address supplied by the official SDK derivation, discriminator, known field boundaries, mint context, slot and observation time. A completed curve is terminal/migration-pending evidence, not proof that the PumpSwap pool is already ready.
+- Pool decoding checks PumpSwap program ownership, discriminator, and the current/known legacy field lengths. Pool vault balances are decoded from SPL Token / Token-2022 account data.
+- Canonical pool evidence is emitted only when the caller supplies the expected canonical pool PDA, Pump pool-creator authority PDA, and pool authority PDA derived by the official SDK; pool index must be zero, the base mint and both vault addresses/mints/authorities must match, both reserves must be non-zero, and pool/vault account data must share one RPC context slot and be fresh.
+- This decoder is a pure validation layer. It does not yet fetch accounts from Helius, derive PDAs itself, discover pools, compute Pump dynamic fees, produce executable quotes, or connect market state to the Worker.
+- Official protocol sources: `pump-fun/pump-public-docs/idl/pump.json`, `pump_amm.json`, `docs/PUMP_PROGRAM_README.md`, `docs/PUMP_SWAP_README.md`, and `docs/FEE_PROGRAM_README.md`. The official docs currently identify `@pump-fun/pump-sdk` 4.1.0 and `@pump-fun/pump-swap-sdk` 2.1.0; compatibility with the current Cloudflare Worker bundle must be tested before adding either package.
