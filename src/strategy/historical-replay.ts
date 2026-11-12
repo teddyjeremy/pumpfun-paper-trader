@@ -379,7 +379,7 @@ function hydrateEventBigInts(value: unknown, fields: readonly string[]): Record<
   for (const field of fields) {
     const raw = event[field];
     if (typeof raw === "bigint") continue;
-    if (typeof raw === "string" && /^\\d+$/.test(raw)) {
+    if (typeof raw === "string" && /^\d+$/.test(raw)) {
       event[field] = BigInt(raw);
     } else if (typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0) {
       event[field] = BigInt(raw);
