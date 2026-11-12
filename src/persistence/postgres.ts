@@ -659,7 +659,7 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
   const signaturePattern = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
   if (!sessionId.trim() || sessionId.length > 128 || !address.test(mint) ||
       !address.test(state.bondingCurve) || !signaturePattern.test(state.createSignature) ||
-      state.launchBlockTime === null || (state.launchBlockTime === null ? state.status !== "INCOMPLETE" :
+      (state.launchBlockTime === null ? state.status !== "INCOMPLETE" :
         !Number.isSafeInteger(state.launchBlockTime) || state.launchBlockTime < 0) ||
       !Number.isSafeInteger(state.horizonSeconds) || state.horizonSeconds < 60 || state.horizonSeconds > 1800 ||
       !Number.isSafeInteger(state.maxSignatures) || state.maxSignatures < 1 || state.maxSignatures > 500 ||
