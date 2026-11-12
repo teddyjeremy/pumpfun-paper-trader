@@ -281,6 +281,45 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
+  private async flushHeliusBackfillArchivesToPostgres(): Promise<void> {
+    if (!this.postgresIngestConfigured || !this.activeSessionId) return;
+    const listKey = `helius_backfill_mints:${this.activeSessionId}`;
+    const mints = await this.ctx.storage.get<string[]>(listKey) ?? [];
+    for (const mint of mints) {
+      const state = await this.ctx.storage.get<HistoricalBackfillState>(`helius_backfill:${this.activeSessionId}:${mint}`);
+      if (!state) continue;
+      try {
+        const response = await this.postPostgresIngest("/internal/helius-backfill", {
+          sessionId: this.activeSessionId, mint, state
+        });
+        if (!response.ok) throw new Error("Archive checkpoint was not acknowledged.");
+      } catch {
+        this.status.lastError = "Helius backfill archive is waiting for PostgreSQL persistence.";
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+    }
+    for (const transaction of this.verifiedTransactions) {
+      try {
+        const state = await this.ctx.storage.get<HistoricalBackfillState>(
+          `helius_backfill:${this.activeSessionId}:${transaction.mint}`
+        );
+        if (!state) continue;
+        const response = await this.postPostgresIngest("/internal/helius-backfill", {
+          sessionId: this.activeSessionId,
+          mint: transaction.mint,
+          state,
+          transaction: jsonSafe(transaction)
+        });
+        if (!response.ok) throw new Error("Transaction archive was not acknowledged.");
+      } catch {
+        this.status.lastError = "Verified Helius transactions are waiting for PostgreSQL persistence.";
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+    }
+  }
+
   private async flushAllAuditSessionsToPostgres(): Promise<void> {
     if (!this.postgresIngestConfigured) return;
     const sessions = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
@@ -313,6 +352,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await this.drainHeliusQueue();
     }
     await this.flushAllAuditSessionsToPostgres();
+    await this.flushHeliusBackfillArchivesToPostgres();
     if (this.status.enabled && this.postgresLeaseHeld) {
       const now = Date.now();
       const pendingRetryAt = this.heliusState.queue
