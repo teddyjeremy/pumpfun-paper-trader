@@ -14,6 +14,7 @@ import { buildCandidateTradeFlows } from "../../../../src/ingestion/trade-flow.j
 import { fetchHolderConcentration } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
+import { evaluateWalletClusterRisk } from "../../../../src/ingestion/wallet-cluster-risk.js";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
@@ -341,6 +342,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       coverageStartByMint
     });
     const creatorRiskByMint = new Map(creatorSellRisk.map(item => [item.mint, item]));
+    // No wallet-linkage source is wired yet. Emit WATCH for every candidate
+    // rather than treating missing attribution as a clean bill of health.
+    const launchByMint = new Map(this.verifiedTransactions.flatMap(tx => tx.createEvents)
+      .map(event => [event.mint, event] as const));
+    const walletClusterRisk = candidateMints.map(mint => {
+      const launch = launchByMint.get(mint);
+      return evaluateWalletClusterRisk(this.verifiedTransactions, {
+        mint,
+        creator: launch?.creator ?? null,
+        totalSupply: launch?.tokenTotalSupply.toString() ?? null
+      });
+    });
     const creatorRiskRank = (status: string): number =>
       status === "PASS_COMPLETE" ? 0 :
       status === "PENDING" ? 1 :
@@ -372,6 +385,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       retentionMayBeTruncated,
       knownIncompleteMints: incompleteMints,
       creatorSellRisk,
+      walletClusterRisk,
       candidateCoverage: this.discovery.candidates.map(candidate => {
         const subscription = this.heliusState.subscriptions.find(item => item.mint === candidate.mint);
         return {
