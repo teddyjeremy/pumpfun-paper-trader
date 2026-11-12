@@ -96,3 +96,8 @@ The six-hour paper session remains blocked until the missing quote source, execu
 - Paper quote accounting now requires explicit protocol, creator, pool/LP, transfer, network, priority and provider fee amounts. Gross output is stored before those costs; net sell proceeds and realized PnL subtract the complete fee breakdown. Every later exit quote is rechecked against the per-side 2% impact and 2% tax limits, and a sell quote with negative net proceeds is rejected.
 
 - A small market verifier now connects the raw account decoders to `updatePumpMarketState`: a verified live curve becomes LIVE_CURVE, a completed curve becomes MIGRATION_PENDING, and only the fully verified canonical pool/vault snapshot advances it to MIGRATED_POOL_VERIFIED. This remains a pure adapter; Worker fetching and SDK PDA derivation are still separate integration tasks.
+
+## Canonical PDA derivation
+- Added deterministic PDA derivation using Solana `PublicKey.findProgramAddressSync` and the exact seed recipes in the official Pump IDL: `bonding-curve + mint`, `pool-authority + base_mint`, and PumpSwap `pool + index(0 as u16 LE) + creator + base_mint + quote_mint`.
+- The Pump program derives the pool creator authority; the canonical pool PDA is derived under the PumpSwap program. The pool PDA itself is the token-account authority for its base/quote vaults, which the verifier now enforces.
+- The market verifier derives these addresses itself from the verified curve mint/quote mint; callers can no longer supply arbitrary expected PDA values.
