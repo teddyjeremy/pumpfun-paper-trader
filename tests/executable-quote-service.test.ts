@@ -4,7 +4,7 @@ import type {OfflinePumpQuote} from "../src/ingestion/executable-paper-quote.js"
 
 const mint="So11111111111111111111111111111111111111112";
 const observedAt="2026-11-12T12:00:00.000Z";
-const solUsd={priceUsd:150,observedAt};
+const solUsd={source:"binance-spot" as const,symbol:"SOLUSDT" as const,priceUsd:150,observedAt};
 function quote(side:"BUY"|"SELL",slot:number,amount:string):OfflinePumpQuote {
   const common={
     provider:"pump-sdk-4.3.1" as const,side,mint,quoteMint:"11111111111111111111111111111111",
