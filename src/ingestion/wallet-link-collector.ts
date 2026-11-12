@@ -66,8 +66,13 @@ export async function collectWalletFundingEvidence(
     }
     const validSignatures = signatures.result.filter(item =>
       item && typeof item === "object" &&
-      typeof (item as Record<string, unknown>).signature === "string"
+      typeof (item as Record<string, unknown>).signature === "string" &&
+      /^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test((item as Record<string, unknown>).signature as string)
     ).map(item => (item as Record<string, unknown>).signature as string);
+    if (validSignatures.length === 0) {
+      incomplete = true;
+      warnings.push("No usable signature history was returned for one or more wallets.");
+    }
     // The RPC returns newest first; inspect the oldest three in this bounded
     // recent sample to approximate initial funding without unbounded history.
     const sample = validSignatures.slice(-MAX_TRANSACTIONS_PER_WALLET);
