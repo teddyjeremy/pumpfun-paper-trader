@@ -11,7 +11,7 @@ import { trackingSnapshot } from "./diagnostics/tracker.js";
 import {
   acquireWorkerLease, heartbeatWorkerLease, persistPaperAuditEvents,
   releaseWorkerLease, getPersistenceStatus, getTradingDashboardSnapshot, getPaperSessionLedgerSnapshot,
-  persistHeliusBackfillArchive
+  persistHeliusBackfillArchive, getHeliusBackfillReplayDataset
 } from "./persistence/postgres.js";
 
 export const app = Fastify({
