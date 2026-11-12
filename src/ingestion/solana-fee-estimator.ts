@@ -61,6 +61,99 @@ export interface UnsignedFeeMessage {
   messageSha256: string;
 }
 
+export type UnsignedInstructionFeeEvidence =
+  | {
+      status: "AVAILABLE";
+      messageSha256: string;
+      writableAccountKeys: string[];
+      computeUnitLimit: number;
+      estimate: SolanaFeeEstimate;
+    }
+  | {
+      status: "UNAVAILABLE";
+      reason: string;
+      messageSha256?: string;
+      writableAccountKeys?: string[];
+      computeUnitLimit: number;
+    };
+
+/**
+ * Compile a venue's exact unsigned instruction list, then estimate base and
+ * account-lock-specific priority fees against that same serialized message.
+ * This composition never signs, simulates or submits a transaction.
+ */
+export async function estimateFeesForUnsignedInstructions(input: {
+  apiKey: string;
+  payer: PublicKey;
+  recentBlockhash: string;
+  instructions: readonly TransactionInstruction[];
+  computeUnitLimit: number;
+  fetcher?: typeof fetch;
+  nowMs?: number;
+}): Promise<UnsignedInstructionFeeEvidence> {
+  let compiled: UnsignedFeeMessage;
+  try {
+    compiled = await compileUnsignedFeeMessage({
+      payer: input.payer,
+      recentBlockhash: input.recentBlockhash,
+      instructions: input.instructions,
+      computeUnitLimit: input.computeUnitLimit
+    });
+  } catch (error) {
+    return {
+      status: "UNAVAILABLE",
+      reason: error instanceof Error ? error.message : "Unsigned transaction compilation failed.",
+      computeUnitLimit: input.computeUnitLimit
+    };
+  }
+
+  let result: SolanaFeeEstimateResult;
+  try {
+    result = await estimateSolanaTransactionFees({
+      apiKey: input.apiKey,
+      messageBase64: compiled.messageBase64,
+      writableAccountKeys: compiled.writableAccountKeys,
+      computeUnitLimit: compiled.computeUnitLimit,
+      fetcher: input.fetcher,
+      nowMs: input.nowMs
+    });
+  } catch {
+    return {
+      status: "UNAVAILABLE",
+      reason: "Exact-message fee evidence request failed.",
+      messageSha256: compiled.messageSha256,
+      writableAccountKeys: compiled.writableAccountKeys,
+      computeUnitLimit: compiled.computeUnitLimit
+    };
+  }
+
+  if (result.status === "UNAVAILABLE") {
+    return {
+      status: "UNAVAILABLE",
+      reason: result.reason,
+      messageSha256: compiled.messageSha256,
+      writableAccountKeys: compiled.writableAccountKeys,
+      computeUnitLimit: compiled.computeUnitLimit
+    };
+  }
+  if (result.estimate.feeMessageSha256 !== compiled.messageSha256) {
+    return {
+      status: "UNAVAILABLE",
+      reason: "Compiled-message and fee-estimator fingerprints do not match.",
+      messageSha256: compiled.messageSha256,
+      writableAccountKeys: compiled.writableAccountKeys,
+      computeUnitLimit: compiled.computeUnitLimit
+    };
+  }
+  return {
+    status: "AVAILABLE",
+    messageSha256: compiled.messageSha256,
+    writableAccountKeys: compiled.writableAccountKeys,
+    computeUnitLimit: compiled.computeUnitLimit,
+    estimate: result.estimate
+  };
+}
+
 export async function compileUnsignedFeeMessage(
   input: UnsignedFeeMessageInput
 ): Promise<UnsignedFeeMessage> {
@@ -220,9 +313,10 @@ export async function estimateSolanaTransactionFees(
   const priorityLamports = (
     priorityMicroLamports * BigInt(config.computeUnitLimit) + 999_999n
   ) / 1_000_000n;
+  const messageBytes = Uint8Array.from(atob(config.messageBase64), character => character.charCodeAt(0));
   const digestBytes = new Uint8Array(await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(config.messageBase64)
+    messageBytes
   ));
   const messageDigest = [...digestBytes].map(value => value.toString(16).padStart(2, "0")).join("");
 
