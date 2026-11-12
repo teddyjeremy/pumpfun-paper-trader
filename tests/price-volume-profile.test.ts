@@ -52,6 +52,8 @@ describe("observed price and stage-volume profile", () => {
     expect(profile?.impulseVolume.totalQuoteVolume).toBe("2250");
     expect(profile?.pullbackVolume.totalQuoteVolume).toBe("2150");
     expect(profile?.reclaimVolume.totalQuoteVolume).toBe("1200");
+    expect(profile?.pullbackVolumeVsImpulsePct).toBe(95.56);
+    expect(profile?.reclaimVolumeVsPullbackPct).toBe(55.81);
   });
 
   it("does not call a greater-than-40% drawdown a valid pullback", () => {
