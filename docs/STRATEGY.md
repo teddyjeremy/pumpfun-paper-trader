@@ -14,11 +14,12 @@ Status: paper-trading specification. The standard strategy is the only enabled s
 
 ### Price formation
 
-1. Observe the first 60 seconds after launch.
-2. Price impulse reaches at least +20%.
-3. Price pulls back 10–40% from the impulse high.
-4. Reclaim reaches at least +1% above the previous completed five-second high.
-5. The candidate signal is 1–2 seconds old and is confirmed again on the next observation.
+1. Treat the first 60 seconds as the initial discovery and creator-risk observation window, not the only entry window.
+2. Keep eligible candidates under observation for at least 10 minutes from launch. A valid impulse/pullback/reclaim setup may develop later (for example, after the first few minutes); do not reject a candidate solely because it did not qualify in its first 60 seconds. The current 15-minute discovery-store TTL is an inactivity expiry, not a 60-second entry cutoff.
+3. Price impulse reaches at least +20%.
+4. Price pulls back 10–40% from the impulse high.
+5. Reclaim reaches at least +1% above the previous completed five-second high.
+6. The candidate signal is 1–2 seconds old and is confirmed again on the next observation.
 
 ### Flow confirmation
 
