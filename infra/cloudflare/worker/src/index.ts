@@ -613,11 +613,12 @@ export default {
     }
     if (url.pathname === "/observations" && request.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? "100");
+      const transactions = await coordinator.listVerifiedTransactions(limit);
       return Response.json({
         provider: "helius",
         mode: "paper",
-        count: Math.max(1, Math.min(500, Number.isFinite(limit) ? Math.floor(limit) : 100)),
-        transactions: await coordinator.listVerifiedTransactions(limit)
+        count: transactions.length,
+        transactions
       });
     }
     return Response.json({ error: "Not found" }, { status: 404 });
