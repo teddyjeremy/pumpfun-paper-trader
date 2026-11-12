@@ -14,6 +14,38 @@ export interface HeliusAccountSnapshot {
   accounts: Array<RawProgramAccount | null>;
 }
 
+export interface HeliusEpochInfo {
+  epoch: number;
+  absoluteSlot: number;
+  slotIndex: number;
+}
+
+/** Fetches the current epoch context used to select Token-2022 transfer fees. */
+export async function fetchHeliusEpochInfo(config: HeliusAccountReadConfig): Promise<HeliusEpochInfo> {
+  const response = await (config.fetcher ?? fetch)(buildHeliusRpcUrl(config.apiKey), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: "paper-epoch-info", method: "getEpochInfo",
+      params: [{ commitment: config.commitment ?? "confirmed" }]
+    })
+  });
+  if (!response.ok) throw new Error(`Helius epoch RPC returned HTTP ${response.status}.`);
+  const envelope = asRecord(await response.json());
+  if (envelope.error) throw new Error("Helius epoch RPC returned a JSON-RPC error.");
+  const result = asRecord(envelope.result);
+  const epoch = result.epoch;
+  const absoluteSlot = result.absoluteSlot;
+  const slotIndex = result.slotIndex;
+  if (!Number.isSafeInteger(epoch) || (epoch as number) < 0 ||
+      !Number.isSafeInteger(absoluteSlot) || (absoluteSlot as number) < 0 ||
+      !Number.isSafeInteger(slotIndex) || (slotIndex as number) < 0 ||
+      (slotIndex as number) > (absoluteSlot as number)) {
+    throw new Error("Helius epoch RPC omitted a valid epoch, absolute slot or slot index.");
+  }
+  return { epoch: epoch as number, absoluteSlot: absoluteSlot as number, slotIndex: slotIndex as number };
+}
+
 function decodeBase64(value: string, maximumBytes: number): Uint8Array {
   if (!value || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     throw new Error("Helius account data is not valid base64.");
