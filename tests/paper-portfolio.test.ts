@@ -36,8 +36,9 @@ describe("paper portfolio accounting",()=>{
  it("marks high water and realizes net proceeds without pretending fees are profit",()=>{
   const p=createPaperPortfolio();
   const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
-  const marked=markPaperPosition(opened.state,{positionId:"p1",priceUsdPerToken:2,markedAt:now});
-  expect(marked.positions[0]!.highWaterPriceUsdPerToken).toBe(2);
+  const marked=markPaperPosition(opened.state,{sellQuotes:[quote("mint","SELL","1000000",2.007)],markedAt:now,nowMs:Date.parse(now)});
+  expect(marked.positions[0]!.highWaterPriceUsdPerToken).toBeCloseTo(2);
+  expect(marked.positions[0]!.latestLiquidationValueUsd).toBeCloseTo(2);
   const sell=quote("mint","SELL","1000000",1.5);
   const closed=closePaperPosition(marked,{positionId:"p1",sellQuote:sell,exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
   expect(closed.position.status).toBe("CLOSED");
@@ -91,6 +92,32 @@ describe("paper portfolio accounting",()=>{
   const p=createPaperPortfolio();
   const buy=quote("mint","BUY");buy.tokenDecimals=19;
   expect(()=>openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:buy,sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)})).toThrow(/invalid amount or cost evidence/);
+ });
+
+ it("uses net liquidation value after sell fees for initial equity",()=>{
+  const opened=openPaperPosition(createPaperPortfolio(),{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
+  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(0.993);
+  expect(opened.state.bankroll.currentEquityUsd).toBeCloseTo(2.686);
+ });
+ it("requires one exact-size sell quote for every open position before marking equity",()=>{
+  let state=createPaperPortfolio();
+  state={...state,maxConcurrentPositions:2};
+  const first=openPaperPosition(state,{mint:"mint1",positionId:"p1",occurredAt:now,buyQuote:quote("mint1","BUY"),sellQuote:quote("mint1","SELL"),nowMs:Date.parse(now)});
+  const second=openPaperPosition(first.state,{mint:"mint2",positionId:"p2",occurredAt:now,buyQuote:quote("mint2","BUY"),sellQuote:quote("mint2","SELL"),nowMs:Date.parse(now)});
+  expect(()=>markPaperPosition(second.state,{sellQuotes:[quote("mint1","SELL")],markedAt:now,nowMs:Date.parse(now)})).toThrow(/every open position/);
+ });
+ it("values each concurrent position from its own sell quote rather than reusing one quote",()=>{
+  let state=createPaperPortfolio();
+  state={...state,maxConcurrentPositions:2};
+  const first=openPaperPosition(state,{mint:"mint1",positionId:"p1",occurredAt:now,buyQuote:quote("mint1","BUY"),sellQuote:quote("mint1","SELL"),nowMs:Date.parse(now)});
+  const second=openPaperPosition(first.state,{mint:"mint2",positionId:"p2",occurredAt:now,buyQuote:quote("mint2","BUY"),sellQuote:quote("mint2","SELL"),nowMs:Date.parse(now)});
+  const marked=markPaperPosition(second.state,{sellQuotes:[
+    quote("mint1","SELL","1000000",1.007),
+    quote("mint2","SELL","1000000",2.007)
+  ],markedAt:now,nowMs:Date.parse(now)});
+  expect(marked.positions.find(p=>p.mint==="mint1")!.latestLiquidationValueUsd).toBeCloseTo(1);
+  expect(marked.positions.find(p=>p.mint==="mint2")!.latestLiquidationValueUsd).toBeCloseTo(2);
+  expect(marked.bankroll.currentEquityUsd).toBeCloseTo(3.686);
  });
 
 });
