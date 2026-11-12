@@ -6,7 +6,9 @@ import {
   closePaperPosition, createPaperPortfolio, markPaperPosition, openPaperPosition,
   type ExecutablePaperQuote, type PaperPortfolioState
 } from "../../../../src/paper/portfolio.js";
-import { commitPaperPortfolioTransition } from "../../../../src/paper/portfolio-session.js";
+import {
+  commitPaperPortfolioTransition, type PaperTransitionEvent
+} from "../../../../src/paper/portfolio-session.js";
 
 type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "SESSION_HEARTBEAT" | "WORKER_RESTARTED" | "DISCOVERY" |
   "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "CANDIDATE_EXPIRED" | "OBSERVATION" |
@@ -456,8 +458,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       sessionId, idempotencyKey, occurredAt, mint: input.mint,
       apply: portfolio => {
         const opened = openPaperPosition(portfolio, { ...input, occurredAt, nowMs: Date.parse(occurredAt) });
-        const events = [{
-          kind: "PAPER_ENTRY" as const,
+        const events: PaperTransitionEvent[] = [{
+          kind: "PAPER_ENTRY",
           data: { position: opened.position, buyQuoteId: input.buyQuote.quoteId,
             initialSellQuoteId: input.sellQuote.quoteId }
         }];
@@ -485,8 +487,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       sessionId, idempotencyKey, occurredAt,
       apply: portfolio => {
         const closed = closePaperPosition(portfolio, { ...input, closedAt: occurredAt, nowMs: Date.parse(occurredAt) });
-        const events = [{
-          kind: "PAPER_EXIT" as const,
+        const events: PaperTransitionEvent[] = [{
+          kind: "PAPER_EXIT",
           mint: closed.position.mint,
           data: { position: closed.position, sellQuoteId: input.sellQuote.quoteId,
             exitReason: input.exitReason }
@@ -522,8 +524,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const openPositions = marked.positions.filter(position => position.status !== "CLOSED");
         const liquidationValueUsd = openPositions.reduce((sum, position) =>
           sum + position.latestLiquidationValueUsd, 0);
-        const events = [{
-          kind: "POSITION_MARK" as const,
+        const events: PaperTransitionEvent[] = [{
+          kind: "POSITION_MARK",
           data: { markedAt, quoteIds, liquidationValueUsd,
             equityUsd: marked.availableCashUsd + liquidationValueUsd }
         }];
