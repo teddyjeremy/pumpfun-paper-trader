@@ -1,5 +1,15 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+  buildCandidateLogsSubscribe, buildHeliusWebSocketUrl, fetchAndVerifyPumpTransaction,
+  parseHeliusLogsNotification, type VerifiedPumpTransaction
+} from "../../../../src/ingestion/helius.js";
+import {
+  emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
+  reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork,
+  type HeliusMonitorState
+} from "../../../../src/ingestion/helius-monitor.js";
+import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
+import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
   pruneExpiredCandidates,
@@ -14,6 +24,7 @@ import {
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
   CONTROL_TOKEN: string;
+  HELIUS_API_KEY: string;
 }
 
 interface CoordinatorStatus {
@@ -39,6 +50,12 @@ interface CoordinatorStatus {
   nextReconnectAt: string | null;
   lastPersistedAt: string | null;
   lastError: string | null;
+  heliusConnected: boolean;
+  monitoredCandidates: number;
+  queuedHeliusSignatures: number;
+  verifiedTransactions: number;
+  incompleteHeliusTransactions: number;
+  failedHeliusTransactions: number;
 }
 
 const INITIAL_STATUS: CoordinatorStatus = {
@@ -63,7 +80,13 @@ const INITIAL_STATUS: CoordinatorStatus = {
   reconnectAttempts: 0,
   nextReconnectAt: null,
   lastPersistedAt: null,
-  lastError: null
+  lastError: null,
+  heliusConnected: false,
+  monitoredCandidates: 0,
+  queuedHeliusSignatures: 0,
+  verifiedTransactions: 0,
+  incompleteHeliusTransactions: 0,
+  failedHeliusTransactions: 0
 };
 
 const MAX_CANDIDATES = 100;
@@ -71,26 +94,41 @@ const PERSIST_EVERY_EVENTS = 25;
 
 export class PumpFunCoordinator extends DurableObject<Env> {
   private socket: WebSocket | null = null;
+  private heliusSocket: WebSocket | null = null;
+  private heliusState: HeliusMonitorState = emptyHeliusMonitorState();
+  private heliusBucket = new TokenBucket(2, 2);
+  private drainingHelius = false;
+  private verifiedTransactions: VerifiedPumpTransaction[] = [];
   private status: CoordinatorStatus = { ...INITIAL_STATUS };
   private discovery: DiscoveryStoreState = emptyDiscoveryStore();
   private hydrated = false;
   private pendingWrites = 0;
   private persistChain: Promise<void> = Promise.resolve();
   private connectingSinceMs = 0;
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.env = env;
+  }
+  private readonly env: Env;
 
   private async hydrate(): Promise<void> {
     if (this.hydrated) return;
     const [savedStatus, savedDiscovery, enabled] = await Promise.all([
       this.ctx.storage.get<CoordinatorStatus>("status"),
       this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
-      this.ctx.storage.get<boolean>("enabled")
+      this.ctx.storage.get<boolean>("enabled"),
+      this.ctx.storage.get<HeliusMonitorState>("helius_monitor_state"),
+      this.ctx.storage.get<VerifiedPumpTransaction[]>("verified_transactions")
     ]);
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
+    this.heliusState = normalizeHeliusMonitorState(await this.ctx.storage.get<HeliusMonitorState>("helius_monitor_state"));
+    this.verifiedTransactions = (await this.ctx.storage.get<VerifiedPumpTransaction[]>("verified_transactions")) ?? [];
     if (savedDiscovery) this.discovery = { ...emptyDiscoveryStore(), ...savedDiscovery, expired: savedDiscovery.expired ?? 0 };
     this.status.enabled = enabled === true;
     // Outbound sockets cannot survive a Durable Object restart.
     this.status.connected = false;
     this.status.subscriptionsSent = false;
+    this.status.heliusConnected = false;
     this.syncCounts();
     this.hydrated = true;
   }
@@ -102,6 +140,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.status.nextReconnectAt = null;
     this.status.reconnectAttempts = 0;
     this.connect();
+    this.connectHelius();
     await this.persist();
     return this.getStatus();
   }
@@ -117,6 +156,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     this.status.connected = false;
     this.status.subscriptionsSent = false;
+    if (this.heliusSocket) {
+      const helius = this.heliusSocket;
+      this.heliusSocket = null;
+      helius.close(1000, "Paper monitoring stopped");
+    }
+    this.status.heliusConnected = false;
     this.status.nextReconnectAt = null;
     await this.persist();
     return this.getStatus();
@@ -132,6 +177,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       }
       this.status.connected = false;
       this.status.subscriptionsSent = false;
+      if (this.heliusSocket) {
+        const helius = this.heliusSocket;
+        this.heliusSocket = null;
+        helius.close(1000, "Coordinator disabled");
+      }
+      this.status.heliusConnected = false;
       await this.persist();
       return this.getStatus();
     }
@@ -142,6 +193,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (this.discovery.candidates.length !== beforeExpiry) this.pendingWrites += 1;
     await this.persist();
 
+    if (!this.heliusSocket && this.status.enabled) this.connectHelius();
     if (this.socket?.readyState === WebSocket.OPEN) {
       const connectedAtMs = this.status.connectedAt ? Date.parse(this.status.connectedAt) : 0;
       if (connectedAtMs > 0 && Date.now() - connectedAtMs < 14 * 60 * 1000) {
@@ -176,6 +228,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   async getStatus(): Promise<CoordinatorStatus> {
     await this.hydrate();
     this.syncCounts();
+    this.status.monitoredCandidates = this.heliusState.subscriptions.length;
+    this.status.queuedHeliusSignatures = this.heliusState.queue.length;
     return { ...this.status };
   }
 
@@ -249,6 +303,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           receivedAt: parsed.event.receivedAt
         }, { cap: MAX_CANDIDATES, now: this.status.lastMessageAt });
         this.discovery = result.state;
+        this.reconcileHelius();
         this.pendingWrites += 1;
         this.syncCounts();
         if (this.pendingWrites >= PERSIST_EVERY_EVENTS) void this.persist().catch(() => undefined);
@@ -280,6 +335,138 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
+  private reconcileHelius(): void {
+    this.heliusState = reconcileHeliusSubscriptions(this.heliusState, this.discovery.candidates);
+    if (this.heliusSocket?.readyState === WebSocket.OPEN) this.sendHeliusSubscriptions();
+  }
+
+  private connectHelius(): void {
+    if (this.heliusSocket || !this.status.enabled) return;
+    try {
+      const socket = new WebSocket(buildHeliusWebSocketUrl(this.env.HELIUS_API_KEY));
+      this.heliusSocket = socket;
+      socket.addEventListener("open", () => {
+        if (this.heliusSocket !== socket || !this.status.enabled) {
+          socket.close(1000, "Coordinator disabled before Helius connection opened");
+          return;
+        }
+        this.status.heliusConnected = true;
+        this.sendHeliusSubscriptions();
+        void this.persist().catch(() => undefined);
+      });
+      socket.addEventListener("message", (message: MessageEvent) => {
+        if (this.heliusSocket !== socket || !this.status.enabled || typeof message.data !== "string") return;
+        let payload: unknown;
+        try { payload = JSON.parse(message.data); } catch { this.markHeliusIncomplete(); return; }
+        if (!payload || typeof payload !== "object") return;
+        const record = payload as Record<string, unknown>;
+        if (Number.isSafeInteger(record.id) && Number.isSafeInteger(record.result)) {
+          this.heliusState = confirmHeliusSubscription(this.heliusState, record.id as number, record.result as number);
+          void this.persist().catch(() => undefined);
+          return;
+        }
+        const notification = parseHeliusLogsNotification(payload);
+        if (!notification) return;
+        const params = record.params as Record<string, unknown> | undefined;
+        const subscriptionId = params?.subscription;
+        if (!Number.isSafeInteger(subscriptionId)) { this.markHeliusIncomplete(); return; }
+        const result = enqueueHeliusNotification(this.heliusState, {
+          subscriptionId: subscriptionId as number,
+          signature: notification.signature,
+          slot: notification.slot,
+          err: notification.err
+        });
+        this.heliusState = result.state;
+        if (result.outcome === "OVERFLOW" || result.outcome === "INVALID") this.status.incompleteHeliusTransactions += 1;
+        if (result.outcome === "FAILED") this.status.failedHeliusTransactions += 1;
+        void this.persist().then(() => this.drainHeliusQueue()).catch(() => this.markHeliusIncomplete());
+      });
+      socket.addEventListener("close", () => {
+        if (this.heliusSocket !== socket) return;
+        this.heliusSocket = null;
+        this.status.heliusConnected = false;
+        void this.persist().catch(() => undefined);
+      });
+      socket.addEventListener("error", () => {
+        if (this.heliusSocket !== socket) return;
+        this.status.lastError = "Helius WebSocket transport error.";
+        void this.persist().catch(() => undefined);
+      });
+    } catch {
+      this.heliusSocket = null;
+      this.status.heliusConnected = false;
+      this.status.lastError = "Unable to create the Helius WebSocket connection.";
+    }
+  }
+
+  private sendHeliusSubscriptions(): void {
+    const socket = this.heliusSocket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    this.heliusState = reconcileHeliusSubscriptions(this.heliusState, this.discovery.candidates);
+    try {
+      for (const subscription of this.heliusState.subscriptions) {
+        if (subscription.subscriptionId !== null) continue;
+        socket.send(JSON.stringify(buildCandidateLogsSubscribe(subscription.bondingCurve, subscription.requestId, "confirmed")));
+      }
+      void this.persist().catch(() => undefined);
+    } catch {
+      this.status.lastError = "Helius candidate subscription send failed.";
+      socket.close(1011, "Helius subscription send failed");
+    }
+  }
+
+  private async drainHeliusQueue(): Promise<void> {
+    if (this.drainingHelius || !this.status.enabled) return;
+    this.drainingHelius = true;
+    try {
+      while (this.status.enabled && this.heliusState.queue.length > 0) {
+        if (!this.heliusBucket.tryTake()) {
+          await new Promise(resolve => setTimeout(resolve, this.heliusBucket.retryAfterMs));
+          continue;
+        }
+        const work = this.heliusState.queue[0];
+        if (!work) break;
+        const result = await fetchAndVerifyPumpTransaction(work.signature, work.mint, {
+          apiKey: this.env.HELIUS_API_KEY,
+          commitment: "confirmed"
+        });
+        if (result.status === "VERIFIED") {
+          this.verifiedTransactions = [...this.verifiedTransactions, result.transaction].slice(-2_000);
+          this.status.verifiedTransactions += 1;
+        } else if (result.status === "FAILED_TRANSACTION") {
+          this.status.failedHeliusTransactions += 1;
+        } else if (result.status === "DATA_INCOMPLETE") {
+          this.status.incompleteHeliusTransactions += 1;
+          this.heliusState = {
+            ...this.heliusState,
+            incompleteMints: [...new Set([...this.heliusState.incompleteMints, work.mint])].slice(-10)
+          };
+        }
+        this.heliusState = takeHeliusWork(this.heliusState).state;
+        await this.ctx.storage.put({
+          helius_monitor_state: this.heliusState,
+          verified_transactions: this.verifiedTransactions,
+          status: this.status
+        });
+      }
+    } catch {
+      this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
+      this.markHeliusIncomplete();
+    } finally {
+      this.drainingHelius = false;
+    }
+  }
+
+  private markHeliusIncomplete(): void {
+    const mint = this.heliusState.queue[0]?.mint;
+    if (mint) this.heliusState = {
+      ...this.heliusState,
+      incompleteMints: [...new Set([...this.heliusState.incompleteMints, mint])].slice(-10)
+    };
+    this.status.incompleteHeliusTransactions += 1;
+    void this.persist().catch(() => undefined);
+  }
+
   private scheduleReconnect(): void {
     this.status.reconnectAttempts += 1;
     const delayMs = Math.min(60_000, 1_000 * (2 ** Math.min(this.status.reconnectAttempts - 1, 6)));
@@ -295,6 +482,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.status.incompleteEvents = this.discovery.incomplete;
     this.status.expiredCandidates = this.discovery.expired ?? 0;
     this.status.lastPersistedAt = this.discovery.lastPersistedAt;
+    this.status.monitoredCandidates = this.heliusState.subscriptions.length;
+    this.status.queuedHeliusSignatures = this.heliusState.queue.length;
   }
 
   private async persist(): Promise<void> {
@@ -307,7 +496,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const statusSnapshot = { ...this.status };
     const write = this.persistChain.then(() => this.ctx.storage.put({
       status: statusSnapshot,
-      discovery_state: snapshot
+      discovery_state: snapshot,
+      helius_monitor_state: this.heliusState,
+      verified_transactions: this.verifiedTransactions
     }));
     this.persistChain = write.catch(() => undefined);
     try {
