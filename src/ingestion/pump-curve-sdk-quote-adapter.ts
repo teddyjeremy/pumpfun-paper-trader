@@ -5,7 +5,7 @@ import {
   getTransferFeeConfig, getTransferHook, unpackMint, type RawMint
 } from "@solana/spl-token";
 import {
-  PUMP_SDK, PUMP_GLOBAL_PDA, PUMP_FEE_CONFIG_PDA,
+  PUMP_SDK, PUMP_FEE_CONFIG_PDA,
   computeFeesBps, getBuyTokenAmountFromSolAmount,
   getBuySolAmountFromTokenAmount, getSellSolAmountFromTokenAmount
 } from "@pump-fun/pump-sdk";
@@ -22,6 +22,9 @@ import {
 import type { HeliusAccountReadConfig } from "./helius-accounts.js";
 
 const PUMP_FEE_PROGRAM_ID = "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ";
+const PUMP_GLOBAL_PDA = PublicKey.findProgramAddressSync(
+  [Buffer.from("global")], new PublicKey(PUMP_PROGRAM_ID)
+)[0];
 const MAX_U64 = 18_446_744_073_709_551_615n;
 const BPS = new BN(10_000);
 
@@ -126,7 +129,8 @@ export function quotePumpCurveBuyFromSdkState(
   const budget = new BN(quoteBudgetBaseUnits);
   const tokensOut = getBuyTokenAmountFromSolAmount({
     global: state.global, feeConfig: state.feeConfig,
-    mintSupply: curve.tokenTotalSupply, bondingCurve: curve, amount: budget
+    mintSupply: curve.tokenTotalSupply, bondingCurve: curve, amount: budget,
+    quoteMint: PublicKey.default
   });
   if (tokensOut.isZero() || tokensOut.gte(curve.virtualTokenReserves)) {
     throw new Error("SDK bonding-curve buy output is zero or outside virtual reserves.");
@@ -141,7 +145,8 @@ export function quotePumpCurveBuyFromSdkState(
   const totalCost = netCurveInput.add(protocolFee).add(creatorFee);
   const sdkExactCost = getBuySolAmountFromTokenAmount({
     global: state.global, feeConfig: state.feeConfig,
-    mintSupply: curve.tokenTotalSupply, bondingCurve: curve, amount: tokensOut
+    mintSupply: curve.tokenTotalSupply, bondingCurve: curve, amount: tokensOut,
+    quoteMint: PublicKey.default
   });
   if (!totalCost.eq(sdkExactCost) || totalCost.gt(budget)) {
     throw new Error("Pump SDK buy quote and independently reconciled fee amounts disagree.");
