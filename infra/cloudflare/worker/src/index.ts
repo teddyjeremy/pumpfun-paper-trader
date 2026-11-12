@@ -304,6 +304,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.walletHoldingsByMint[mint] = result.snapshot.accounts.map(account => ({
         mint, wallet: account.owner, amount: account.amount
       }));
+      this.reconcileHelius();
       await this.persist();
     }
     return result;
@@ -326,6 +327,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       fetcher: this.rateLimitedHeliusFetcher()
     });
     this.walletLinkSnapshots[mint] = result;
+    this.reconcileHelius();
     await this.persist();
     const risk = evaluateWalletClusterRisk(this.verifiedTransactions, {
       mint,
@@ -576,11 +578,21 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       incompleteMints: this.heliusState.incompleteMints,
       coverageStartByMint
     });
+    const launchByMint = new Map(this.verifiedTransactions.flatMap(tx => tx.createEvents)
+      .map(event => [event.mint, event] as const));
     const flowByMint = new Map(flows.map(item => [item.mint, item]));
     const creatorByMint = new Map(creatorRisk.map(item => [item.mint, item]));
     return Object.fromEntries(candidateMints.map(mint => {
       const flow = flowByMint.get(mint);
       const creator = creatorByMint.get(mint);
+      const launch = launchByMint.get(mint);
+      const clusterRisk = evaluateWalletClusterRisk(this.verifiedTransactions, {
+        mint,
+        creator: launch?.creator ?? null,
+        totalSupply: launch?.tokenTotalSupply.toString() ?? null,
+        links: this.walletLinkSnapshots[mint]?.links ?? [],
+        holdings: this.walletHoldingsByMint[mint] ?? []
+      });
       const dataComplete = Boolean(flow?.dataComplete);
       const flowConfirmed = Boolean(flow?.flowConfirmationPass);
       const creatorClearanceComplete = creator?.status === "PASS_COMPLETE";
@@ -593,7 +605,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         Math.floor((flow?.largestBuyerShareAcrossLatestThreeBps ?? 10_000) / 100);
       return [mint, {
         score,
-        hardRejected: creator?.status === "REJECT_OBSERVED",
+        hardRejected: creator?.status === "REJECT_OBSERVED" || clusterRisk.status === "REJECT_OBSERVED",
         creatorClearanceComplete,
         flowConfirmed,
         dataComplete
