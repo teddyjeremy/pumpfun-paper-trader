@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ComputeBudgetProgram, Keypair, SystemProgram, TransactionMessage } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, Message, SystemProgram, TransactionMessage } from "@solana/web3.js";
 import { compileUnsignedFeeMessage, estimateSolanaTransactionFees } from "../src/ingestion/solana-fee-estimator.js";
 
 const account = "11111111111111111111111111111111";
