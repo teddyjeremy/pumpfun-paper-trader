@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "../../../../src/paper/session-ledger.js";
 import { updateCandidatePriceTracker, type CandidatePriceTracker } from "../../../../src/paper/candidate-price-ledger.js";
+import { evaluateStrictStrategyAudit } from "../../../../src/paper/strategy-audit.js";
 
 type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "SESSION_HEARTBEAT" | "WORKER_RESTARTED" | "DISCOVERY" |
   "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "CANDIDATE_EXPIRED" | "OBSERVATION" |
@@ -455,6 +456,61 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const ids = await this.ctx.storage.get<string[]>("audit_session_ids") ?? [];
     const sessions = await Promise.all(ids.map(id => this.ctx.storage.get<AuditSessionMeta>(`audit_session:${id}`)));
     return sessions.filter((item): item is AuditSessionMeta => item !== undefined);
+  }
+
+  private async recordStrategyAudit(triggerSignature: string): Promise<void> {
+    const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
+    if (monitoredMints.length === 0) return;
+    const report = await this.listTradeFlows() as {
+      flows: Array<{ mint: string; dataComplete: boolean; windows: Array<{buySellRatio:number|null;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
+      priceVolumeProfiles: Array<{ mint:string; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
+      creatorSellRisk: Array<{mint:string;status:string}>;
+      walletClusterRisk: Array<{mint:string;status:string}>;
+    };
+    for (const mint of monitoredMints) {
+      const candidate = await this.ctx.storage.get<Record<string, unknown>>(
+        `candidate_seen:${this.activeSessionId}:${mint}`
+      );
+      const firstSeenAt = typeof candidate?.firstSeenAt === "string" ? Date.parse(candidate.firstSeenAt) : Number.NaN;
+      const ageSeconds = Number.isFinite(firstSeenAt) ? Math.max(0, (Date.now() - firstSeenAt) / 1000) : null;
+      const profile = report.priceVolumeProfiles.find(item => item.mint === mint) ?? null;
+      const flow = report.flows.find(item => item.mint === mint) ?? null;
+      const creatorRisk = report.creatorSellRisk.find(item => item.mint === mint);
+      const walletRisk = report.walletClusterRisk.find(item => item.mint === mint);
+      const links = this.walletLinkSnapshots[mint]?.links ?? [];
+      const confidence = links.reduce((max, link) => Math.max(max, link.confidenceBps), 0);
+      const evaluated = evaluateStrictStrategyAudit({
+        candidateAgeSeconds: ageSeconds,
+        profile: profile ? {
+          impulsePriceChangePct: profile.impulsePriceChangePct, pullbackPct: profile.pullbackPct,
+          reclaimDetected: profile.reclaimDetected,
+          reclaimAbovePreviousFiveSecondHighPct: profile.reclaimAbovePreviousFiveSecondHighPct,
+          pullbackVolumeVsImpulsePct: profile.pullbackVolumeVsImpulsePct,
+          reclaimVolumeVsPullbackPct: profile.reclaimVolumeVsPullbackPct, dataComplete: profile.dataComplete
+        } : null,
+        flow: flow ? {
+          dataComplete: flow.dataComplete, windows: flow.windows,
+          distinctBuyersAcrossLatestThree: flow.distinctBuyersAcrossLatestThree,
+          largestBuyerShareAcrossLatestThreeBps: flow.largestBuyerShareAcrossLatestThreeBps
+        } : null,
+        creatorRiskStatus: creatorRisk?.status ?? null,
+        walletClusterRiskStatus: walletRisk?.status ?? null,
+        attributionConfidenceBps: confidence > 0 ? confidence : null,
+        signalAgeSeconds: null, nextObservationConfirmed: null,
+        executableQuoteAvailable: false
+      });
+      await this.appendAudit("FEATURE_SNAPSHOT", mint, { triggerSignature, profile, flow },
+        `features:${triggerSignature}:${mint}`);
+      await this.appendAudit("STRATEGY_DECISION", mint, evaluated,
+        `decision:${triggerSignature}:${mint}`);
+      for (const reason of [...evaluated.rejectionReasons, ...evaluated.watchReasons, ...evaluated.blockingUnknownRules]) {
+        await this.appendAudit("REJECTION_REASON", mint, {
+          triggerSignature, reason,
+          classification: evaluated.rejectionReasons.includes(reason) ? "REJECT" :
+            evaluated.watchReasons.includes(reason) ? "WATCH" : "UNKNOWN"
+        }, `decision-reason:${triggerSignature}:${mint}:${reason}`);
+      }
+    }
   }
 
   private async recordCandidateTradePrice(
@@ -1062,6 +1118,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction),
             retentionPolicy: "LATEST_2000_TRANSACTION_SNAPSHOT_PLUS_APPEND_ONLY_AUDIT"
           }, `helius:${work.signature}`);
+          await this.recordStrategyAudit(work.signature);
           for (let tradeIndex = 0; tradeIndex < result.transaction.tradeEvents.length; tradeIndex += 1) {
             const trade = result.transaction.tradeEvents[tradeIndex]!;
             const quoteAmount = trade.quoteMint === SOL_QUOTE_MINT

@@ -34,3 +34,25 @@ describe("candidate price follow-up ledger", () => {
   expect(() => updateCandidatePriceTracker(first, {mint:"mint",quoteMint:"USDC",quoteAmount:"300",tokenAmount:"1000",timestamp:"2026-11-12T12:01:00Z",signature:"sig2",isBuy:false})).toThrow();
  });
 });
+
+import { evaluateStrictStrategyAudit } from "../src/paper/strategy-audit.js";
+describe("strict strategy audit", () => {
+ const base = {
+  candidateAgeSeconds: 25,
+  profile: {impulsePriceChangePct:25,pullbackPct:20,reclaimDetected:true,reclaimAbovePreviousFiveSecondHighPct:1.4,pullbackVolumeVsImpulsePct:35,reclaimVolumeVsPullbackPct:180,dataComplete:true},
+  flow: {dataComplete:true,windows:[1,2,3].map(()=>({buySellRatio:4,uniqueBuyers:4,uniqueSellers:1})),distinctBuyersAcrossLatestThree:7,largestBuyerShareAcrossLatestThreeBps:6500},
+  creatorRiskStatus:"PASS_COMPLETE",walletClusterRiskStatus:"WATCH",attributionConfidenceBps:7500,
+  signalAgeSeconds:1.5,nextObservationConfirmed:true,executableQuoteAvailable:false
+ };
+ it("records known passes but never permits a buy while quote and volume thresholds are unknown", () => {
+  const result=evaluateStrictStrategyAudit(base);
+  expect(result.decision).toBe("WATCH"); expect(result.buyAllowed).toBe(false);
+  expect(result.blockingUnknownRules).toContain("PULLBACK_VOLUME_CONTRACTION");
+  expect(result.blockingUnknownRules).toContain("EXECUTABLE_QUOTE");
+  expect(result.rules.find(rule=>rule.rule==="IMPULSE")?.status).toBe("PASS");
+ });
+ it("rejects a confirmed creator risk breach", () => {
+  const result=evaluateStrictStrategyAudit({...base,creatorRiskStatus:"REJECT_OBSERVED"});
+  expect(result.decision).toBe("REJECT"); expect(result.rejectionReasons).toContain("CREATOR_SELL_RISK");
+ });
+});
