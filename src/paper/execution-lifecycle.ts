@@ -1,19 +1,16 @@
 import type { PaperPortfolioState } from "./portfolio.js";
-import type { OfflinePumpQuote, SolUsdReference, PaperExecutionCostEstimate } from "../ingestion/executable-paper-quote.js";
+import type { OfflinePumpQuote, SolUsdReference, PaperExecutionCostEstimate, ExecutablePaperQuoteWithLatency } from "../ingestion/executable-paper-quote.js";
 import { buildExecutablePaperQuote } from "../ingestion/executable-paper-quote.js";
-import type { ExecutablePaperQuoteWithLatency } from "../ingestion/executable-paper-quote.js";
 
 export interface PaperEntryStrategyDecision {
   decision: "BUY" | "WATCH" | "REJECT";
   buyAllowed: boolean;
   rules: Array<{ rule: string; status: "PASS" | "FAIL" | "UNKNOWN" }>;
 }
-
 export interface PaperEntryQuoteContext {
   solUsd: SolUsdReference;
   costs: PaperExecutionCostEstimate;
 }
-
 export interface PaperEntryExecutionInput {
   mint: string;
   positionId: string;
@@ -21,12 +18,8 @@ export interface PaperEntryExecutionInput {
   nowMs?: number;
   strategy: PaperEntryStrategyDecision;
   portfolio: PaperPortfolioState;
-  quoteBuy: (input: { mint: string; stakeUsd: number }) => Promise<{
-    quote: OfflinePumpQuote; context: PaperEntryQuoteContext;
-  }>;
-  quoteSell: (input: { mint: string; tokenAmountBaseUnits: string }) => Promise<{
-    quote: OfflinePumpQuote; context: PaperEntryQuoteContext;
-  }>;
+  quoteBuy: (input: { mint: string; stakeUsd: number }) => Promise<{ quote: OfflinePumpQuote; context: PaperEntryQuoteContext }>;
+  quoteSell: (input: { mint: string; tokenAmountBaseUnits: string }) => Promise<{ quote: OfflinePumpQuote; context: PaperEntryQuoteContext }>;
   commitEntry: (input: {
     mint: string;
     positionId: string;
@@ -34,23 +27,20 @@ export interface PaperEntryExecutionInput {
     sellQuote: ExecutablePaperQuoteWithLatency;
   }) => Promise<unknown>;
 }
-
 export type PaperEntryExecutionResult =
   | { status: "BLOCKED"; reason: string }
+  | { status: "DUPLICATE"; buyQuoteId: string; sellQuoteId: string }
   | { status: "ENTERED"; buyQuoteId: string; sellQuoteId: string; commitResult: unknown };
 
 /**
  * Fail-closed bridge from a fully passing strategy signal to a durable paper
- * entry. The quote callbacks must return official-SDK offline exact-size
- * quotes from verified account snapshots. The commit callback is expected to
- * use the Durable Object's atomic/idempotent portfolio transition.
- *
- * WATCH/REJECT decisions, unknown rules, unavailable quotes and stale quotes
- * cannot create positions. This is deliberately dormant while the current
- * strategy evaluator keeps buyAllowed=false pending calibration.
+ * entry. Quote callbacks must return official-SDK offline quotes from verified
+ * account snapshots; commitEntry must use an atomic/idempotent Durable Object
+ * portfolio transition. The current strategy remains WATCH/REJECT until its
+ * volume thresholds and quote gate are calibrated.
  */
 export async function executePaperEntry(input: PaperEntryExecutionInput): Promise<PaperEntryExecutionResult> {
-  const now = input.nowMs ?? Date.now();
+  const executionNow = () => input.nowMs ?? Date.now();
   if (!input.mint.trim() || !input.positionId.trim() ||
       !Number.isFinite(Date.parse(input.occurredAt)) || !Number.isFinite(executionNow())) {
     return { status: "BLOCKED", reason: "Entry identity or execution clock is invalid." };
@@ -65,7 +55,10 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
   if (input.portfolio.enteredMints.includes(input.mint)) {
     return { status: "BLOCKED", reason: "This mint has already been entered in the paper session." };
   }
-  if (input.portfolio.positions.some(position => position.positionId === input.positionId)) {\n    return { status: "BLOCKED", reason: "Position ID already exists in the paper session." };\n  }\n  const openPositions = input.portfolio.positions.filter(position => position.status !== "CLOSED");
+  if (input.portfolio.positions.some(position => position.positionId === input.positionId)) {
+    return { status: "BLOCKED", reason: "Position ID already exists in the paper session." };
+  }
+  const openPositions = input.portfolio.positions.filter(position => position.status !== "CLOSED");
   if (openPositions.length >= input.portfolio.maxConcurrentPositions) {
     return { status: "BLOCKED", reason: "Maximum concurrent paper positions reached." };
   }
@@ -90,16 +83,26 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
       mint: input.mint, tokenAmountBaseUnits: buyQuote.outputAmountBaseUnits
     });
     if (sell.quote.side !== "SELL" || sell.quote.mint !== input.mint ||
-        sell.quote.inputAmountBaseUnits !== buyQuote.outputAmountBaseUnits) {
-      return { status: "BLOCKED", reason: "Initial sell quote is not exact-size for the complete purchased token balance." };
+        sell.quote.inputAmountBaseUnits !== buyQuote.outputAmountBaseUnits ||
+        sell.quote.venue !== buy.quote.venue || sell.quote.quoteMint !== buy.quote.quoteMint) {
+      return { status: "BLOCKED", reason: "Initial sell quote is not exact-size for the complete purchased token balance on the same venue and quote mint." };
     }
     const sellQuote = buildExecutablePaperQuote({
       quote: sell.quote, solUsd: sell.context.solUsd, costs: sell.context.costs, nowMs: executionNow()
     });
+    const buyObservedAt = Date.parse(buyQuote.observedAt);
+    const sellObservedAt = Date.parse(sellQuote.observedAt);
+    if (Math.abs(sellObservedAt - buyObservedAt) > 2_000) {
+      return { status: "BLOCKED", reason: "Buy and initial sell quotes are not from a coherent two-second market window." };
+    }
 
     const commitResult = await input.commitEntry({
       mint: input.mint, positionId: input.positionId, buyQuote, sellQuote
     });
+    if (commitResult && typeof commitResult === "object" &&
+        "status" in commitResult && commitResult.status === "DUPLICATE") {
+      return { status: "DUPLICATE", buyQuoteId: buyQuote.quoteId, sellQuoteId: sellQuote.quoteId };
+    }
     return {
       status: "ENTERED",
       buyQuoteId: buyQuote.quoteId,
