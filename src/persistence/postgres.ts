@@ -129,8 +129,8 @@ export async function getTradingDashboardSnapshot() {
 
   const persistence = await getPersistenceStatus();
   if (!persistence.connected) return unavailable("PostgreSQL is not connected");
-  if (persistence.migrationVersion !== "0002_migration_aware_dynamic_exits") {
-    return unavailable("Required ledger migrations 0001 and 0002 are not both applied");
+  if (persistence.migrationVersion !== "0003_dynamic_exit_observations") {
+    return unavailable("Required ledger migrations 0001, 0002 and 0003 are not all applied");
   }
 
   try {
@@ -141,7 +141,7 @@ export async function getTradingDashboardSnapshot() {
         (COALESCE(SUM(net_pnl_lamports) FILTER (WHERE status = 'closed'), 0) / 1000000000::numeric)::text AS realized_pnl_sol,
         CASE WHEN COUNT(*) FILTER (WHERE status = 'closed' AND net_pnl_usd IS NULL) = 0
           THEN SUM(net_pnl_usd) FILTER (WHERE status = 'closed')::text ELSE NULL END AS realized_pnl_usd,
-        COUNT(*) FILTER (WHERE status IN ('buy_pending','open','sell_pending','exit_unexecutable'))::int AS open_positions,
+        COUNT(*) FILTER (WHERE status IN ('buy_pending','open','sell_pending','exit_unexecutable','migration_pending','open_migrated','exit_blocked'))::int AS open_positions,
         COUNT(*) FILTER (WHERE status = 'closed')::int AS closed_positions,
         COUNT(*) FILTER (WHERE status = 'closed' AND zero_balance_confirmed)::int AS confirmed_closed_positions
       FROM positions
@@ -154,6 +154,7 @@ export async function getTradingDashboardSnapshot() {
         p.token_quantity_base_units::text AS token_quantity,
         p.exit_blocked_reason, p.active_stop_net_return_pct::text,
         q.quoted_at AS latest_sell_quote_at,
+        q.quote_status AS sell_quote_status,
         (q.id IS NOT NULL AND q.quote_status = 'success' AND q.quoted_at >= now() - interval '15 seconds') AS sell_quote_fresh,
         CASE WHEN q.id IS NOT NULL AND q.quote_status = 'success' AND q.quoted_at >= now() - interval '15 seconds' THEN
           ((q.output_amount_base_units - COALESCE(q.protocol_fee_lamports, 0) - COALESCE(q.creator_fee_lamports, 0)
@@ -171,15 +172,15 @@ export async function getTradingDashboardSnapshot() {
           creator_fee_lamports, network_fee_lamports, priority_fee_lamports
         FROM execution_quotes
         WHERE mint = p.mint AND side = 'sell'
-          AND input_amount_base_units >= p.token_quantity_base_units
-          AND (market_phase = p.market_phase OR p.market_phase = 'migration_pending')
+          AND input_amount_base_units = p.token_quantity_base_units
+          AND market_phase = p.market_phase
         ORDER BY quoted_at DESC LIMIT 1
       ) q ON true
       LEFT JOIN LATERAL (
         SELECT COALESCE(SUM(COALESCE(protocol_fee_lamports, 0) + COALESCE(creator_fee_lamports, 0) + COALESCE(network_fee_lamports, 0) + COALESCE(priority_fee_lamports, 0)), 0) AS fees
         FROM trades WHERE position_id = p.id AND side = 'buy'
       ) buy_fees ON true
-      WHERE p.status IN ('buy_pending','open','sell_pending','exit_unexecutable')
+      WHERE p.status IN ('buy_pending','open','sell_pending','exit_unexecutable','migration_pending','open_migrated','exit_blocked')
       ORDER BY p.created_at DESC
     `),
     pool.query(`
@@ -224,7 +225,7 @@ export async function getTradingDashboardSnapshot() {
     tokenQuantity: String(row.token_quantity ?? "0"),
     latestSellQuoteAt: row.latest_sell_quote_at == null ? null : new Date(String(row.latest_sell_quote_at)).toISOString(),
     sellQuoteFresh: row.sell_quote_fresh === true,
-    sellQuoteStatus: row.quote_status == null ? null : String(row.quote_status),
+    sellQuoteStatus: row.sell_quote_status == null ? null : String(row.sell_quote_status),
     estimatedExitSol: row.estimated_exit_sol == null ? null : String(row.estimated_exit_sol),
     estimatedUnrealizedPnlSol: row.estimated_unrealized_pnl_sol == null ? null : String(row.estimated_unrealized_pnl_sol),
     unrealizedValuationStatus: row.sell_quote_fresh === true ? "fresh_executable_quote" : "quote_unavailable_or_stale",
