@@ -28,6 +28,7 @@ export interface CandidateTradeFlow {
   windowSeconds: number;
   horizonSeconds: number;
   windows: TradeFlowWindow[];
+  observedTradeEvents: number;
   latestThreeWindowFlowPass: boolean;
   distinctBuyersAcrossLatestThree: number;
   largestBuyerShareAcrossLatestThreeBps: number | null;
@@ -147,6 +148,7 @@ export function buildCandidateTradeFlows(
       windowSeconds: TRADE_FLOW_WINDOW_SECONDS,
       horizonSeconds,
       windows: windows.map(({ buyers: _buyers, buyerVolumes: _buyerVolumes, buyVolume: _buyVolume, sellVolume: _sellVolume, ...window }) => window),
+      observedTradeEvents: windows.reduce((sum, window) => sum + window.tradeCount, 0),
       latestThreeWindowFlowPass,
       distinctBuyersAcrossLatestThree: distinctBuyers,
       largestBuyerShareAcrossLatestThreeBps: largestBuyerShareBps,
