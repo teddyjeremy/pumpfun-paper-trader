@@ -42,33 +42,28 @@ function hasAnyMethod(objects: readonly unknown[], methods: readonly string[]): 
 }
 
 export interface PumpSdkInstructionCapabilities {
-  curveV3: { buy: boolean; sell: boolean };
-  curveV2: { buy: boolean; sell: boolean };
-  pumpSwapV2: { buy: boolean; sell: boolean };
+  curveV3: { buyExactTokens: boolean; buyExactQuoteIn: boolean; sellExactTokens: boolean };
+  curveV2: { buyExactTokens: boolean; buyExactQuoteIn: boolean; sellExactTokens: boolean };
+  pumpSwapV2: { buyExactTokens: boolean; buyExactQuoteIn: boolean; sellExactTokens: boolean };
 }
 
 /** Runtime surface inspection only; this never builds or submits a transaction. */
 export function officialPumpSdkInstructionCapabilities(): PumpSdkInstructionCapabilities {
   return {
     curveV3: {
-      buy: hasAnyMethod([PUMP_SDK, OnlinePumpSdk.prototype], [
-        "getBuyV3InstructionRaw", "getBuyExactQuoteInV3InstructionRaw"
-      ]),
-      sell: hasAnyMethod([PUMP_SDK, OnlinePumpSdk.prototype], ["getSellV3InstructionRaw"])
+      buyExactTokens: hasAnyMethod([PUMP_SDK, OnlinePumpSdk.prototype], ["getBuyV3InstructionRaw"]),
+      buyExactQuoteIn: hasAnyMethod([PUMP_SDK, OnlinePumpSdk.prototype], ["getBuyExactQuoteInV3InstructionRaw"]),
+      sellExactTokens: hasAnyMethod([PUMP_SDK, OnlinePumpSdk.prototype], ["getSellV3InstructionRaw"])
     },
     curveV2: {
-      buy: hasAnyMethod([PUMP_SDK, OnlinePumpSdk.prototype], [
-        "getBuyV2InstructionRaw", "getBuyExactQuoteInV2InstructionRaw"
-      ]),
-      sell: hasAnyMethod([PUMP_SDK, OnlinePumpSdk.prototype], ["getSellV2InstructionRaw"])
+      buyExactTokens: hasAnyMethod([PUMP_SDK, OnlinePumpSdk.prototype], ["getBuyV2InstructionRaw"]),
+      buyExactQuoteIn: hasAnyMethod([PUMP_SDK, OnlinePumpSdk.prototype], ["getBuyExactQuoteInV2InstructionRaw"]),
+      sellExactTokens: hasAnyMethod([PUMP_SDK, OnlinePumpSdk.prototype], ["getSellV2InstructionRaw"])
     },
     pumpSwapV2: {
-      buy: hasAnyMethod([PUMP_AMM_SDK, OnlinePumpAmmSdk.prototype], [
-        "buyV2Instructions", "buyExactQuoteInV2Instructions"
-      ]),
-      sell: hasAnyMethod([PUMP_AMM_SDK, OnlinePumpAmmSdk.prototype], [
-        "sellV2Instructions"
-      ])
+      buyExactTokens: hasAnyMethod([PUMP_AMM_SDK, OnlinePumpAmmSdk.prototype], ["buyV2Instructions"]),
+      buyExactQuoteIn: hasAnyMethod([PUMP_AMM_SDK, OnlinePumpAmmSdk.prototype], ["buyExactQuoteInV2Instructions"]),
+      sellExactTokens: hasAnyMethod([PUMP_AMM_SDK, OnlinePumpAmmSdk.prototype], ["sellV2Instructions"])
     }
   };
 }

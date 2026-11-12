@@ -24,9 +24,9 @@ describe("official Pump SDK runtime surface", () => {
   it("reports instruction-builder capabilities only when the pinned runtime exports them", () => {
     const capabilities = officialPumpSdkInstructionCapabilities();
     expect(capabilities).toEqual({
-      curveV3: { buy: true, sell: true },
-      curveV2: { buy: true, sell: true },
-      pumpSwapV2: { buy: true, sell: true }
+      curveV3: { buyExactTokens: true, buyExactQuoteIn: true, sellExactTokens: true },
+      curveV2: { buyExactTokens: true, buyExactQuoteIn: false, sellExactTokens: true },
+      pumpSwapV2: { buyExactTokens: true, buyExactQuoteIn: true, sellExactTokens: true }
     });
   });
 });
