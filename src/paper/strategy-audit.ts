@@ -102,9 +102,9 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
     : result("ATTRIBUTION_CONFIDENCE", "PASS", input.attributionConfidenceBps, ">= 7000 bps", "Attribution confidence meets the minimum threshold."));
   const thresholds = input.volumeThresholds ?? null;
   const validVolumeThresholds = thresholds !== null &&
-    Number.isFinite(thresholds.maxPullbackVolumeVsImpulsePct) &&
+    Number.isFinite(thresholds!.maxPullbackVolumeVsImpulsePct) &&
     thresholds.maxPullbackVolumeVsImpulsePct >= 0 &&
-    Number.isFinite(thresholds.minReclaimVolumeVsPullbackPct) &&
+    Number.isFinite(thresholds!.minReclaimVolumeVsPullbackPct) &&
     thresholds.minReclaimVolumeVsPullbackPct >= 0;
   rules.push(!profile || !profile.dataComplete || profile.pullbackVolumeVsImpulsePct === null || !validVolumeThresholds
     ? result("PULLBACK_VOLUME_CONTRACTION", "UNKNOWN", profile?.pullbackVolumeVsImpulsePct ?? null,
