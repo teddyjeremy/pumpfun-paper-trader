@@ -170,6 +170,60 @@ export async function estimateSolanaTransactionFees(
   };
 }
 
+/**
+ * Decode legacy and v0 compiled messages. The exact message must contain one
+ * explicit CU limit matching the fee calculation and no CU-price instruction.
+ * getFeeForMessage includes an embedded CU price, so accepting one would
+ * double-count priority fees when the sampled estimate is added.
+ */
+function messageHasSafeFeeInstructions(messageBase64: string, expectedLimit: number): boolean {
+  try {
+    const bytes = Buffer.from(messageBase64, "base64");
+    if (bytes.length === 0 || bytes.toString("base64") !== messageBase64) return false;
+    const versioned = (bytes[0]! & 0x80) !== 0;
+    const message = versioned ? VersionedMessage.deserialize(bytes) : Message.from(bytes);
+    const keys = versioned
+      ? (message as ReturnType<typeof VersionedMessage.deserialize>).staticAccountKeys
+      : (message as Message).accountKeys;
+    const instructions = versioned
+      ? (message as ReturnType<typeof VersionedMessage.deserialize>).compiledInstructions
+      : (message as Message).instructions;
+    let limitCount = 0;
+    for (const instruction of instructions) {
+      const programId = keys[instruction.programIdIndex];
+      if (!programId || programId.toBase58() !== COMPUTE_BUDGET_PROGRAM_ID) continue;
+      const data = decodeBase58(instruction.data);
+      if (data[0] === 3) return false;
+      if (data[0] === 2) {
+        if (data.length !== 5) return false;
+        limitCount += 1;
+        const limit = data[1]! + (data[2]! << 8) + (data[3]! << 16) + (data[4]! << 24);
+        if (limit !== expectedLimit) return false;
+      }
+    }
+    return limitCount === 1;
+  } catch {
+    return false;
+  }
+}
+
+function decodeBase58(value: string): Uint8Array {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let number = 0n;
+  for (const char of value) {
+    const digit = alphabet.indexOf(char);
+    if (digit < 0) throw new Error("Invalid base58 instruction data.");
+    number = number * 58n + BigInt(digit);
+  }
+  const bytes: number[] = [];
+  while (number > 0n) {
+    bytes.unshift(Number(number & 255n));
+    number >>= 8n;
+  }
+  for (let index = 0; index < value.length && value[index] === "1"; index += 1) bytes.unshift(0);
+  return Uint8Array.from(bytes);
+}
+
 async function rpc(
   fetcher: typeof fetch,
   url: string,
