@@ -44,6 +44,7 @@ import { fetchHolderConcentration } from "../../../../src/ingestion/holder-risk.
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
 import { officialPumpSdkModulesAvailable } from "../../../../src/ingestion/pump-sdk-runtime.js";
+import { fetchPumpSwapSdkQuote } from "../../../../src/ingestion/pump-sdk-quote-adapter.js";
 import {
   createHistoricalBackfillState, fetchHeliusAddressSignaturesPage,
   type HistoricalBackfillState
@@ -610,6 +611,39 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const sessionId = this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
     if (!sessionId) return null;
     return await this.ctx.storage.get<PaperPortfolioState>(`paper_portfolio:${sessionId}`) ?? null;
+  }
+
+
+  /** Read-only, audited SDK quote. It never opens, marks or closes a position. */
+  async requestPumpSwapQuote(input: {
+    mint: string; poolAddress: string; side: "BUY" | "SELL"; amountBaseUnits: string;
+  }): Promise<unknown> {
+    await this.hydrate();
+    if (!this.activeSessionId) throw new Error("No active paper session.");
+    const requestId = crypto.randomUUID();
+    await this.appendAudit("QUOTE_REQUESTED", input.mint, {
+      requestId, venue: "pumpswap", side: input.side,
+      amountBaseUnits: input.amountBaseUnits, poolAddress: input.poolAddress
+    }, `quote-request:${requestId}`);
+    try {
+      const quote = await fetchPumpSwapSdkQuote({
+        ...input,
+        config: { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" }
+      });
+      await this.appendAudit("QUOTE_RESULT", input.mint, {
+        requestId, status: "QUOTED", quote
+      }, `quote-result:${requestId}`);
+      return quote;
+    } catch (error) {
+      const rawReason = error instanceof Error ? error.message : "Quote request failed.";
+      const reason = this.env.HELIUS_API_KEY
+        ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
+        : rawReason;
+      await this.appendAudit("QUOTE_RESULT", input.mint, {
+        requestId, status: "BLOCKED", reason
+      }, `quote-result:${requestId}`);
+      throw error;
+    }
   }
 
   async getPaperBankroll(): Promise<unknown> {
@@ -1708,6 +1742,34 @@ export default {
     if (url.pathname === "/candidates" && request.method === "GET") {
       return Response.json(await coordinator.listCandidates());
     }
+
+    if (url.pathname === "/paper-quote" && request.method === "POST") {
+      let body: unknown;
+      try { body = await request.json(); } catch {
+        return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      const value = body && typeof body === "object" ? body as Record<string, unknown> : {};
+      const { mint, poolAddress, side, amountBaseUnits } = value;
+      if (typeof mint !== "string" || !mint.trim() ||
+          typeof poolAddress !== "string" || !poolAddress.trim() ||
+          (side !== "BUY" && side !== "SELL") ||
+          typeof amountBaseUnits !== "string" || !/^\\d+$/.test(amountBaseUnits) ||
+          BigInt(amountBaseUnits || "0") <= 0n) {
+        return Response.json({
+          error: "mint, poolAddress, side (BUY|SELL), and positive integer amountBaseUnits are required"
+        }, { status: 400 });
+      }
+      try {
+        return Response.json(await coordinator.requestPumpSwapQuote({
+          mint, poolAddress, side, amountBaseUnits
+        }));
+      } catch (error) {
+        return Response.json({
+          error: error instanceof Error ? error.message : "Unable to create PumpSwap quote"
+        }, { status: 409 });
+      }
+    }
+
     if (url.pathname === "/paper-bankroll" && request.method === "GET") {
       return Response.json(await coordinator.getPaperBankroll());
     }
