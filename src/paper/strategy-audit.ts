@@ -103,22 +103,22 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
   const thresholds = input.volumeThresholds ?? null;
   const validVolumeThresholds = thresholds !== null &&
     Number.isFinite(thresholds!.maxPullbackVolumeVsImpulsePct) &&
-    thresholds.maxPullbackVolumeVsImpulsePct >= 0 &&
+    thresholds!.maxPullbackVolumeVsImpulsePct >= 0 &&
     Number.isFinite(thresholds!.minReclaimVolumeVsPullbackPct) &&
-    thresholds.minReclaimVolumeVsPullbackPct >= 0;
+    thresholds!.minReclaimVolumeVsPullbackPct >= 0;
   rules.push(!profile || !profile.dataComplete || profile.pullbackVolumeVsImpulsePct === null || !validVolumeThresholds
     ? result("PULLBACK_VOLUME_CONTRACTION", "UNKNOWN", profile?.pullbackVolumeVsImpulsePct ?? null,
       "Reviewed max pullback/impulse volume ratio required", "Volume contraction is recorded but cannot be scored without complete data and an explicitly reviewed calibration.")
     : result("PULLBACK_VOLUME_CONTRACTION",
-      profile.pullbackVolumeVsImpulsePct <= thresholds.maxPullbackVolumeVsImpulsePct ? "PASS" : "FAIL",
-      profile.pullbackVolumeVsImpulsePct, `<= ${thresholds.maxPullbackVolumeVsImpulsePct}%`,
+      profile.pullbackVolumeVsImpulsePct <= thresholds!.maxPullbackVolumeVsImpulsePct ? "PASS" : "FAIL",
+      profile.pullbackVolumeVsImpulsePct, `<= ${thresholds!.maxPullbackVolumeVsImpulsePct}%`,
       "Pullback volume is compared with the reviewed training-set threshold."));
   rules.push(!profile || !profile.dataComplete || profile.reclaimVolumeVsPullbackPct === null || !validVolumeThresholds
     ? result("RECLAIM_VOLUME_EXPANSION", "UNKNOWN", profile?.reclaimVolumeVsPullbackPct ?? null,
       "Reviewed min reclaim/pullback volume ratio required", "Volume expansion is recorded but cannot be scored without complete data and an explicitly reviewed calibration.")
     : result("RECLAIM_VOLUME_EXPANSION",
-      profile.reclaimVolumeVsPullbackPct >= thresholds.minReclaimVolumeVsPullbackPct ? "PASS" : "FAIL",
-      profile.reclaimVolumeVsPullbackPct, `>= ${thresholds.minReclaimVolumeVsPullbackPct}%`,
+      profile.reclaimVolumeVsPullbackPct >= thresholds!.minReclaimVolumeVsPullbackPct ? "PASS" : "FAIL",
+      profile.reclaimVolumeVsPullbackPct, `>= ${thresholds!.minReclaimVolumeVsPullbackPct}%`,
       "Reclaim volume is compared with the reviewed training-set threshold."));
   rules.push(input.signalAgeSeconds === null || input.nextObservationConfirmed === null
     ? result("SIGNAL_FRESHNESS", "UNKNOWN", { ageSeconds: input.signalAgeSeconds, nextObservationConfirmed: input.nextObservationConfirmed },
