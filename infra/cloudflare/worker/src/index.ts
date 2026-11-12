@@ -366,6 +366,46 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     });
   }
 
+  private async archiveVerifiedHistoricalTransaction(transaction: VerifiedPumpTransaction): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!this.postgresIngestConfigured || !sessionId) return;
+    const state = await this.ctx.storage.get<HistoricalBackfillState>(
+      `helius_backfill:${sessionId}:${transaction.mint}`
+    );
+    const historicalSignature = state?.signatures.find(item => item.signature === transaction.signature);
+    if (!state || !historicalSignature) return;
+    if (historicalSignature.slot !== transaction.slot) {
+      await this.markHistoricalDecodeIncomplete({
+        signature: transaction.signature, mint: transaction.mint, slot: transaction.slot
+      } as HeliusSignatureWork, "Verified transaction slot conflicts with historical signature evidence.");
+      return;
+    }
+    try {
+      const decodeCoverage = await this.getHistoricalDecodeCoverage(sessionId, transaction.mint, state);
+      const response = await this.postPostgresIngest("/internal/helius-backfill", {
+        sessionId, mint: transaction.mint, state, decodeCoverage,
+        transaction: {
+          ...jsonSafe(transaction) as Record<string, unknown>,
+          provider: "helius", commitment: "confirmed",
+          receivedAt: transaction.receivedAt ?? new Date().toISOString(),
+          source: "HISTORICAL_BACKFILL"
+        }
+      });
+      if (!response.ok) throw new Error("Historical transaction archive was not acknowledged.");
+      const globalKey = `helius_archived_transaction_signatures:${sessionId}`;
+      const global = new Set(await this.ctx.storage.get<string[]>(globalKey) ?? []);
+      global.add(transaction.signature);
+      await this.ctx.storage.put(globalKey, [...global].slice(-5_000));
+      const mintKey = `helius_archived_transaction_signatures:${sessionId}:${transaction.mint}`;
+      const mintArchived = new Set(await this.ctx.storage.get<string[]>(mintKey) ?? []);
+      mintArchived.add(transaction.signature);
+      await this.ctx.storage.put(mintKey, [...mintArchived].slice(-500));
+    } catch {
+      this.status.lastError = "Verified historical transaction is waiting for PostgreSQL persistence.";
+      await this.ctx.storage.setAlarm(Date.now() + 30_000);
+    }
+  }
+
   private async flushHeliusBackfillArchivesToPostgres(sessionId: string | null = this.activeSessionId): Promise<void> {
     if (!this.postgresIngestConfigured || !sessionId) return;
     const listKey = `helius_backfill_mints:${sessionId}`;
@@ -2105,6 +2145,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           this.verifiedTransactions = [...this.verifiedTransactions, { ...result.transaction, receivedAt: new Date().toISOString() }].slice(-2_000);
           await this.beginHistoricalBackfill(result.transaction);
           await this.recordVerifiedHistoricalSignature(result.transaction);
+          await this.archiveVerifiedHistoricalTransaction(result.transaction);
           await this.appendAudit("OBSERVATION", work.mint, {
             signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction),
             retentionPolicy: "LATEST_2000_TRANSACTION_SNAPSHOT_PLUS_APPEND_ONLY_AUDIT"
