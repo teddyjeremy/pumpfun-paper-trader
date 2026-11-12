@@ -1,5 +1,5 @@
 import { buildHeliusRpcUrl, type HeliusRpcConfig } from "./helius.js";
-import type { RawProgramAccount } from "./pump-account-decoder.js";
+import { decodePumpSwapPoolAccount, PUMP_AMM_PROGRAM_ID, type DecodedPumpSwapPoolAccount, type RawProgramAccount } from "./pump-account-decoder.js";
 
 export interface HeliusAccountReadConfig extends HeliusRpcConfig {
   now?: () => number;
@@ -104,4 +104,77 @@ export async function fetchHeliusMultipleAccounts(
     parseAccount(addresses[index]!, value, slot, observedAt, maxAccountBytes)
   );
   return { slot, commitment, observedAt, accounts };
+}
+
+export interface PumpSwapPoolDiscoveryResult {
+  contextSlot: number;
+  observedAt: string;
+  pools: DecodedPumpSwapPoolAccount[];
+}
+
+/**
+ * Finds pool accounts whose base_mint matches a candidate mint. This is only
+ * discovery: a returned pool is not trusted until its canonical PDA/authority
+ * and its vault accounts are re-fetched and verified in one getMultipleAccounts
+ * context slot.
+ */
+export async function discoverPumpSwapPoolsForMint(
+  mint: string,
+  config: HeliusAccountReadConfig
+): Promise<PumpSwapPoolDiscoveryResult> {
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
+    throw new Error("Invalid PumpSwap base mint.");
+  }
+  const commitment = config.commitment ?? "confirmed";
+  const fetcher = config.fetcher ?? fetch;
+  const response = await fetcher(buildHeliusRpcUrl(config.apiKey), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: "pump-pool-discovery", method: "getProgramAccounts",
+      params: [PUMP_AMM_PROGRAM_ID, {
+        encoding: "base64", commitment, withContext: true,
+        filters: [{ memcmp: { offset: 43, bytes: mint } }]
+      }]
+    })
+  });
+  if (!response.ok) throw new Error(`Helius pool discovery returned HTTP ${response.status}.`);
+  const envelope = asRecord(await response.json());
+  if (envelope.error) throw new Error("Helius pool discovery returned a JSON-RPC error.");
+  const result = asRecord(envelope.result);
+  const slot = parseContextSlot(result.context);
+  if (!Array.isArray(result.value)) throw new Error("Helius pool discovery omitted account results.");
+  const maximumResults = config.maxAccountBytes === 0 ? 0 : 50;
+  if (result.value.length > maximumResults) {
+    throw new Error("PumpSwap pool discovery exceeded the bounded candidate result limit.");
+  }
+  const observedAt = new Date((config.now ?? Date.now)()).toISOString();
+  const candidates: DecodedPumpSwapPoolAccount[] = [];
+  for (const item of result.value) {
+    const record = asRecord(item);
+    if (typeof record.pubkey !== "string") throw new Error("Helius pool discovery returned an invalid account address.");
+    const raw = parseAccount(record.pubkey, record.account, slot, observedAt, config.maxAccountBytes ?? 64 * 1024);
+    if (!raw) continue;
+    const decoded = decodePumpSwapPoolAccount(raw);
+    if (decoded.baseMint !== mint) throw new Error("Helius memcmp pool result did not match the requested base mint.");
+    candidates.push(decoded);
+  }
+  return { contextSlot: slot, observedAt, pools: candidates };
+}
+
+/** Selects a single index-0 pool only when SDK-derived canonical addresses match. */
+export async function discoverCanonicalPumpSwapPoolForMint(input: {
+  mint: string;
+  expectedPoolAddress: string;
+  expectedPoolCreatorAuthority: string;
+  config: HeliusAccountReadConfig;
+}): Promise<{ pool: DecodedPumpSwapPoolAccount; contextSlot: number; observedAt: string } | null> {
+  const discovery = await discoverPumpSwapPoolsForMint(input.mint, input.config);
+  const matches = discovery.pools.filter(pool =>
+    pool.address === input.expectedPoolAddress && pool.index === 0 &&
+    pool.creator === input.expectedPoolCreatorAuthority
+  );
+  if (matches.length === 0) return null;
+  if (matches.length !== 1) throw new Error("More than one PumpSwap account matched the canonical pool identity.");
+  return { pool: matches[0]!, contextSlot: discovery.contextSlot, observedAt: discovery.observedAt };
 }
