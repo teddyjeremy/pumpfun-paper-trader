@@ -113,7 +113,11 @@ app.get("/api/diagnostics", async () => ({
 
 app.get("/api/tracking", async () => trackingSnapshot());
 app.get("/api/persistence", async () => getPersistenceStatus());
-app.get("/api/portfolio", async () => getTradingDashboardSnapshot());\napp.get("/api/paper-ledger", async request => {\n  const sessionId = (request.query as Record<string, unknown>).sessionId;\n  return getPaperSessionLedgerSnapshot(typeof sessionId === "string" ? sessionId : undefined);\n});
+app.get("/api/portfolio", async () => getTradingDashboardSnapshot());
+app.get("/api/paper-ledger", async request => {
+  const sessionId = (request.query as Record<string, unknown>).sessionId;
+  return getPaperSessionLedgerSnapshot(typeof sessionId === "string" ? sessionId : undefined);
+});
 
 app.get("/api/results/summary", async () => {
   const state = snapshot();
