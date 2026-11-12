@@ -17,7 +17,7 @@ export function applyVerifiedPumpCurveAccount(input: {
   });
   return updatePumpMarketState(input.state, {
     curve: toVerifiedPumpCurveEvidence(decoded),
-    nowMs: input.nowMs
+    ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs })
   });
 }
 
@@ -39,7 +39,9 @@ export function applyVerifiedPumpSwapPoolAccounts(input: {
     expectedPoolAddress: input.expectedPoolAddress,
     expectedPoolCreatorAuthority: input.expectedPoolCreatorAuthority,
     expectedPoolAuthority: input.expectedPoolAuthority,
-    nowMs: input.nowMs
+    ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs })
   });
-  return updatePumpMarketState(input.state, { pool, nowMs: input.nowMs });
+  return updatePumpMarketState(input.state, {
+    pool, ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs })
+  });
 }
