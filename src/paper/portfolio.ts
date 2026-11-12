@@ -73,6 +73,10 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
     throw new Error("Quote contains invalid amount or cost evidence.");
   }
 }
+function growthEquity(state: PaperPortfolioState): number {
+  // Replenishments restore simulated cash but are contributions, not trading gains.
+  return Math.max(0, round(state.bankroll.currentEquityUsd - state.bankroll.totalTopUpsUsd));
+}
 function currentOpen(state: PaperPortfolioState): PaperPosition[] {
   return state.positions.filter(position => position.status !== "CLOSED");
 }
@@ -139,11 +143,11 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   const topped = replenishPaperBankroll(bankroll, input.occurredAt,
     PAPER_PORTFOLIO_POLICY.topUpUsd, PAPER_PORTFOLIO_POLICY.topUpBelowUsd);
   const cashAfterTopUp = round(availableCashUsd + (topped.event ? PAPER_PORTFOLIO_POLICY.topUpUsd : 0));
-  const limits = capacityForEquity(Math.max(state.highWaterEquityUsd, topped.state.currentEquityUsd), state.bankroll.initialBankrollUsd);
+  const limits = capacityForEquity(Math.max(state.highWaterEquityUsd, growthEquity({ ...state, bankroll: topped.state })), state.bankroll.initialBankrollUsd);
   return {
     state: { ...state, bankroll: topped.state, availableCashUsd: cashAfterTopUp,
       positions, enteredMints: [...state.enteredMints, input.mint],
-      highWaterEquityUsd: Math.max(state.highWaterEquityUsd, topped.state.currentEquityUsd),
+      highWaterEquityUsd: Math.max(state.highWaterEquityUsd, growthEquity({ ...state, bankroll: topped.state })),
       positionSizeUsd: limits.stake, maxConcurrentPositions: limits.slots },
     position
   };
@@ -164,11 +168,11 @@ export function markPaperPosition(state: PaperPortfolioState, input: {
   const bankroll = markPaperEquity(state.bankroll, equity);
   const topped = replenishPaperBankroll(bankroll, input.markedAt,
     PAPER_PORTFOLIO_POLICY.topUpUsd, PAPER_PORTFOLIO_POLICY.topUpBelowUsd);
-  const limits = capacityForEquity(Math.max(state.highWaterEquityUsd, topped.state.currentEquityUsd), state.bankroll.initialBankrollUsd);
+  const limits = capacityForEquity(Math.max(state.highWaterEquityUsd, growthEquity({ ...state, bankroll: topped.state })), state.bankroll.initialBankrollUsd);
   return { ...state, bankroll: topped.state,
     availableCashUsd: round(state.availableCashUsd + (topped.event ? PAPER_PORTFOLIO_POLICY.topUpUsd : 0)),
     positions, lastMarkedAt: input.markedAt,
-    highWaterEquityUsd: Math.max(state.highWaterEquityUsd, topped.state.currentEquityUsd),
+    highWaterEquityUsd: Math.max(state.highWaterEquityUsd, growthEquity({ ...state, bankroll: topped.state })),
     positionSizeUsd: limits.stake, maxConcurrentPositions: limits.slots };
 }
 export function closePaperPosition(state: PaperPortfolioState, input: {
@@ -193,12 +197,12 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
   const bankroll = markPaperEquity(state.bankroll, equity);
   const topped = replenishPaperBankroll(bankroll, input.closedAt,
     PAPER_PORTFOLIO_POLICY.topUpUsd, PAPER_PORTFOLIO_POLICY.topUpBelowUsd);
-  const limits = capacityForEquity(Math.max(state.highWaterEquityUsd, topped.state.currentEquityUsd),
+  const limits = capacityForEquity(Math.max(state.highWaterEquityUsd, growthEquity({ ...state, bankroll: topped.state })),
     topped.state.initialBankrollUsd);
   return {
     state: { ...state, bankroll: topped.state,
       availableCashUsd: round(availableCashUsd + (topped.event ? PAPER_PORTFOLIO_POLICY.topUpUsd : 0)),
-      positions, highWaterEquityUsd: Math.max(state.highWaterEquityUsd, topped.state.currentEquityUsd),
+      positions, highWaterEquityUsd: Math.max(state.highWaterEquityUsd, growthEquity({ ...state, bankroll: topped.state })),
       positionSizeUsd: limits.stake, maxConcurrentPositions: limits.slots },
     position
   };
