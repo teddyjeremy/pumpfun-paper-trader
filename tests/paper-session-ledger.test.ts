@@ -72,6 +72,12 @@ describe("strict strategy audit", () => {
   expect(result.blockingUnknownRules).toContain("EXECUTABLE_QUOTE");
   expect(result.rules.find(rule=>rule.rule==="IMPULSE")?.status).toBe("PASS");
  });
+ it("keeps flow rules UNKNOWN until the USD micro-trade filter has been applied", () => {
+  const result=evaluateStrictStrategyAudit({...base,flow:{...base.flow,microTradeFilterStatus:"UNAVAILABLE"}});
+  expect(result.rules.find(rule=>rule.rule==="THREE_FLOW_WINDOWS")?.status).toBe("UNKNOWN");
+  expect(result.rules.find(rule=>rule.rule==="DISTINCT_BUYERS")?.status).toBe("UNKNOWN");
+  expect(result.rules.find(rule=>rule.rule==="BUYER_CONCENTRATION")?.status).toBe("UNKNOWN");
+ });
  it("rejects a confirmed creator risk breach", () => {
   const result=evaluateStrictStrategyAudit({...base,creatorRiskStatus:"REJECT_OBSERVED"});
   expect(result.decision).toBe("REJECT"); expect(result.rejectionReasons).toContain("CREATOR_SELL_RISK");
