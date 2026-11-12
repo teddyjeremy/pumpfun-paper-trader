@@ -37,3 +37,8 @@
 - [ ] Historical replay and paper-forward validation before any strategy changes
 
 No implementation stage may bypass paper-only, strict-entry, fail-closed, no-fabricated-fill, or migration-aware exit invariants.
+
+## Official Pump SDK quote adapter
+- Added the official `@pump-fun/pump-sdk@4.3.1` dependency. The published package now includes the PumpSwap SDK at `@pump-fun/pump-sdk/swap`; do not add a duplicate standalone AMM SDK.
+- Added an export-surface smoke test for the official curve and PumpSwap SDKs. Dependency installation, typecheck, tests/build and Worker bundle validation passed immediately after adding the dependency (CI run 43185228566); the later smoke-test commit still requires its own CI result.
+- Quote adapter implementation remains blocked on a safe integration contract: quotes must use one coherent, fresh market snapshot; the SDK's online RPC convenience methods can perform separate reads, so they must not be allowed to silently bypass the Helius same-slot verification. Also, an aggregate SDK fee total cannot be split into the ledger's protocol/creator/pool/transfer/network categories without authoritative fee evidence. Do not create an executable paper quote until those requirements are met.
