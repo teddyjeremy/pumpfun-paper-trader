@@ -85,9 +85,20 @@ describe("historical strategy replay", () => {
     expect(classifyHistoricalWalletClusterRisk({
       walletRisk: noObservedClusterRisk,
       walletClusterEvidenceCompleteAt: 20,
+      walletClusterEvidenceCoverage: "FULL_WALLET_HISTORY",
       holderCensusCompleteAt: 25,
       evaluatedAt: 30
     })).toBe("PASS_COMPLETE");
+  });
+
+  it("does not clear sampled latest-20 wallet history even when top-holder coverage is timestamped", () => {
+    expect(classifyHistoricalWalletClusterRisk({
+      walletRisk: noObservedClusterRisk,
+      walletClusterEvidenceCompleteAt: 20,
+      walletClusterEvidenceCoverage: "RECENT_SIGNATURE_SAMPLE_ONLY",
+      holderCensusCompleteAt: 25,
+      evaluatedAt: 30
+    })).toBe("UNKNOWN");
   });
 
   it("preserves an observed wallet-cluster reject even when coverage is incomplete", () => {
