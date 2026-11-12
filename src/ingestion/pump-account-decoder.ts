@@ -70,12 +70,15 @@ export function toVerifiedPumpCurveEvidence(curve: DecodedPumpCurveAccount) {
 
 export interface DecodedPumpSwapPoolAccount {
   address: string;
+  bump: number;
   index: number;
   creator: string;
   baseMint: string;
   quoteMint: string;
+  lpMint: string;
   baseVault: string;
   quoteVault: string;
+  lpSupplyBaseUnits: string;
   coinCreator: string;
   virtualQuoteReserves: string;
   creatorFeeBps: string;
@@ -228,10 +231,10 @@ export function decodePumpSwapPoolAccount(account: RawProgramAccount): DecodedPu
     throw new Error("Unsupported or partially written PumpSwap pool account length.");
   }
   return {
-    address: account.address, index: readU16(data, 9), creator: readPubkey(data, 11),
-    baseMint: readPubkey(data, 43), quoteMint: readPubkey(data, 75),
+    address: account.address, bump: readU8(data, 8), index: readU16(data, 9), creator: readPubkey(data, 11),
+    baseMint: readPubkey(data, 43), quoteMint: readPubkey(data, 75), lpMint: readPubkey(data, 107),
     baseVault: readPubkey(data, 139), quoteVault: readPubkey(data, 171),
-    coinCreator: readPubkey(data, 211),
+    lpSupplyBaseUnits: readUnsigned(data, 203, 8).toString(), coinCreator: readPubkey(data, 211),
     virtualQuoteReserves: data.length >= 261 ? readSigned128(data, 245).toString() : "0",
     creatorFeeBps: data.length >= 269 ? readUnsigned(data, 261, 8).toString() : "0",
     canEditCreatorFee: data.length >= 270 ? readBool(data, 269) : false,
