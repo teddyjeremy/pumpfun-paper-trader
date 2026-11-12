@@ -72,6 +72,16 @@ describe("wallet cluster risk", () => {
     expect(result.status).toBe("REJECT_OBSERVED");
     expect(result.largestClusterHoldingShareBps).toBe(2_100);
   });
+
+  it("rejects an observed individual wallet above 20% even without cluster links", () => {
+    const result = evaluateWalletClusterRisk([], {
+      mint, creator, totalSupply: "100000",
+      holdings: [{ mint, wallet: "large-holder", amount: "20001" }]
+    });
+    expect(result.status).toBe("REJECT_OBSERVED");
+    expect(result.largestIndividualHolderShareBps).toBe(2_001);
+    expect(result.attributionStatus).toBe("NO_HIGH_CONFIDENCE_LINKS");
+  });
   it("does not reject exactly 35% buy volume or exactly 20% holdings", () => {
     const result = evaluateWalletClusterRisk([tx([trade("w1", true, 35n), trade("other", true, 65n)])], {
       mint, creator, totalSupply: "100000", links: [link("w1", "w2")],
