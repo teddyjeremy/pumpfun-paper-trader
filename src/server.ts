@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { authorizeDashboardRequest } from "./dashboard-auth.js";
 import { config } from "./config.js";
 import { diagnose, increment, snapshot } from "./diagnostics/registry.js";
 import { trackingSnapshot } from "./diagnostics/tracker.js";
@@ -7,6 +8,26 @@ import { getPersistenceStatus, getTradingDashboardSnapshot } from "./persistence
 export const app = Fastify({
   logger: { level: config.LOG_LEVEL, redact: ["*.HELIUS_API_KEY", "*.apiKey", "*.secret", "*.authorization"] }
 });
+// The read-only dashboard exposes private candidate, trade and portfolio data.
+// Liveness/readiness stay public; every other route requires HTTP Basic auth
+// in production. Missing production credentials fail closed.
+app.addHook("onRequest", async (request, reply) => {
+  const pathname = request.url.split("?")[0];
+  if (pathname === "/health" || pathname === "/ready") return;
+  const result = authorizeDashboardRequest({
+    authorization: request.headers.authorization ?? null,
+    username: config.DASHBOARD_USERNAME,
+    password: config.DASHBOARD_PASSWORD,
+    production: config.NODE_ENV === "production"
+  });
+  if (result === "ALLOW") return;
+  if (result === "NOT_CONFIGURED") {
+    return reply.code(503).send({ error: "Dashboard authentication is not configured." });
+  }
+  return reply.header("WWW-Authenticate", 'Basic realm="Pump.fun Paper Trader", charset="UTF-8"')
+    .code(401).send({ error: "Authentication required." });
+});
+
 
 app.get("/health", async () => ({
   status: "ok",
