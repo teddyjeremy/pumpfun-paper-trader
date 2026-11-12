@@ -101,3 +101,5 @@ The six-hour paper session remains blocked until the missing quote source, execu
 - Added deterministic PDA derivation using Solana `PublicKey.findProgramAddressSync` and the exact seed recipes in the official Pump IDL: `bonding-curve + mint`, `pool-authority + base_mint`, and PumpSwap `pool + index(0 as u16 LE) + creator + base_mint + quote_mint`.
 - The Pump program derives the pool creator authority; the canonical pool PDA is derived under the PumpSwap program. The pool PDA itself is the token-account authority for its base/quote vaults, which the verifier now enforces.
 - The market verifier derives these addresses itself from the verified curve mint/quote mint; callers can no longer supply arbitrary expected PDA values.
+
+- The current Pump bonding-curve account layout is 166 bytes; the decoder also accepts only complete known historical field boundaries. The current PumpSwap Pool layout is 287 bytes, including the protocol-fee and creator-fee accumulators appended after the 271-byte prefix. Known older lengths are explicitly enumerated; unknown/partial lengths fail closed.
