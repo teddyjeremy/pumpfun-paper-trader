@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import { Message, MessageV0, VersionedMessage } from "@solana/web3.js";
 import { buildHeliusRpcUrl } from "./helius.js";
 
@@ -178,8 +177,9 @@ export async function estimateSolanaTransactionFees(
  */
 function messageHasSafeFeeInstructions(messageBase64: string, expectedLimit: number): boolean {
   try {
-    const bytes = Buffer.from(messageBase64, "base64");
-    if (bytes.length === 0 || bytes.toString("base64") !== messageBase64) return false;
+    const binary = atob(messageBase64);
+    if (binary.length === 0 || btoa(binary) !== messageBase64) return false;
+    const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
     const versioned = (bytes[0]! & 0x80) !== 0;
     const message = versioned ? VersionedMessage.deserialize(bytes) : Message.from(bytes);
     const keys = versioned
