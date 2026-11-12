@@ -492,6 +492,52 @@ function scoreThreshold(
   return { samples: coins.length, precision, recall, f1, accepted: accepted.length };
 }
 
+/**
+ * Split calibration data by launch timestamp, never by array index alone.
+ * Coins launched in the same second stay in the same partition so a batch
+ * cannot leak across the training/holdout boundary.
+ */
+export function splitChronologicalCalibrationCoins<T extends { launchBlockTime: number }>(
+  coins: readonly T[],
+  trainingFraction = 0.7
+): { training: T[]; holdout: T[] } {
+  if (!Number.isFinite(trainingFraction) || trainingFraction <= 0 || trainingFraction >= 1) {
+    throw new Error("Training fraction must be greater than 0 and less than 1.");
+  }
+  const ordered = coins.map((coin, index) => ({ coin, index }))
+    .sort((a, b) => a.coin.launchBlockTime - b.coin.launchBlockTime || a.index - b.index);
+  if (ordered.length < 2) {
+    return { training: ordered.map(item => item.coin), holdout: [] };
+  }
+
+  const groups: Array<{ timestamp: number; coins: T[] }> = [];
+  for (const { coin } of ordered) {
+    const last = groups[groups.length - 1];
+    if (last && last.timestamp === coin.launchBlockTime) last.coins.push(coin);
+    else groups.push({ timestamp: coin.launchBlockTime, coins: [coin] });
+  }
+  if (groups.length < 2) {
+    return { training: [], holdout: ordered.map(item => item.coin) };
+  }
+
+  const targetTrainingCount = ordered.length * trainingFraction;
+  let bestBoundary = 1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let cumulative = 0;
+  for (let boundary = 1; boundary < groups.length; boundary += 1) {
+    cumulative += groups[boundary - 1]!.coins.length;
+    const distance = Math.abs(cumulative - targetTrainingCount);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestBoundary = boundary;
+    }
+  }
+  return {
+    training: groups.slice(0, bestBoundary).flatMap(group => group.coins),
+    holdout: groups.slice(bestBoundary).flatMap(group => group.coins)
+  };
+}
+
 export function calibrateVolumeThresholds(
   replays: readonly HistoricalCoinReplay[]
 ): VolumeThresholdCalibration {
@@ -499,10 +545,7 @@ export function calibrateVolumeThresholds(
     coin.firstSetup !== null &&
     coin.firstSetup.pullbackVolumeVsImpulsePct !== null &&
     coin.firstSetup.reclaimVolumeVsPullbackPct !== null);
-  const ordered = [...labeled].sort((a, b) => a.launchBlockTime - b.launchBlockTime);
-  const split = Math.floor(ordered.length * 0.7);
-  const training = ordered.slice(0, split);
-  const holdout = ordered.slice(split);
+  const { training, holdout } = splitChronologicalCalibrationCoins(labeled, 0.7);
   const positiveCoins = labeled.filter(coin => coin.outcome?.label === "SUCCESS").length;
   const negativeCoins = labeled.filter(coin => coin.outcome?.label === "FAILURE").length;
   if (training.length < 30 || holdout.length < 10 ||
