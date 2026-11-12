@@ -20,6 +20,8 @@ export interface HistoricalReplayCoinInput {
   holderCensusCompleteAt?: number;
   /** Historical second when every non-risk entry gate (signal freshness, liquidity/MC, executable quote/cost and capacity) was verified. */
   entryEvidenceCompleteAt?: number;
+  /** Historical second when the dynamic exit lifecycle completed with a fresh full-size sell quote and zero-balance confirmation. */
+  exitLifecycleCompleteAt?: number;
   walletLinks?: readonly WalletLinkEvidence[];
   walletHoldings?: readonly WalletHoldingEvidence[];
 }
@@ -28,7 +30,7 @@ export interface HistoricalReplayConfig {
   solUsdPriceUsd: number;
   minimumTradeUsd?: number;
   horizonSeconds?: number;
-  /** Required to assign labels; no success/failure label is fabricated without both values. */
+  /** Thresholds for exploratory labels; labels still require complete risk, entry and exit evidence. */
   label?: {
     minFavorableExcursionPct: number;
     maxAdverseExcursionPct: number;
@@ -81,7 +83,7 @@ export interface HistoricalCoinReplay {
   snapshots: HistoricalSetupSnapshot[];
   firstSetup: HistoricalSetupSnapshot | null;
   outcome: HistoricalEntryOutcome | null;
-  status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY" | "RISK_NOT_CLEARED" | "ENTRY_EVIDENCE_INCOMPLETE";
+  status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY" | "RISK_NOT_CLEARED" | "ENTRY_EVIDENCE_INCOMPLETE" | "EXIT_EVIDENCE_INCOMPLETE";
 }
 
 export interface VolumeThresholdCandidate {
@@ -131,6 +133,16 @@ function sortedTrades(input: HistoricalReplayCoinInput): PumpTradeEvent[] {
     .sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
 }
 
+export function hasCompleteHistoricalExitEvidence(input: {
+  entryAt: number;
+  replayEndAt: number;
+  exitLifecycleCompleteAt?: number;
+}): boolean {
+  return Number.isSafeInteger(input.exitLifecycleCompleteAt) &&
+    input.exitLifecycleCompleteAt! >= input.entryAt &&
+    input.exitLifecycleCompleteAt! <= input.replayEndAt;
+}
+
 export function hasCompleteHistoricalEntryEvidence(input: {
   entryAt: number;
   entryEvidenceCompleteAt?: number;
@@ -166,6 +178,7 @@ function metrics(input: {
   decodeComplete: boolean;
   riskCleared: boolean;
   entryEvidenceComplete: boolean;
+  exitEvidenceComplete: boolean;
 }): HistoricalEntryOutcome | null {
   const future = input.trades.filter(event => {
     const at = eventTimestamp(event);
@@ -188,6 +201,8 @@ function metrics(input: {
     labelReason = "Creator and complete holder/cluster evidence were not cleared at the candidate time; reserve-price performance is exploratory and is not labelled as a strategy outcome.";
   } else if (!input.entryEvidenceComplete) {
     labelReason = "Signal freshness, liquidity/market-cap, executable quote/cost and portfolio-capacity gates were not all verified by the candidate time; reserve-price performance is not labelled as a strategy outcome.";
+  } else if (!input.exitEvidenceComplete) {
+    labelReason = "The dynamic exit lifecycle, fresh full-size sell quote and zero-balance confirmation were not replayed; reserve-price performance is not labelled as a strategy outcome.";
   } else if (input.decodeComplete && input.label && netFinalReturnPct !== null) {
     const metExcursions = maxFavorableExcursionPct >= input.label.minFavorableExcursionPct &&
       maxAdverseExcursionPct <= input.label.maxAdverseExcursionPct;
@@ -355,6 +370,13 @@ export function replayHistoricalCoin(
           ...(input.entryEvidenceCompleteAt === undefined ? {} : {
             entryEvidenceCompleteAt: input.entryEvidenceCompleteAt
           })
+        }),
+        exitEvidenceComplete: hasCompleteHistoricalExitEvidence({
+          entryAt,
+          replayEndAt: Math.min(observedEnd, entryAt + horizonSeconds),
+          ...(input.exitLifecycleCompleteAt === undefined ? {} : {
+            exitLifecycleCompleteAt: input.exitLifecycleCompleteAt
+          })
         })
       })
     : null;
@@ -368,7 +390,14 @@ export function replayHistoricalCoin(
             entryEvidenceCompleteAt: input.entryEvidenceCompleteAt
           })
         }) ? "ENTRY_EVIDENCE_INCOMPLETE"
-          : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
+          : !hasCompleteHistoricalExitEvidence({
+            entryAt,
+            replayEndAt: Math.min(observedEnd, entryAt + horizonSeconds),
+            ...(input.exitLifecycleCompleteAt === undefined ? {} : {
+              exitLifecycleCompleteAt: input.exitLifecycleCompleteAt
+            })
+          }) ? "EXIT_EVIDENCE_INCOMPLETE"
+            : !outcome ? "NO_FORWARD_ENTRY" : "COMPLETE";
   return {
     mint: input.mint,
     launchBlockTime: input.launchBlockTime,
