@@ -163,10 +163,14 @@ function tradeFromQuote(event: AuditEvent, position: PaperProjectionPosition, qu
 
 /** Pure, validated event-to-ledger projection. It is safe to replay inside the same DB transaction as the event insert. */
 export function buildPaperLedgerProjection(event: AuditEvent): PaperLedgerProjection {
+  const result: PaperLedgerProjection = { positions: [], quotes: [], trades: [] };
+  if (!["PAPER_ENTRY", "PAPER_EXIT", "POSITION_MARK"].includes(event.kind)) return result;
   const data = object(event.data);
   if (!data) throw new Error("Paper projection event payload must be an object.");
-  const result: PaperLedgerProjection = { positions: [], quotes: [], trades: [] };
   if (event.kind === "PAPER_ENTRY") {
+    // Older journal events recorded only quote IDs. Keep them durable in the
+    // event table but do not fabricate a normalized trade projection.
+    if (!data.buyQuote || !data.initialSellQuote) return result;
     const position = projectPosition(data.position);
     const buy = projectQuote(data.buyQuote);
     const initialSell = projectQuote(data.initialSellQuote);
