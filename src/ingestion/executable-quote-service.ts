@@ -21,7 +21,7 @@ export interface ExecutableRoundTripQuote {
   buyQuote: ExecutablePaperQuoteWithLatency;
   initialSellQuote: ExecutablePaperQuoteWithLatency;
   sellability: {
-    sellable: true;
+    quoteSellable: true;
     mint: string;
     venue: "PUMP_CURVE" | "PUMPSWAP";
     quoteMint: string;
@@ -174,6 +174,9 @@ export async function fetchExecutableRoundTripQuote(input: {
   if (initialSellQuote.slot < buyQuote.slot) {
     throw new Error("Initial sell quote is older than the buy quote snapshot.");
   }
+  if (Date.parse(rawSell.observedAt) < Date.parse(rawBuy.observedAt)) {
+    throw new Error("Initial sell quote timestamp is older than the buy quote snapshot.");
+  }
   const buyAgeMs = Math.max(0, buyFetchedAt - Date.parse(rawBuy.observedAt));
   const sellAgeMs = Math.max(0, sellFetchedAt - Date.parse(rawSell.observedAt));
   if (buyAgeMs > quoteTtlMs || sellAgeMs > quoteTtlMs) {
@@ -199,7 +202,7 @@ export async function fetchExecutableRoundTripQuote(input: {
     buyQuote,
     initialSellQuote,
     sellability: {
-      sellable: true,
+      quoteSellable: true,
       mint: buyQuote.mint,
       venue: buyQuote.venue,
       quoteMint: buyQuote.quoteMint,
