@@ -70,6 +70,7 @@ describe("verified Pump.fun trade-flow windows", () => {
     });
     expect(flow?.sampleIntervalSeconds).toBe(1);
     expect(flow?.windows).toHaveLength(6);
+    expect(flow?.observedTradeEvents).toBe(13);
     expect(flow?.windows[0]).toMatchObject({
       startTime: 99, uniqueBuyers: 3, uniqueSellers: 1,
       buyQuoteVolume: "30", sellQuoteVolume: "2", flowWindowPass: true
@@ -153,7 +154,8 @@ describe("verified Pump.fun trade-flow windows", () => {
     const events = [
       trade(100n, trader(1), true, 10n), trade(100n, trader(2), true, 10n), trade(100n, trader(3), true, 10n),
       trade(102n, trader(2), true, 10n), trade(102n, trader(3), true, 10n), trade(102n, trader(4), true, 10n),
-      trade(104n, trader(3), true, 10n), trade(104n, trader(4), true, 10n), trade(104n, trader(5), true, 10n)
+      trade(104n, trader(3), true, 10n), trade(104n, trader(4), true, 10n),
+      trade(104n, trader(5), true, 10n), trade(104n, trader(6), true, 10n)
     ];
     const [flow] = buildCandidateTradeFlows([tx(events)], {
       nowSeconds: 106, horizonSeconds: 60, coverageStartByMint: { [mint]: 101 }
