@@ -463,7 +463,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put(portfolioKey, {
           ...portfolio, bankroll: topped.state,
           availableCashUsd: Math.max(0, Math.round((topped.state.currentEquityUsd - openValue) * 1e8) / 1e8),
-          highWaterEquityUsd: Math.max(portfolio.highWaterEquityUsd, topped.state.currentEquityUsd),
+          highWaterEquityUsd: Math.max(portfolio.highWaterEquityUsd, Math.max(0, topped.state.currentEquityUsd - topped.state.totalTopUpsUsd)),
           lastMarkedAt: occurredAt
         });
       }
