@@ -167,8 +167,8 @@ app.get("/api/worker", async (_request, reply) => {
 });
 
 app.post("/api/worker/start-monitor", async (_request, reply) => {
-  if (!config.PAPER_WORKER_URL || !config.PAPER_WORKER_CONTROL_TOKEN)
-    return reply.code(503).send({ error: "Cloudflare Worker URL and control token are not configured." });
+  if (!config.PAPER_WORKER_URL || !isStrongServiceToken(config.PAPER_WORKER_CONTROL_TOKEN))
+    return reply.code(503).send({ error: "Cloudflare Worker URL and a control token of at least 32 characters are required." });
   try {
     const response = await fetch(new URL("/start", config.PAPER_WORKER_URL), {
       method: "POST", headers: { authorization: `Bearer ${config.PAPER_WORKER_CONTROL_TOKEN}` },
@@ -181,8 +181,8 @@ app.post("/api/worker/start-monitor", async (_request, reply) => {
 });
 
 app.post("/api/worker/stop-monitor", async (_request, reply) => {
-  if (!config.PAPER_WORKER_URL || !config.PAPER_WORKER_CONTROL_TOKEN)
-    return reply.code(503).send({ error: "Cloudflare Worker URL and control token are not configured." });
+  if (!config.PAPER_WORKER_URL || !isStrongServiceToken(config.PAPER_WORKER_CONTROL_TOKEN))
+    return reply.code(503).send({ error: "Cloudflare Worker URL and a control token of at least 32 characters are required." });
   try {
     const response = await fetch(new URL("/stop", config.PAPER_WORKER_URL), {
       method: "POST", headers: { authorization: `Bearer ${config.PAPER_WORKER_CONTROL_TOKEN}` },
