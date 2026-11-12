@@ -93,7 +93,9 @@ The replay endpoint excludes live-monitor-only observations and only labels outc
 - every verified historical transaction is durably archived,
 - explicit favorable/adverse excursion thresholds are supplied.
 
-The replay uses SOL-quoted reserve observations and current SOL/USD normalization. It is not an executable SDK fill simulation, does not model the complete dynamic exit lifecycle, and must not be interpreted as realized PnL. Calibration recommendations remain advisory and require a separate chronological holdout review.
+The replay uses SOL-quoted reserve observations and current SOL/USD normalization. A market-pattern setup is not a strategy entry: profitability labels remain UNKNOWN unless direct-creator first-minute risk and independently verified wallet/holder risk are cleared at the historical evaluation time. The current top-20 holder snapshot can reject an observed concentration breach, but cannot clear a candidate; a full holder census is required. Missing or partial evidence returns `RISK_NOT_CLEARED`.
+
+Even a risk-cleared market-pattern candidate is not a full strategy entry: signal freshness, liquidity/market-cap gates, executable SDK quotes, and the dynamic exit lifecycle are not yet replayed together. Reserve-price outcomes are not executable fills or realized PnL. Round-trip cost is an explicit assumption. Calibration recommendations remain advisory and require a separate chronological holdout review.
 
 ## Instrumentation contract
 
