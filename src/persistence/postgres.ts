@@ -130,7 +130,7 @@ export async function getTradingDashboardSnapshot() {
 
   const persistence = await getPersistenceStatus();
   if (!persistence.connected) return unavailable("PostgreSQL is not connected");
-  if (persistence.migrationVersion !== "0004_paper_session_event_ingestion") {
+  if (!["0004_paper_session_event_ingestion", "0005_paper_trade_projections"].includes(persistence.migrationVersion ?? "")) {
     return unavailable("Required ledger migrations 0001, 0002, 0003 and 0004 are not all applied");
   }
 
@@ -531,4 +531,72 @@ export async function releaseWorkerLease(leaseName: string, ownerId: string): Pr
     [leaseName, ownerId]
   );
   return (result.rowCount ?? 0) === 1;
+}
+
+
+export async function getPaperSessionLedgerSnapshot(sessionId?: string) {
+  const unavailable = (reason: string) => ({
+    available: false as const, reason, generatedAt: new Date().toISOString(),
+    sessions: [], positions: [], quotes: [], trades: []
+  });
+  if (!pool) return unavailable("DATABASE_URL is not configured");
+  const persistence = await getPersistenceStatus();
+  if (!persistence.connected) return unavailable("PostgreSQL is not connected");
+  if (persistence.migrationVersion !== "0005_paper_trade_projections") {
+    return unavailable("Migration 0005_paper_trade_projections must be explicitly applied before reading the paper ledger projection");
+  }
+  if (sessionId !== undefined && (!sessionId.trim() || sessionId.length > 128)) {
+    return unavailable("Invalid paper session id");
+  }
+  try {
+    const sessionsResult = await pool.query(
+      `SELECT id,status,started_at,stopped_at,strategy_version,last_sequence,last_event_at,metadata
+       FROM paper_sessions
+       ${sessionId ? "WHERE id=$1" : ""}
+       ORDER BY started_at DESC LIMIT 50`,
+      sessionId ? [sessionId] : []
+    );
+    const ids = sessionsResult.rows.map(row => String(row.id));
+    if (ids.length === 0) {
+      return { available: true as const, generatedAt: new Date().toISOString(),
+        sessions: [], positions: [], quotes: [], trades: [] };
+    }
+    const [positions, quotes, trades] = await Promise.all([
+      pool.query(
+        `SELECT session_id,external_position_id,mint,status,opened_at,closed_at,
+          stake_usd::text,token_amount_base_units::text,token_decimals,
+          entry_price_usd_per_token::text,buy_costs_usd::text,
+          latest_liquidation_value_usd::text,realized_pnl_usd::text,exit_reason,
+          last_event_sequence,snapshot
+         FROM paper_position_projection WHERE session_id=ANY($1::text[])
+         ORDER BY opened_at DESC`, [ids]
+      ),
+      pool.query(
+        `SELECT session_id,external_quote_id,external_position_id,mint,side,provider,venue,
+          context_slot,observed_at,expires_at,requested_usd::text,
+          input_amount_base_units::text,output_amount_base_units::text,output_usd::text,
+          price_impact_pct::text,simulated_latency_ms,simulated_fill_at,
+          fee_breakdown_usd,raw_quote
+         FROM paper_execution_quote_projection WHERE session_id=ANY($1::text[])
+         ORDER BY observed_at DESC LIMIT 500`, [ids]
+      ),
+      pool.query(
+        `SELECT session_id,external_trade_id,external_position_id,mint,side,quote_id,
+          executed_at,token_amount_base_units::text,quote_amount_base_units::text,
+          gross_usd::text,total_fees_usd::text,simulated_latency_ms,raw_trade
+         FROM paper_trade_projection WHERE session_id=ANY($1::text[])
+         ORDER BY executed_at DESC LIMIT 500`, [ids]
+      )
+    ]);
+    return {
+      available: true as const,
+      generatedAt: new Date().toISOString(),
+      sessions: sessionsResult.rows,
+      positions: positions.rows,
+      quotes: quotes.rows,
+      trades: trades.rows
+    };
+  } catch {
+    return unavailable("Paper ledger projection tables are unavailable; inspect migration 0005 and database logs");
+  }
 }
