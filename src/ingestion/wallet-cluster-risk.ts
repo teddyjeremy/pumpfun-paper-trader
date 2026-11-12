@@ -110,13 +110,14 @@ export function evaluateWalletClusterRisk(
 
   let linkedSells = 0n;
   let allSells = 0n;
-  let linkedBuys = 0n;
+  const clusterBuyVolumes = new Map<number, bigint>();
   let allBuys = 0n;
   for (const tx of transactions) for (const trade of tx.tradeEvents) {
     if (trade.mint !== options.mint || trade.quoteAmount <= 0n) continue;
     if (trade.isBuy) {
       allBuys += trade.quoteAmount;
-      if (clusters.some(group => group.has(trade.user))) linkedBuys += trade.quoteAmount;
+      const groupIndex = clusters.findIndex(group => group.has(trade.user));
+      if (groupIndex >= 0) clusterBuyVolumes.set(groupIndex, (clusterBuyVolumes.get(groupIndex) ?? 0n) + trade.quoteAmount);
     } else {
       allSells += trade.tokenAmount;
       if (creatorClusterWallets.has(trade.user)) linkedSells += trade.tokenAmount;
@@ -124,7 +125,8 @@ export function evaluateWalletClusterRisk(
   }
   const linkedSellShare = allSells > 0n ? linkedSells : 0n;
   const sellBps = allSells > 0n ? ceilBps(linkedSellShare, supply) : null;
-  const clusterBuyBps = allBuys > 0n ? ceilBps(linkedBuys, allBuys) : null;
+  const largestClusterBuy = [...clusterBuyVolumes.values()].reduce((max, value) => value > max ? value : max, 0n);
+  const clusterBuyBps = allBuys > 0n && clusterBuyVolumes.size > 0 ? ceilBps(largestClusterBuy, allBuys) : null;
 
   const holdingByCluster = new Map<number, bigint>();
   for (const holding of options.holdings ?? []) {
