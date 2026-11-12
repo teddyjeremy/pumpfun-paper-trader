@@ -29,6 +29,7 @@ export interface WalletClusterRisk {
   largestClusterConfidenceBps: number | null;
   largestIndividualHolderShareBps: number | null;
   linkedWalletSellShareBps: number | null;
+  largestLinkedClusterSellShareBps: number | null;
   largestClusterBuyVolumeShareBps: number | null;
   largestClusterHoldingShareBps: number | null;
   reasons: string[];
@@ -126,6 +127,7 @@ export function evaluateWalletClusterRisk(
 
   let linkedSells = 0n;
   let allSells = 0n;
+  const clusterSellVolumes = new Map<number, bigint>();
   const clusterBuyVolumes = new Map<string, bigint>();
   const totalBuyVolumesByQuoteMint = new Map<string, bigint>();
   for (const tx of transactions) for (const trade of tx.tradeEvents) {
@@ -141,10 +143,14 @@ export function evaluateWalletClusterRisk(
     } else {
       allSells += trade.tokenAmount;
       if (creatorClusterWallets.has(trade.user)) linkedSells += trade.tokenAmount;
+      const groupIndex = clusters.findIndex(group => group.has(trade.user));
+      if (groupIndex >= 0) clusterSellVolumes.set(groupIndex, (clusterSellVolumes.get(groupIndex) ?? 0n) + trade.tokenAmount);
     }
   }
   const linkedSellShare = allSells > 0n ? linkedSells : 0n;
   const sellBps = allSells > 0n ? ceilBps(linkedSellShare, supply) : null;
+  const largestClusterSell = [...clusterSellVolumes.values()].reduce((max, value) => value > max ? value : max, 0n);
+  const clusterSellBps = clusterSellVolumes.size > 0 ? ceilBps(largestClusterSell, supply) : null;
   let clusterBuyBps: number | null = null;
   for (const [key, amount] of clusterBuyVolumes) {
     const quoteMint = key.slice(0, key.lastIndexOf(":"));
@@ -163,20 +169,23 @@ export function evaluateWalletClusterRisk(
   const largestClusterHolding = [...holdingByCluster.values()].reduce((max, value) => value > max ? value : max, 0n);
   const holdingBps = holdingByCluster.size ? ceilBps(largestClusterHolding, supply) : null;
   const linkedCreatorSellBreach = creatorClusterWallets.size > 1 && linkedSells * 10_000n > supply * BigInt(LINKED_WALLET_SELL_REJECT_BPS);
+  const linkedClusterSellBreach = clusterSellBps !== null && clusterSellBps > LINKED_WALLET_SELL_REJECT_BPS;
   const clusterBuyBreach = clusterBuyBps !== null && clusterBuyBps > LINKED_CLUSTER_BUY_VOLUME_REJECT_BPS;
   const clusterHoldingBreach = holdingBps !== null && holdingBps > LINKED_CLUSTER_HOLDER_REJECT_BPS;
   if (linkedCreatorSellBreach) reasons.push("Creator-linked wallets sold more than 0.25% of supply.");
+  if (linkedClusterSellBreach) reasons.push("A high-confidence linked cluster sold more than 0.25% of supply.");
   if (clusterBuyBreach) reasons.push("High-confidence linked clusters contributed more than 35% of observed buy quote volume.");
   if (clusterHoldingBreach) reasons.push("A high-confidence linked cluster holds more than 20% of supply.");
 
   return {
     mint: options.mint,
-    status: linkedCreatorSellBreach || clusterBuyBreach || clusterHoldingBreach || individualHolderBreach ? "REJECT_OBSERVED" : "WATCH",
+    status: linkedCreatorSellBreach || linkedClusterSellBreach || clusterBuyBreach || clusterHoldingBreach || individualHolderBreach ? "REJECT_OBSERVED" : "WATCH",
     attributionStatus: "CONFIRMED_LINKS",
     linkedWalletCount: new Set(clusters.flatMap(group => [...group])).size,
     largestClusterConfidenceBps: confidenceByCluster.length ? Math.max(...confidenceByCluster) : null,
     largestIndividualHolderShareBps: individualHolderBps,
     linkedWalletSellShareBps: sellBps,
+    largestLinkedClusterSellShareBps: clusterSellBps,
     largestClusterBuyVolumeShareBps: clusterBuyBps,
     largestClusterHoldingShareBps: holdingBps,
     reasons,
@@ -193,6 +202,7 @@ function emptyRisk(
   return {
     mint, status: "WATCH", attributionStatus, linkedWalletCount: 0,
     largestClusterConfidenceBps: null, largestIndividualHolderShareBps: null, linkedWalletSellShareBps: null,
+    largestLinkedClusterSellShareBps: null,
     largestClusterBuyVolumeShareBps: null, largestClusterHoldingShareBps: null,
     reasons, limitations
   };
