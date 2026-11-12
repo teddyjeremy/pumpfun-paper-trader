@@ -118,7 +118,7 @@ const INITIAL_STATUS: CoordinatorStatus = {
   enabled: false,
   tradingReady: false,
   quoteSdkModules: officialPumpSdkModulesAvailable(),
-  blocker: "On-chain verification, selective Helius monitoring, strategy evaluation, executable quotes and paper ledger are not connected.",
+  blocker: "Live discovery, verified transaction decoding and strategy/risk audits are active; executable quote authorization and scheduled paper entry/exit execution are not connected.",
   connectedAt: null,
   lastMessageAt: null,
   lastSignature: null,
