@@ -82,9 +82,11 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
     const sell = await input.quoteSell({
       mint: input.mint, tokenAmountBaseUnits: buyQuote.outputAmountBaseUnits
     });
+    const buyVenue = "venue" in buy.quote ? buy.quote.venue : "PUMPSWAP";
+    const sellVenue = "venue" in sell.quote ? sell.quote.venue : "PUMPSWAP";
     if (sell.quote.side !== "SELL" || sell.quote.mint !== input.mint ||
         sell.quote.inputAmountBaseUnits !== buyQuote.outputAmountBaseUnits ||
-        sell.quote.venue !== buy.quote.venue || sell.quote.quoteMint !== buy.quote.quoteMint) {
+        sellVenue !== buyVenue || sell.quote.quoteMint !== buy.quote.quoteMint) {
       return { status: "BLOCKED", reason: "Initial sell quote is not exact-size for the complete purchased token balance on the same venue and quote mint." };
     }
     const sellQuote = buildExecutablePaperQuote({
