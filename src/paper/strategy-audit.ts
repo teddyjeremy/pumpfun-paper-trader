@@ -62,8 +62,7 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
   const windows = input.flow?.windows.slice(-3) ?? [];
   const threeWindowsAvailable = windows.length === 3;
   const flowWindowsPass = Boolean(input.flow?.latestThreeWindowFlowPass) && threeWindowsAvailable && windows.every(window =>
-    window.buySellRatio !== null && window.buySellRatio > 3 &&
-    window.uniqueBuyers >= 3 && window.uniqueSellers <= window.uniqueBuyers / 2
+    window.flowWindowPass && window.uniqueBuyers >= 3 && window.uniqueSellers <= window.uniqueBuyers / 2
   );
   rules.push(!input.flow || !input.flow.dataComplete || !threeWindowsAvailable
     ? result("THREE_FLOW_WINDOWS", "UNKNOWN", windows, "3 consecutive completed 2-second windows; each >3:1, >=3 buyers, sellers <= half buyers", "Three fully covered consecutive windows are not available.")
