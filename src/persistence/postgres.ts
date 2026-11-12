@@ -350,15 +350,20 @@ export async function persistPaperAuditEvents(
     for (const event of ordered) {
       const sequence = BigInt(event.sequence);
       if (sequence <= lastSequence) {
-        const existing = await client.query<{ event_id: string; event_type: string }>(
-          "SELECT event_id,event_type FROM paper_session_events WHERE session_id=$1 AND sequence=$2",
-          [sessionId, event.sequence]
+        const existing = await client.query<{ event_id: string; event_type: string; same_event: boolean }>(
+          `SELECT event_id,event_type,
+             (payload=$4::jsonb AND occurred_at=$5 AND mint IS NOT DISTINCT FROM $6
+               AND strategy_version=$7) AS same_event
+           FROM paper_session_events WHERE session_id=$1 AND sequence=$2`,
+          [sessionId, event.sequence, event.eventId, JSON.stringify(event.data ?? {}),
+            event.occurredAt, event.mint, event.strategyVersion]
         );
         const existingEvent = existing.rows[0];
         if (!existingEvent ||
             existingEvent.event_id !== event.eventId ||
-            existingEvent.event_type !== event.kind) {
-          throw new Error("Paper audit replay conflicts with an existing session sequence.");
+            existingEvent.event_type !== event.kind ||
+            existingEvent.same_event !== true) {
+          throw new Error("Paper audit replay conflicts with an existing session sequence or payload.");
         }
         duplicates++;
         continue;
