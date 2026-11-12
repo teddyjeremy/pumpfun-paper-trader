@@ -6,7 +6,7 @@ A **paper-only** Pump.fun research, market-monitoring and trading-simulation sys
 
 The current `main` branch contains the discovery and monitoring foundation, verified Pump/PumpSwap account and transaction evidence, strict strategy audit, quote adapters, portfolio simulation primitives, and dashboard/API foundations.
 
-**Main is not yet paper-trading ready.** The merged ledger and reusable execution components are not yet connected to an automatic position scheduler, and strict entry remains fail-closed. The strict evaluator intentionally cannot authorize a BUY while the pullback/reclaim volume thresholds, executable quote economics, and quote-to-position lifecycle are incomplete.
+**Main is not yet paper-trading ready.** The merged ledger, strict strategy audit, quote preflight and reusable execution components are not yet connected into one automatic paper-position scheduler. Strict entry remains fail-closed while historical risk evidence, signal freshness, pullback/reclaim calibration and the quote-to-position lifecycle are incomplete.
 
 ### Implemented on main
 
@@ -41,7 +41,7 @@ The integration was merged in [PR #40](https://github.com/teddyjeremy/pumpfun-pa
 
 1. **Validate historical replay:** run the new replay API against collected sessions, inspect incomplete-coverage outcomes and verify that archived observations match the intended launch windows. Migration 0007 is additive and must be explicitly reviewed/applied before the replay API can read decode-completeness fields.
 2. **Complete strategy replay and calibration:** include every mandatory rule and the documented dynamic exit behavior; use chronological training/holdout sets to evaluate pullback contraction and reclaim expansion. Do not invent thresholds or promote a weak holdout result.
-3. **Complete quote economics:** add supported Token-2022 transfer-fee handling or fail-closed rejection, authoritative network/priority fee estimates, and validated impact/slippage policy.
+3. **Finish quote economics integration:** exact-size buy/full-output sell preflight, Helius priority-fee sampling, SOL/USD normalization, 2% per-side impact checks and the 4% combined cost gate are implemented. The base network fee and compute-unit limit remain explicit assumptions until a real transaction message can be built/simulated; Token-2022 transfer-fee/hook base mints and non-SOL quote mints remain fail-closed.
 4. **Connect paper execution:** connect quote-gated entry/exit lifecycle to the actual Worker position scheduler and persist complete position/trade transitions.
 5. **Complete migration lifecycle:** verify graduation and canonical PumpSwap market state, monitor full-position sellability and keep positions open when quotes are unavailable.
 6. **Runtime acceptance:** test Durable Object eviction/restart, PostgreSQL outage/recovery, queue recovery, worker lease fencing, provider gaps and a bounded paper-forward soak.
@@ -95,7 +95,7 @@ npm run build
 
 ## Readiness
 
-The service must remain not-ready for paper execution until the verified quote path, strict entry evidence, risk gates, durable ledger and position/exit lifecycle are connected and tested. CI and a multi-hour soak validate integration and operations, **not profitability**.
+The service must remain not-ready for paper execution until historical risk evidence is hydrated from the audit journal, a complete holder census is available, strict entry and dynamic-exit rules are replayed, quote preflight is wired to the Worker scheduler, and durable recovery/position transitions are tested. CI and a multi-hour soak validate integration and operations, **not profitability**.
 
 ## Disclaimer
 
