@@ -13,19 +13,24 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test && npm run build",
+    "db:migrate": "npm run build && node dist/src/db/migrate.js"
   },
   "dependencies": {
     "fastify": "^5.2.1",
     "pino": "^9.6.0",
     "zod": "^3.24.2",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "@solana/web3.js": "1.98.4",
+    "@pump-fun/pump-sdk": "4.3.1",
+    "@solana/spl-token": "^0.4.15"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "vitest": "^3.0.8",
-    "@types/pg": "^8.15.5"
+    "@types/pg": "^8.15.5",
+    "@types/bn.js": "^5.1.6"
   }
 }

@@ -37,4 +37,4 @@ CREATE TABLE IF NOT EXISTS position_exit_evaluations (
 CREATE INDEX IF NOT EXISTS position_exit_evaluations_position_time_idx ON position_exit_evaluations(position_id,evaluated_at DESC);
 CREATE INDEX IF NOT EXISTS position_exit_evaluations_mint_time_idx ON position_exit_evaluations(mint,evaluated_at DESC);
 CREATE INDEX IF NOT EXISTS positions_market_phase_status_idx ON positions(market_phase,status);
-INSERT INTO schema_migrations(version) VALUES ('0002_migration_aware_dynamic_exits') ON CONFLICT(version) DO NOTHING;
+INSERT INTO schema_migrations(version) VALUES ('0003_dynamic_exit_observations') ON CONFLICT(version) DO NOTHING;

@@ -1,6 +1,6 @@
 import type { PumpTradeEvent } from "./pump-events.js";
 import type { VerifiedPumpTransaction } from "./helius.js";
-import { SOL_QUOTE_MINT } from "./trade-flow.js";
+import { isSolQuoteMint } from "./trade-flow.js";
 
 export const PRICE_VOLUME_BUCKET_SECONDS = 5;
 export const PRICE_VOLUME_HORIZON_SECONDS = 10 * 60;
@@ -62,6 +62,9 @@ export interface CandidatePriceVolumeProfile {
   dataComplete: boolean;
   coverage: "OBSERVED_EVENTS_ONLY";
   entryEligible: false;
+  microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE";
+  ignoredMicroTradeCount: number;
+  ignoredMicroTradeQuoteVolume: string;
 }
 
 interface TimedTrade {
@@ -79,7 +82,7 @@ interface MutableBucket {
 }
 
 function quoteAmount(event: PumpTradeEvent): bigint {
-  if (event.quoteMint === SOL_QUOTE_MINT) {
+  if (isSolQuoteMint(event.quoteMint)) {
     return event.quoteAmount > 0n ? event.quoteAmount : event.solAmount;
   }
   return event.quoteAmount;
@@ -96,7 +99,7 @@ function reservePrice(
 }
 
 function priceOf(event: PumpTradeEvent): number | null {
-  const quoteReserves = event.quoteMint === SOL_QUOTE_MINT
+  const quoteReserves = isSolQuoteMint(event.quoteMint)
     ? event.virtualSolReserves
     : event.virtualQuoteReserves;
   return reservePrice(quoteReserves, event.virtualTokenReserves);
@@ -141,9 +144,9 @@ function summarizeBucket(bucket: MutableBucket): PriceVolumeBucket | null {
 }
 
 function volumeRatioPct(part: StageVolume, base: StageVolume): number | null {
-  const denominator = BigInt(base.totalQuoteVolume);
+  const denominator = BigInt(base.buyQuoteVolume);
   if (denominator <= 0n) return null;
-  const numerator = BigInt(part.totalQuoteVolume);
+  const numerator = BigInt(part.buyQuoteVolume);
   return Number((numerator * 10_000n + denominator / 2n) / denominator) / 100;
 }
 
@@ -186,6 +189,8 @@ export function buildCandidatePriceVolumeProfiles(
     incompleteMints?: readonly string[];
     coverageStartByMint?: Readonly<Record<string, number>>;
     candidateMints?: readonly string[];
+    solUsdPriceUsd?: number;
+    minimumTradeUsd?: number;
   } = {}
 ): CandidatePriceVolumeProfile[] {
   const now = options.nowSeconds ?? Math.floor(Date.now() / 1_000);
@@ -194,6 +199,8 @@ export function buildCandidatePriceVolumeProfiles(
       horizon < PRICE_VOLUME_BUCKET_SECONDS) {
     throw new Error("Invalid price-volume profile time range.");
   }
+  const minimumTradeUsd = options.minimumTradeUsd ?? 0.01;
+  if (!Number.isFinite(minimumTradeUsd) || minimumTradeUsd < 0) throw new Error("Invalid minimum trade notional.");
   const lower = now - horizon;
   const groups = new Map<string, {
     mint: string;
@@ -201,12 +208,14 @@ export function buildCandidatePriceVolumeProfiles(
     trades: TimedTrade[];
     launchTime: number | null;
     launchPrice: number | null;
+    ignoredMicroTradeCount: number;
+    ignoredMicroTradeQuoteVolume: bigint;
   }>();
   const ensure = (mint: string, quoteMint: string | null) => {
     const key = `${mint}:${quoteMint ?? "UNKNOWN"}`;
     let group = groups.get(key);
     if (!group) {
-      group = { mint, quoteMint, trades: [], launchTime: null, launchPrice: null };
+      group = { mint, quoteMint, trades: [], launchTime: null, launchPrice: null, ignoredMicroTradeCount: 0, ignoredMicroTradeQuoteVolume: 0n };
       groups.set(key, group);
     }
     return group;
@@ -219,7 +228,7 @@ export function buildCandidatePriceVolumeProfiles(
       const group = ensure(created.mint, created.quoteMint);
       if (group.launchTime === null || timestamp < group.launchTime) {
         group.launchTime = timestamp;
-        const quoteReserves = created.quoteMint === SOL_QUOTE_MINT
+        const quoteReserves = isSolQuoteMint(created.quoteMint)
           ? created.virtualSolReserves
           : created.virtualQuoteReserves;
         group.launchPrice = reservePrice(quoteReserves, created.virtualTokenReserves);
@@ -233,6 +242,14 @@ export function buildCandidatePriceVolumeProfiles(
       const price = priceOf(event);
       const amount = quoteAmount(event);
       if (price === null || amount <= 0n) continue;
+      if (isSolQuoteMint(event.quoteMint) && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0) {
+        const notionalUsd = Number(amount) / 1_000_000_000 * options.solUsdPriceUsd!;
+        if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) {
+          group.ignoredMicroTradeCount += 1;
+          group.ignoredMicroTradeQuoteVolume += amount;
+          continue;
+        }
+      }
       group.trades.push({
         event, timestamp, price, quoteAmount: amount,
         slot: transaction.slot, signature: transaction.signature
@@ -360,7 +377,7 @@ export function buildCandidatePriceVolumeProfiles(
     output.push({
       mint: group.mint,
       quoteMint: group.quoteMint,
-      quoteUnit: group.quoteMint === null ? "UNKNOWN" : group.quoteMint === SOL_QUOTE_MINT ? "SOL" : "NON_SOL_RAW",
+      quoteUnit: group.quoteMint === null ? "UNKNOWN" : isSolQuoteMint(group.quoteMint) ? "SOL" : "NON_SOL_RAW",
       bucketSeconds: PRICE_VOLUME_BUCKET_SECONDS,
       horizonSeconds: horizon,
       baselinePrice: baseline,
@@ -377,15 +394,23 @@ export function buildCandidatePriceVolumeProfiles(
       impulseVolume,
       pullbackVolume,
       reclaimVolume,
-      pullbackVolumeVsImpulsePct: volumeRatioPct(pullbackVolume, impulseVolume),
-      reclaimVolumeVsPullbackPct: volumeRatioPct(reclaimVolume, pullbackVolume),
+      pullbackVolumeVsImpulsePct: isSolQuoteMint(group.quoteMint) && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
+        ? volumeRatioPct(pullbackVolume, impulseVolume) : null,
+      reclaimVolumeVsPullbackPct: isSolQuoteMint(group.quoteMint) && Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
+        ? volumeRatioPct(reclaimVolume, pullbackVolume) : null,
       buckets,
       profileStatus,
       coverageStatus,
       dataComplete: coverageStatus === "COMPLETE_FROM_LAUNCH" &&
         buckets.at(-1)?.endTime === Math.floor(now / PRICE_VOLUME_BUCKET_SECONDS) * PRICE_VOLUME_BUCKET_SECONDS,
       coverage: "OBSERVED_EVENTS_ONLY",
-      entryEligible: false
+      entryEligible: false,
+      microTradeFilterStatus: !isSolQuoteMint(group.quoteMint)
+        ? "UNSUPPORTED_QUOTE"
+        : Number.isFinite(options.solUsdPriceUsd) && options.solUsdPriceUsd! > 0
+          ? "APPLIED" : "UNAVAILABLE",
+      ignoredMicroTradeCount: group.ignoredMicroTradeCount,
+      ignoredMicroTradeQuoteVolume: group.ignoredMicroTradeQuoteVolume.toString()
     });
   }
   return output.sort((a, b) => a.mint.localeCompare(b.mint) ||

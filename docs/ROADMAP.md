@@ -11,18 +11,34 @@
 - [ ] Verify no-key PumpPortal WebSocket handshake in the deployed Worker
 - [ ] Add reconnect/backoff and provider-gap reconciliation
 - [x] Helius transaction verification adapter and bounded candidate-specific monitoring (10 slots, durable queue, event verification, and evidence-driven slot rotation)
-- [ ] Verify Pump.fun official SDK/program interfaces and implement bonding-curve PDA/account decoder
-- [ ] Authoritative graduation detector and migrated-pool discovery
+- [x] Verify official Pump program and PumpSwap IDL layouts; implement fail-closed bonding-curve and pool/vault account decoders with PDA derivation from official IDL seeds
+- [ ] Worker/position integration and retry scheduling (Helius-backed curve-to-pool verification, bounded discovery, same-slot vault re-fetch, and IDL-seed PDA derivation are implemented)
+- [x] Pure fail-closed market transition rules for live curve, migration pending, verified canonical pool and EXIT_BLOCKED
+- [x] IDL-aligned Pump curve, PumpSwap pool, and SPL token-vault decoders with program-owner, discriminator, mint, vault, canonical index/authority, slot-coherence and freshness checks
+- [x] Helius getMultipleAccounts reader that returns related account data from one shared RPC context slot
+- [x] Pure adapter that passes verified curve and canonical pool/vault snapshots into the migration-aware market state machine
+- [x] Helius-backed market refresh pipeline: fetch curve PDA, stop at LIVE_CURVE, or on completion discover index-0 canonical PumpSwap pool and verify pool plus both vaults at one RPC context slot
+- [x] Bounded PumpSwap pool discovery by base mint, followed by canonical pool/vault verification
 - [ ] Helius backfill/reconciliation for missed provider events
-- [ ] Complete entry decision engine and explainable decisions (flow/price profiles exist, but volume-profile thresholds, signal-age confirmation, executable quotes, and ledger integration remain outstanding)
+- [ ] Complete entry decision engine and explainable decisions (strict per-rule evaluation and 1–2 second reclaim freshness confirmation are implemented; numeric volume-profile thresholds, executable quotes and automated ledger integration remain outstanding)
+- [x] Exclude buy/sell spam at or below $0.01 from flow and price-volume evidence when a fresh SOL/USD price is supplied; pullback/reclaim volume ratios use buy-side quote volume only
+- [x] Fetch and validate fresh SOL/USDT last-trade reference data for USD-notional spam filtering; reject stale, malformed or unavailable observations (not an execution price)
 - [x] Direct creator-sale screening, bounded wallet-funding linkage inspection, and observed individual/linked-cluster hard rejects
 - [ ] Complete wallet attribution and full holder census; current funding inspection is sampled and top-20 holder evidence is partial
-- [ ] Verified PumpSwap quote adapter with dynamic protocol/creator fee, network, priority, impact and slippage accounting
-- [ ] PostgreSQL migrations, append-only event/trade ledger, idempotency and worker leader lease
+- [ ] Verified Pump/PumpSwap executable quote adapter using official SDK quote math, dynamic protocol/creator fees, network/priority costs, impact and slippage accounting
+- [x] Durable session journal core (append-only pages, idempotency, atomic session lifecycle, restart markers, pagination and JSON export)
+- [x] Durable Object journal storage-contract tests for concurrent appends, monotonic paging, idempotency, rollback and restart markers; real Cloudflare runtime acceptance tests and six-hour soak remain outstanding
+- [ ] PostgreSQL event/trade ledger writes, idempotent execution transitions and worker lease integration (ordered migrations and an explicit manual migration runner are implemented)
 - [ ] Deterministic paper executor and migration-aware position state machine
-- [ ] Dynamic exhaustion exit signal backtest/calibration; no maximum holding duration
-- [ ] Portfolio sizing/capacity policy and invariant tests
+- [x] Dynamic exit-window metric builder for verified 2/5/10/30-second samples, with baseline resets across gaps/venue/phase/quote changes
+- [ ] Dynamic exhaustion exit signal backtest/calibration and Worker quote-gated position integration; no maximum holding duration
+- [x] Paper portfolio sizing/capacity policy and pure accounting invariant tests (Worker quote/executor integration remains outstanding)
 - [ ] Authenticated read-only Vercel dashboard backed by durable records
 - [ ] Historical replay and paper-forward validation before any strategy changes
 
 No implementation stage may bypass paper-only, strict-entry, fail-closed, no-fabricated-fill, or migration-aware exit invariants.
+
+## Official Pump SDK quote adapter
+- Added the official `@pump-fun/pump-sdk@4.3.1` dependency. The published package now includes the PumpSwap SDK at `@pump-fun/pump-sdk/swap`; do not add a duplicate standalone AMM SDK.
+- Dependency installation, typecheck, tests/build and Worker bundle validation passed after adding the official package (CI run 43185228566). A direct Vitest runtime import smoke test exposed Anchor CommonJS/ESM interop incompatibility and was removed. The Worker now imports both SDK entry points and reports module availability; its bundle compatibility check is pending CI.
+- Quote adapter implementation remains blocked on a safe integration contract: quotes must use one coherent, fresh market snapshot; the SDK's online RPC convenience methods can perform separate reads, so they must not be allowed to silently bypass the Helius same-slot verification. Also, an aggregate SDK fee total cannot be split into the ledger's protocol/creator/pool/transfer/network categories without authoritative fee evidence. Do not create an executable paper quote until those requirements are met.

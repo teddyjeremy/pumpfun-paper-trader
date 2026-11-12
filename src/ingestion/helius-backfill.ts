@@ -1,3 +1,5 @@
+import { buildHeliusRpcUrl, type HeliusRpcConfig } from "./helius.js";
+
 export interface AddressSignatureInfo {
   signature: string;
   slot: number;
@@ -45,6 +47,9 @@ export function createHistoricalBackfillState(input: {
   if (!BASE58_ADDRESS.test(input.mint)) throw new Error("Invalid mint address.");
   if (!BASE58_ADDRESS.test(input.bondingCurve)) throw new Error("Invalid bonding-curve address.");
   if (!BASE58_SIGNATURE.test(input.createSignature)) throw new Error("Invalid create signature.");
+  if (input.launchBlockTime !== null && (!Number.isSafeInteger(input.launchBlockTime) || input.launchBlockTime < 0)) {
+    throw new Error("Invalid verified launch block time.");
+  }
   const horizonSeconds = input.horizonSeconds ?? DEFAULT_BACKFILL_HORIZON_SECONDS;
   const maxSignatures = input.maxSignatures ?? DEFAULT_BACKFILL_MAX_SIGNATURES;
   if (!Number.isSafeInteger(horizonSeconds) || horizonSeconds < 60 || horizonSeconds > 1800) {
@@ -154,9 +159,14 @@ export function applyAddressSignaturesPage(
   const additions: AddressSignatureInfo[] = [];
   let foundCreate = false;
   let crossedBeforeLaunch = false;
+  let processedCount = 0;
 
   for (const item of parsed) {
+    processedCount += 1;
     if (item.signature === current.createSignature) {
+      if (item.blockTime === null || item.blockTime !== launchTime) {
+        return incomplete("The verified create signature has a missing or mismatched blockTime.");
+      }
       foundCreate = true;
       additions.push(item);
       break;
@@ -176,7 +186,9 @@ export function applyAddressSignaturesPage(
   }
 
   const merged = [...current.signatures, ...additions];
-  const scannedCount = current.scannedCount + parsed.length;
+  // Count only records through the create signature. RPC pages can contain
+  // newer transactions after the launch boundary; they are not part of this scan.
+  const scannedCount = current.scannedCount + processedCount;
   if (merged.length > current.maxSignatures || scannedCount > current.maxSignatures) {
     return incomplete("Historical backfill reached its configured signature-scan cap before coverage was proven.");
   }
@@ -209,4 +221,44 @@ export function applyAddressSignaturesPage(
     reason: null
   };
   return { status: "CONTINUE", state, signaturesToFetch: [] };
+}
+
+function incompleteBackfillPage(current: HistoricalBackfillState, reason: string): BackfillPageResult {
+  return {
+    status: "INCOMPLETE",
+    state: { ...current, status: "INCOMPLETE", reason },
+    signaturesToFetch: []
+  };
+}
+
+/** Fetch and consume one real Helius address-history page; state remains resumable between calls. */
+export async function fetchHeliusAddressSignaturesPage(
+  current: HistoricalBackfillState,
+  config: HeliusRpcConfig
+): Promise<BackfillPageResult> {
+  if (current.status === "COMPLETE" || current.status === "INCOMPLETE") {
+    return { status: current.status, state: current, signaturesToFetch: [] };
+  }
+  try {
+    const request = buildAddressSignaturesRequest(current.bondingCurve, current.before);
+    const fetcher = config.fetcher ?? fetch;
+    const response = await fetcher(buildHeliusRpcUrl(config.apiKey), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request)
+    });
+    if (!response.ok) return incompleteBackfillPage(current, `Helius signature history returned HTTP ${response.status}.`);
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return incompleteBackfillPage(current, "Helius signature history returned malformed JSON.");
+    }
+    const envelope = payload as Record<string, unknown>;
+    if (envelope.error) return incompleteBackfillPage(current, "Helius signature history returned a JSON-RPC error.");
+    if (!Object.prototype.hasOwnProperty.call(envelope, "result") || !Array.isArray(envelope.result)) {
+      return incompleteBackfillPage(current, "Helius signature history omitted its result page.");
+    }
+    return applyAddressSignaturesPage(current, envelope.result);
+  } catch {
+    return incompleteBackfillPage(current, "Helius signature history request failed before coverage could be verified.");
+  }
 }
