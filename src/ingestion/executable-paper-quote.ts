@@ -1,6 +1,7 @@
 import type { ExecutablePaperQuote } from "../paper/portfolio.js";
 import type { PumpSdkCurveQuote } from "./pump-sdk-curve-quote-adapter.js";
 import type { PumpSdkSwapQuote } from "./pump-sdk-quote-adapter.js";
+import { isSolQuoteMint } from "./trade-flow.js";
 
 export type OfflinePumpQuote = PumpSdkCurveQuote | PumpSdkSwapQuote;
 
@@ -119,6 +120,9 @@ export function buildExecutablePaperQuote(input: {
   const now = input.nowMs ?? Date.now();
   if (quote.transferTaxVerifiedZero !== true) {
     throw new Error("Transfer tax is not verified; quote cannot be used for a paper fill.");
+  }
+  if (!isSolQuoteMint(quote.quoteMint)) {
+    throw new Error("Only SOL and WSOL quote mints can be normalized with the current SOL/USD reference.");
   }
   if (quote.executionReady !== false) {
     throw new Error("Unexpected SDK quote readiness state.");
