@@ -136,4 +136,48 @@ describe("bounded Helius candidate monitor", () => {
     expect(taken.state.queue).toHaveLength(0);
     expect(normalizeHeliusMonitorState({ queue: Array(250).fill({}) }).queue).toHaveLength(MAX_HELIUS_SIGNATURE_QUEUE);
   });
+  it("schedules bounded transient retries with durable backoff and marks exhausted mints", () => {
+    const mint = candidate(0).mint;
+    const initial = enqueueHeliusSignatureWork(emptyHeliusMonitorState(), {
+      signature: sig, mint, slot: 10
+    }, "2026-11-12T12:00:00.000Z").state;
+    let state = initial;
+    const delays = [5_000, 15_000, 60_000];
+    for (let attempt = 0; attempt < delays.length; attempt += 1) {
+      const work = state.queue[0]!;
+      state = takeHeliusWork(state).state;
+      const now = Date.parse("2026-11-12T12:00:00.000Z") + attempt * 100_000;
+      const retry = retryHeliusSignatureWork(state, work, now);
+      expect(retry.outcome).toBe("RETRY_SCHEDULED");
+      expect(Date.parse(retry.retryAfterAt!)).toBe(now + delays[attempt]!);
+      expect(retry.state.queue[0]).toMatchObject({
+        signature: sig, mint, retryAttempt: attempt + 1,
+        retryAfterAt: new Date(now + delays[attempt]!).toISOString()
+      });
+      state = retry.state;
+    }
+    const last = state.queue[0]!;
+    state = takeHeliusWork(state).state;
+    const exhausted = retryHeliusSignatureWork(state, last, Date.parse("2026-11-12T12:10:00.000Z"));
+    expect(exhausted.outcome).toBe("EXHAUSTED");
+    expect(exhausted.state.queue).toHaveLength(0);
+    expect(exhausted.state.incompleteMints).toContain(mint);
+  });
+
+  it("fails closed instead of losing a retry when the bounded queue is full", () => {
+    const mint = candidate(0).mint;
+    const full = {
+      ...emptyHeliusMonitorState(),
+      queue: Array.from({ length: MAX_HELIUS_SIGNATURE_QUEUE }, (_, index) => ({
+        signature: sigFor(index), mint, slot: index, queuedAt: "2026-11-12T12:00:00.000Z"
+      }))
+    };
+    const work = { signature: sig, mint, slot: 500, queuedAt: "2026-11-12T12:00:00.000Z" };
+    const retry = retryHeliusSignatureWork(full, work, Date.parse("2026-11-12T12:00:00.000Z"));
+    expect(retry.outcome).toBe("OVERFLOW");
+    expect(retry.state.queue).toHaveLength(MAX_HELIUS_SIGNATURE_QUEUE);
+    expect(retry.state.incompleteMints).toContain(mint);
+    expect(retry.state.droppedSignatures).toBe(1);
+  });
+
 });
