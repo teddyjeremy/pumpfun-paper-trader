@@ -48,6 +48,7 @@ export function toVerifiedPumpCurveEvidence(curve: DecodedPumpCurveAccount) {
     verified: true as const,
     mint: curve.mint,
     curveAddress: curve.address,
+    quoteMint: curve.quoteMint,
     complete: curve.complete,
     migrated: false,
     tokenReserveBaseUnits: curve.realTokenReserves,
@@ -246,7 +247,8 @@ export function verifyCanonicalPumpSwapPoolSnapshot(input: {
   const baseVault = decodeSplTokenAccount(input.baseVaultAccount);
   const quoteVault = decodeSplTokenAccount(input.quoteVaultAccount);
   if (pool.address !== input.expectedPoolAddress || pool.index !== 0 ||
-      pool.creator !== input.expectedPoolCreatorAuthority) {
+      pool.creator !== input.expectedPoolCreatorAuthority ||
+      input.expectedPoolAuthority !== input.expectedPoolAddress) {
     throw new Error("PumpSwap pool is not the canonical migration pool for this mint.");
   }
   if (pool.baseMint !== input.expectedMint || baseVault.mint !== input.expectedMint ||
