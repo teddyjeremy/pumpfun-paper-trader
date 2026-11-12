@@ -84,7 +84,14 @@ export function verifyPumpQuoteAccountSnapshot(input: {
   for (let index = 0; index < entries.length; index += 1) {
     const [role, address] = entries[index]!;
     const account = input.snapshot.accounts[index] ?? null;
-    if (!account || account.address !== address) {
+    if (!account) {
+      if (role === "quoteMint" && address === "11111111111111111111111111111111") {
+        accounts[role] = null;
+        continue;
+      }
+      throw new Error(`Pump quote snapshot is missing or misordered the ${role} account.`);
+    }
+    if (account.address !== address) {
       throw new Error(`Pump quote snapshot is missing or misordered the ${role} account.`);
     }
     if (account.slot !== input.snapshot.slot || account.observedAt !== input.snapshot.observedAt) {
@@ -108,8 +115,21 @@ export async function fetchVerifiedPumpQuoteAccountSnapshot(input: {
   config: HeliusAccountReadConfig;
 }): Promise<VerifiedPumpQuoteSnapshot> {
   const roles = Object.keys(input.addresses) as PumpQuoteAccountRole[];
-  const addresses = roles.map(role => input.addresses[role]!);
-  const snapshot = await fetchHeliusMultipleAccounts(addresses, input.config);
+  const requestRoles = roles.filter(role =>
+    !(role === "quoteMint" && input.addresses.quoteMint === "11111111111111111111111111111111")
+  );
+  const requestAddresses = requestRoles.map(role => input.addresses[role]!);
+  const fetched = await fetchHeliusMultipleAccounts(requestAddresses, input.config);
+  let requestIndex = 0;
+  const snapshot: HeliusAccountSnapshot = {
+    ...fetched,
+    accounts: roles.map(role => {
+      if (role === "quoteMint" && input.addresses.quoteMint === "11111111111111111111111111111111") {
+        return null;
+      }
+      return fetched.accounts[requestIndex++] ?? null;
+    })
+  };
   return verifyPumpQuoteAccountSnapshot({
     addresses: input.addresses,
     snapshot,
