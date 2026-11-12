@@ -129,8 +129,8 @@ export async function getTradingDashboardSnapshot() {
 
   const persistence = await getPersistenceStatus();
   if (!persistence.connected) return unavailable("PostgreSQL is not connected");
-  if (persistence.migrationVersion !== "0003_dynamic_exit_observations") {
-    return unavailable("Required ledger migrations 0001, 0002 and 0003 are not all applied");
+  if (persistence.migrationVersion !== "0004_paper_session_event_ingestion") {
+    return unavailable("Required ledger migrations 0001, 0002, 0003 and 0004 are not all applied");
   }
 
   try {
