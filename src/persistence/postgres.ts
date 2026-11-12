@@ -1,4 +1,5 @@
 import pg from "pg";
+import { buildPaperLedgerProjection } from "./paper-ledger-projection.js";
 
 const { Pool } = pg;
 const connectionString = process.env.DATABASE_URL;
@@ -372,6 +373,77 @@ export async function persistPaperAuditEvents(
         [sessionId, event.eventId, event.sequence, event.kind, event.mint,
           event.strategyVersion, event.occurredAt, JSON.stringify(event.data ?? {})]
       );
+
+      // Keep queryable position/quote/trade projections in the same SQL
+      // transaction as the immutable journal event. A projection failure
+      // rolls back the event insert so the Durable Object outbox can retry.
+      const projection = buildPaperLedgerProjection(event);
+      for (const position of projection.positions) {
+        const projected = await client.query(
+          `INSERT INTO paper_position_projection
+            (session_id,external_position_id,mint,status,opened_at,closed_at,stake_usd,
+             token_amount_base_units,token_decimals,entry_price_usd_per_token,buy_costs_usd,
+             latest_liquidation_value_usd,realized_pnl_usd,exit_reason,last_event_sequence,snapshot)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)
+           ON CONFLICT (session_id,external_position_id) DO UPDATE SET
+             mint=EXCLUDED.mint,status=EXCLUDED.status,opened_at=EXCLUDED.opened_at,
+             closed_at=EXCLUDED.closed_at,stake_usd=EXCLUDED.stake_usd,
+             token_amount_base_units=EXCLUDED.token_amount_base_units,
+             token_decimals=EXCLUDED.token_decimals,
+             entry_price_usd_per_token=EXCLUDED.entry_price_usd_per_token,
+             buy_costs_usd=EXCLUDED.buy_costs_usd,
+             latest_liquidation_value_usd=EXCLUDED.latest_liquidation_value_usd,
+             realized_pnl_usd=EXCLUDED.realized_pnl_usd,exit_reason=EXCLUDED.exit_reason,
+             last_event_sequence=EXCLUDED.last_event_sequence,snapshot=EXCLUDED.snapshot,updated_at=now()
+           WHERE EXCLUDED.last_event_sequence >= paper_position_projection.last_event_sequence
+           RETURNING external_position_id`,
+          [sessionId, position.positionId, position.mint, position.status, position.openedAt,
+            position.closedAt, position.stakeUsd, position.tokenAmountBaseUnits,
+            position.tokenDecimals, position.entryPriceUsdPerToken, position.buyCostsUsd,
+            position.latestLiquidationValueUsd, position.realizedPnlUsd, position.exitReason,
+            event.sequence, JSON.stringify(position.raw)]
+        );
+        if ((projected.rowCount ?? 0) !== 1) throw new Error("Paper position projection conflicted with a newer event.");
+      }
+      for (const quote of projection.quotes) {
+        const projected = await client.query(
+          `INSERT INTO paper_execution_quote_projection
+            (session_id,external_quote_id,external_position_id,mint,side,provider,venue,context_slot,
+             observed_at,expires_at,requested_usd,input_amount_base_units,output_amount_base_units,
+             output_usd,price_impact_pct,simulated_latency_ms,simulated_fill_at,fee_breakdown_usd,raw_quote)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19::jsonb)
+           ON CONFLICT (session_id,external_quote_id) DO UPDATE SET
+             raw_quote=EXCLUDED.raw_quote
+           WHERE paper_execution_quote_projection.raw_quote=EXCLUDED.raw_quote
+           RETURNING external_quote_id`,
+          [sessionId, quote.quoteId, (projection.positions.find(position => position.mint === quote.mint)?.positionId) ??
+            String((event.data as Record<string, unknown>).positionId ?? ""),
+            quote.mint, quote.side, quote.provider, quote.venue ?? null, quote.slot ?? null,
+            quote.observedAt, quote.expiresAt, quote.requestedUsd, quote.inputAmountBaseUnits,
+            quote.outputAmountBaseUnits, quote.outputUsd, quote.priceImpactPct,
+            quote.simulatedLatencyMs, quote.simulatedFillAt,
+            JSON.stringify(quote.feeBreakdownUsd), JSON.stringify(quote.raw)]
+        );
+        if ((projected.rowCount ?? 0) !== 1) throw new Error("Paper quote projection id conflicts with different quote evidence.");
+      }
+      for (const trade of projection.trades) {
+        const projected = await client.query(
+          `INSERT INTO paper_trade_projection
+            (session_id,external_trade_id,external_position_id,mint,side,quote_id,executed_at,
+             token_amount_base_units,quote_amount_base_units,gross_usd,total_fees_usd,
+             simulated_latency_ms,raw_trade)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+           ON CONFLICT (session_id,external_trade_id) DO UPDATE SET
+             raw_trade=EXCLUDED.raw_trade
+           WHERE paper_trade_projection.raw_trade=EXCLUDED.raw_trade
+           RETURNING external_trade_id`,
+          [sessionId, trade.externalTradeId, trade.positionId, trade.mint, trade.side,
+            trade.quoteId, trade.executedAt, trade.tokenAmountBaseUnits,
+            trade.quoteAmountBaseUnits, trade.grossUsd, trade.totalFeesUsd,
+            trade.simulatedLatencyMs, JSON.stringify(trade.raw)]
+        );
+        if ((projected.rowCount ?? 0) !== 1) throw new Error("Paper trade projection id conflicts with different trade evidence.");
+      }
       const stopped = event.kind === "SESSION_STOPPED";
       await client.query(
         `UPDATE paper_sessions
