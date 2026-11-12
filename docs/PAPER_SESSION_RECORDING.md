@@ -6,6 +6,7 @@
 - Exactly USD 1.00 does not trigger a top-up.
 - Record every top-up immutably: sequence, timestamp, replenishment number, balance before, amount, balance after, cumulative top-ups and cumulative contributed capital.
 - Never erase losses or represent a top-up as trading profit.
+- Replenished capital restores cash but is excluded from portfolio-growth high-water marks, stake-tier increases and concurrent-position scaling.
 - Reports must separate initial bankroll, top-up count, total top-ups, total capital contributed, current equity, realized PnL and return against contributed capital.
 
 ## Required session journal
@@ -35,8 +36,8 @@ The journal must be append-only, paginated, restart-safe, exportable and retaine
 ## Implemented in the current draft PR
 - Durable Object session creation/closure is atomic. Session IDs, per-session bankroll and paper portfolio are persisted. Restart markers and minute heartbeats are recorded.
 - Append-only paginated event pages (100 events/page), monotonic per-session sequences and idempotency-key indexes. Event pages are retained in Durable Object storage without a session TTL.
-- Discovery, verified Helius observations, selected provider connections/disconnections/reconnects, queue/data gaps, candidate expiry, holder/funding risk evidence, feature snapshots, per-rule PASS/FAIL/UNKNOWN evaluations, strategy decisions, equity marks and top-ups are journaled.
-- The paper portfolio module enforces one-time mint entry, one initial concurrent position, stake scaling by 50% per portfolio doubling (capped at $100), additional slots per doubling, fresh exact-size quote evidence, per-side impact/tax limits and the 4% round-trip cost cap. It is a tested accounting primitive, not an automatically operated Worker executor.
+- Discovery, verified Helius observations, selected provider connections/disconnections/reconnects, non-queued Helius notifications (including overflow, invalid signatures, unknown subscriptions, failures and duplicates), queue/data gaps, candidate expiry, holder/funding risk evidence, feature snapshots, per-rule PASS/FAIL/UNKNOWN evaluations, strategy decisions, equity marks and top-ups are journaled.
+- The paper portfolio module enforces one-time mint entry, one initial concurrent position, stake scaling by 50% per portfolio doubling (capped at $100), additional slots per doubling, fresh exact-size quote evidence, per-side impact/tax limits and the 4% round-trip cost cap. Top-ups do not count as portfolio growth and cannot unlock larger stakes or more slots. It is a tested accounting primitive, not an automatically operated Worker executor.
 - Candidate outcome tracking is session-scoped. It stores the discovery reserve-price baseline where available, first observed trade baseline, first strategy-decision-time price (including WATCH decisions), post-decision peak and 1.5x/2x/3x milestone timestamps. Prices are quote-mint ratios, not USD prices. Pre-rejection peaks are not counted as post-rejection performance.
 - Read APIs (all control-token protected): `GET /audit/sessions`, paginated `GET /audit`, paginated JSON download `GET /audit/export`, `GET /paper-bankroll`, `GET /paper-portfolio`, `POST /paper-equity`, and `GET /candidate-outcomes`.
 
