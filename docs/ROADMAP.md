@@ -10,12 +10,13 @@
 - [x] Replace global Pump.fun logs listener with PumpPortal launch/migration discovery subscriptions
 - [ ] Verify no-key PumpPortal WebSocket handshake in the deployed Worker
 - [ ] Add reconnect/backoff and provider-gap reconciliation
-- [ ] Helius transaction verification adapter and selective account monitoring
+- [x] Helius transaction verification adapter and bounded candidate-specific monitoring (10 slots, durable queue, event verification, and evidence-driven slot rotation)
 - [ ] Verify Pump.fun official SDK/program interfaces and implement bonding-curve PDA/account decoder
 - [ ] Authoritative graduation detector and migrated-pool discovery
 - [ ] Helius backfill/reconciliation for missed provider events
-- [ ] Exact original entry observation windows and explainable decisions
-- [ ] Creator/linked-wallet/cluster evidence and hard rejection rules
+- [ ] Complete entry decision engine and explainable decisions (flow/price profiles exist, but volume-profile thresholds, signal-age confirmation, executable quotes, and ledger integration remain outstanding)
+- [x] Direct creator-sale screening, bounded wallet-funding linkage inspection, and observed individual/linked-cluster hard rejects
+- [ ] Complete wallet attribution and full holder census; current funding inspection is sampled and top-20 holder evidence is partial
 - [ ] Verified PumpSwap quote adapter with dynamic protocol/creator fee, network, priority, impact and slippage accounting
 - [ ] PostgreSQL migrations, append-only event/trade ledger, idempotency and worker leader lease
 - [ ] Deterministic paper executor and migration-aware position state machine
