@@ -64,12 +64,14 @@ describe("dynamic paper exit lifecycle", () => {
 
   it("holds with a fresh full-size sell quote when no exit condition is met", async () => {
     const commitExit = vi.fn();
+    const commitMark = vi.fn(async () => ({ status: "APPLIED" }));
     const result = await executePaperExit({
       position, marketState, windows: [], nowMs: now,
       quoteSell: async () => ({ quote: sellQuote(), context: { solUsd, costs } }),
-      commitExit
+      commitMark, commitExit
     });
     expect(result.status).toBe("HOLD");
+    expect(commitMark).toHaveBeenCalledOnce();
     expect(commitExit).not.toHaveBeenCalled();
   });
 
@@ -81,7 +83,7 @@ describe("dynamic paper exit lifecycle", () => {
         expect(tokenAmountBaseUnits).toBe(position.tokenAmountBaseUnits);
         return { quote: sellQuote(), context: { solUsd, costs } };
       },
-      commitExit
+      commitMark: vi.fn(), commitExit
     });
     expect(result.status).toBe("EXITED");
     expect(result.reason).toBe("DYNAMIC_EXHAUSTION");
@@ -96,7 +98,7 @@ describe("dynamic paper exit lifecycle", () => {
         quote: { ...sellQuote(), inputAmountBaseUnits: "999999" },
         context: { solUsd, costs }
       }),
-      commitExit
+      commitMark: vi.fn(), commitExit
     });
     expect(result.status).toBe("BLOCKED");
     expect(commitExit).not.toHaveBeenCalled();
