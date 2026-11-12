@@ -337,10 +337,10 @@ export function buildCandidatePriceVolumeProfiles(
     const pullbackVolume = pullbackBuckets.length ? summarizeStage(pullbackBuckets) : empty;
     const reclaimVolume = reclaimBuckets.length ? summarizeStage(reclaimBuckets) : empty;
     const coverageStart = options.coverageStartByMint?.[group.mint];
-    const coverageStatus = incomplete.has(group.mint)
-      ? "GAPPED"
-      : group.launchTime === null || coverageStart === undefined
-        ? "UNKNOWN"
+    const coverageStatus = group.launchTime === null || coverageStart === undefined
+      ? "UNKNOWN"
+      : incomplete.has(group.mint)
+        ? "GAPPED"
         : coverageStart <= group.launchTime
           ? "COMPLETE_FROM_LAUNCH"
           : "PARTIAL_FROM_LAUNCH";
@@ -366,7 +366,7 @@ export function buildCandidatePriceVolumeProfiles(
       pullbackLowTime: pullbackLowIndex >= 0 ? buckets[pullbackLowIndex]!.endTime : null,
       reclaimDetected: reclaimIndex >= 0,
       reclaimTime: reclaimIndex >= 0 ? buckets[reclaimIndex]!.endTime : null,
-      reclaimPrice: reclaimIndex >= 0 ? buckets[reclaimIndex]!.closePrice : null,
+      reclaimPrice: reclaimIndex >= 0 ? buckets[reclaimIndex]!.highPrice : null,
       reclaimAbovePreviousFiveSecondHighPct: reclaimAbovePct,
       impulseVolume,
       pullbackVolume,
