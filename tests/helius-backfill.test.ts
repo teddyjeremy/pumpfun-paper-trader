@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyAddressSignaturesPage,
   buildAddressSignaturesRequest,
-  createHistoricalBackfillState
+  createHistoricalBackfillState,
+  fetchHeliusAddressSignaturesPage
 } from "../src/ingestion/helius-backfill.js";
 
 const address = "So11111111111111111111111111111111111111112";
@@ -17,6 +18,44 @@ describe("bounded Helius historical backfill", () => {
     expect(request.method).toBe("getSignaturesForAddress");
     expect(request.params[1]).toEqual({ commitment: "confirmed", limit: 50, before: newer });
     expect(() => buildAddressSignaturesRequest(address, null, 1001)).toThrow(/limit/i);
+  });
+
+
+  it("fetches one Helius history page and returns a resumable continuation", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const result = await fetchHeliusAddressSignaturesPage(initial, {
+      apiKey: "test-key",
+      fetcher: async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(JSON.stringify({ result: [
+          { signature: newer, slot: 12, blockTime: 1060, err: null }
+        ] }), { status: 200 });
+      }
+    });
+    expect((requestBody as any)?.method).toBe("getSignaturesForAddress");
+    expect(result.status).toBe("CONTINUE");
+    expect(result.state.before).toBe(newer);
+  });
+
+  it("fails closed on HTTP, JSON-RPC and malformed history responses", async () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const httpFailure = await fetchHeliusAddressSignaturesPage(initial, {
+      apiKey: "test-key", fetcher: async () => new Response("", { status: 503 })
+    });
+    const rpcFailure = await fetchHeliusAddressSignaturesPage(initial, {
+      apiKey: "test-key", fetcher: async () => new Response(JSON.stringify({ error: { code: -1 } }), { status: 200 })
+    });
+    const malformed = await fetchHeliusAddressSignaturesPage(initial, {
+      apiKey: "test-key", fetcher: async () => new Response(JSON.stringify({ result: {} }), { status: 200 })
+    });
+    expect(httpFailure.status).toBe("INCOMPLETE");
+    expect(rpcFailure.status).toBe("INCOMPLETE");
+    expect(malformed.status).toBe("INCOMPLETE");
   });
 
   it("marks complete only after reaching the verified create signature", () => {
