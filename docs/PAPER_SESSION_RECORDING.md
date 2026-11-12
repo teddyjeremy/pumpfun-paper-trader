@@ -32,4 +32,17 @@ Each session needs a unique ID, UTC start/end, strategy/config version and durab
 ## Six-hour acceptance gate
 The journal must be append-only, paginated, restart-safe, exportable and retained beyond the run. A rolling latest-N array is insufficient. Use partitioned durable pages or a database event table, idempotent event IDs and monotonic sequence numbers. Test restart during append, duplicate delivery, pagination boundaries, quota failures and export/replay.
 
-IMPORTANT: src/paper/session-ledger.ts currently provides deterministic bankroll and candidate-outcome calculation primitives only. It is NOT yet connected to the Cloudflare Durable Object, discovery stream, Helius observations, decision engine or paper executor. The six-hour paper session remains blocked until that integration and its acceptance tests are complete.
+## Implemented in the current draft PR
+- Cloudflare Durable Object session creation/closure, session index, per-session bankroll persistence and restart markers.
+- Append-only paginated event pages (100 events/page), monotonically increasing per-session sequence, idempotency-key index, and session-selectable audit reads.
+- Discovery events, verified Helius transaction observations, selected provider status/error/gap events, equity marks and top-ups are connected to the journal.
+- `GET /audit/sessions`, `GET /audit?sessionId=...&after=...&limit=...`, `GET /paper-bankroll`, and `POST /paper-equity` are protected by the Worker control token.
+
+## Still blocked / not yet implemented
+- Strategy feature snapshots and per-rule decisions: the strategy evaluator is not connected.
+- Executable quote request/results, paper order/fill/position/exit accounting: quote adapter and paper executor are not implemented.
+- Candidate follow-up price sampling and rejection-time outcome tracking: not yet connected. Raw verified transactions are preserved, but this is not continuous price coverage for every rejected candidate.
+- Full provider outage/reconnect/queue-overflow and persistence-failure audit coverage remains incomplete.
+- Automated Durable Object restart, duplicate-delivery, pagination-boundary, quota-failure and export/replay acceptance tests are still required.
+
+The six-hour paper session remains blocked until those remaining integrations and acceptance tests pass. No claim of complete market-wide follow-up coverage is made.
