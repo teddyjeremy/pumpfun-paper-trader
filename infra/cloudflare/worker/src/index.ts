@@ -70,7 +70,6 @@ import {
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
   CONTROL_TOKEN: string;
-  CONTROL_TOKEN_SHA256?: string;
   HELIUS_API_KEY: string;
   PAPER_EVENT_INGEST_URL?: string;
   PAPER_EVENT_INGEST_TOKEN?: string;
@@ -2379,15 +2378,17 @@ function jsonSafe(value: unknown): unknown {
 
 async function authorized(request: Request, env: Env): Promise<boolean> {
   const authorization = request.headers.get("authorization") ?? "";
-  if (env.CONTROL_TOKEN && authorization === "Bearer " + env.CONTROL_TOKEN) return true;
-  if (!env.CONTROL_TOKEN_SHA256 || !authorization.startsWith("Bearer ")) return false;
-  const supplied = authorization.slice("Bearer ".length);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(supplied));
-  const actual = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-  if (actual.length !== env.CONTROL_TOKEN_SHA256.length) return false;
+  const expected = env.CONTROL_TOKEN;
+  if (!expected || !authorization.startsWith("Bearer ")) return false;
+
+  // Compare the configured secret directly in constant time. A committed
+  // fallback hash would keep old credentials valid after token rotation.
+  const supplied = new TextEncoder().encode(authorization.slice("Bearer ".length));
+  const configured = new TextEncoder().encode(expected);
+  if (supplied.length !== configured.length) return false;
   let difference = 0;
-  for (let index = 0; index < actual.length; index += 1) {
-    difference |= actual.charCodeAt(index) ^ env.CONTROL_TOKEN_SHA256.charCodeAt(index);
+  for (let index = 0; index < supplied.length; index += 1) {
+    difference |= supplied[index]! ^ configured[index]!;
   }
   return difference === 0;
 }
