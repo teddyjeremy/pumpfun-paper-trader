@@ -22,6 +22,8 @@ export interface ExecutablePaperQuote {
   protocolFeeUsd: number;
   creatorFeeUsd: number;
   poolFeeUsd: number;
+  /** Aggregate Pump SDK fee when the SDK does not expose a safe component split. */
+  pumpFeeUsd?: number;
   transferFeeUsd: number;
   routeId: string;
   executable: boolean;
