@@ -2,8 +2,9 @@ import type { PumpTradeEvent } from "./pump-events.js";
 import type { VerifiedPumpTransaction } from "./helius.js";
 
 export const TRADE_FLOW_WINDOW_SECONDS = 2;
+export const TRADE_FLOW_SAMPLE_INTERVAL_SECONDS = 1;
 export const TRADE_FLOW_HORIZON_SECONDS = 10 * 60;
-export const MAX_FLOW_WINDOWS_PER_MINT = TRADE_FLOW_HORIZON_SECONDS / TRADE_FLOW_WINDOW_SECONDS;
+export const MAX_FLOW_WINDOWS_PER_MINT = Math.ceil(TRADE_FLOW_HORIZON_SECONDS / TRADE_FLOW_SAMPLE_INTERVAL_SECONDS);
 // Pump.fun SOL-quoted markets use wrapped SOL as their quote mint.
 export const SOL_QUOTE_MINT = "So11111111111111111111111111111111111111112";
 export const LEGACY_SOL_QUOTE_MINT = "11111111111111111111111111111111";
@@ -31,6 +32,7 @@ export interface CandidateTradeFlow {
   quoteMint: string | null;
   quoteUnit: "SOL" | "NON_SOL_RAW" | "UNKNOWN";
   windowSeconds: number;
+  sampleIntervalSeconds: number;
   horizonSeconds: number;
   windows: TradeFlowWindow[];
   observedTradeEvents: number;
@@ -47,12 +49,13 @@ export interface CandidateTradeFlow {
 }
 
 /**
- * Build event-time flow windows from verified Pump.fun TradeEvents.
+ * Build overlapping event-time flow windows from verified Pump.fun TradeEvents.
+ * Each window spans two seconds and a new window is sampled every second.
  *
  * Volumes remain raw quote-mint base units. SOL quote events use lamports;
  * non-SOL quote mints are kept separate and are never compared with SOL.
- * Empty windows are omitted: absence of a decoded event is not proof of
- * zero trading or complete provider delivery.
+ * Missing windows are not synthesized as zero-volume observations: absence
+ * of decoded events is not proof of complete provider delivery.
  */
 export function buildCandidateTradeFlows(
   transactions: readonly VerifiedPumpTransaction[],
@@ -81,6 +84,7 @@ export function buildCandidateTradeFlows(
     mint: string;
     quoteMint: string | null;
     windows: Map<number, PumpTradeEvent[]>;
+    events: PumpTradeEvent[];
     ignoredMicroTradeCount: number;
     ignoredMicroTradeQuoteVolume: bigint;
   }>();
@@ -89,7 +93,7 @@ export function buildCandidateTradeFlows(
     const key = `${mint}:${quoteMint ?? "UNKNOWN"}`;
     let group = groups.get(key);
     if (!group) {
-      group = { mint, quoteMint, windows: new Map(), ignoredMicroTradeCount: 0, ignoredMicroTradeQuoteVolume: 0n };
+      group = { mint, quoteMint, windows: new Map(), events: [], ignoredMicroTradeCount: 0, ignoredMicroTradeQuoteVolume: 0n };
       groups.set(key, group);
     }
     return group;
@@ -109,18 +113,31 @@ export function buildCandidateTradeFlows(
         if (!Number.isFinite(notionalUsd) || notionalUsd <= minimumTradeUsd) {
           group.ignoredMicroTradeCount += 1;
           group.ignoredMicroTradeQuoteVolume += rawAmount;
-          const ignoredWindowStart = Math.floor(timestamp / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
-          if (ignoredWindowStart + TRADE_FLOW_WINDOW_SECONDS <= nowSeconds && !group.windows.has(ignoredWindowStart)) {
-            group.windows.set(ignoredWindowStart, []);
+          const latestWindowStart = Math.floor(timestamp / TRADE_FLOW_SAMPLE_INTERVAL_SECONDS) * TRADE_FLOW_SAMPLE_INTERVAL_SECONDS;
+          for (const ignoredWindowStart of [
+            latestWindowStart - TRADE_FLOW_SAMPLE_INTERVAL_SECONDS,
+            latestWindowStart
+          ]) {
+            if (ignoredWindowStart >= lowerBound &&
+                ignoredWindowStart + TRADE_FLOW_WINDOW_SECONDS <= nowSeconds &&
+                !group.windows.has(ignoredWindowStart)) {
+              group.windows.set(ignoredWindowStart, []);
+            }
           }
           continue;
         }
       }
-      const windowStart = Math.floor(timestamp / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
-      if (windowStart + TRADE_FLOW_WINDOW_SECONDS > nowSeconds) continue;
-      const events = group.windows.get(windowStart) ?? [];
-      events.push(trade);
-      group.windows.set(windowStart, events);
+      group.events.push(trade);
+      const latestWindowStart = Math.floor(timestamp / TRADE_FLOW_SAMPLE_INTERVAL_SECONDS) * TRADE_FLOW_SAMPLE_INTERVAL_SECONDS;
+      for (const windowStart of [
+        latestWindowStart - TRADE_FLOW_SAMPLE_INTERVAL_SECONDS,
+        latestWindowStart
+      ]) {
+        if (windowStart < lowerBound || windowStart + TRADE_FLOW_WINDOW_SECONDS > nowSeconds) continue;
+        const events = group.windows.get(windowStart) ?? [];
+        events.push(trade);
+        group.windows.set(windowStart, events);
+      }
     }
   }
 
@@ -137,20 +154,24 @@ export function buildCandidateTradeFlows(
       .slice(-MAX_FLOW_WINDOWS_PER_MINT)
       .map(([startTime, events]) => summarizeWindow(startTime, events));
     const latestThree = getLatestThreeConsecutive(windows);
-    const distinctBuyers = latestThree
-      ? new Set(latestThree.flatMap(window => window.buyers)).size
-      : 0;
-    const totalBuyVolume = latestThree
-      ? latestThree.reduce((sum, window) => sum + window.buyVolume, 0n)
-      : 0n;
+    const unionStart = latestThree?.[0]?.startTime ?? Number.POSITIVE_INFINITY;
+    const unionEnd = latestThree?.[2]?.endTime ?? Number.NEGATIVE_INFINITY;
+    const unionEvents = latestThree
+      ? group.events.filter(event => {
+          const timestamp = Number(event.timestamp);
+          return timestamp >= unionStart && timestamp < unionEnd;
+        })
+      : [];
     const buyerVolumes = new Map<string, bigint>();
-    if (latestThree) {
-      for (const window of latestThree) {
-        for (const [buyer, amount] of window.buyerVolumes) {
-          buyerVolumes.set(buyer, (buyerVolumes.get(buyer) ?? 0n) + amount);
-        }
-      }
+    for (const event of unionEvents) {
+      if (!event.isBuy) continue;
+      const amount = isSolQuoteMint(event.quoteMint)
+        ? (event.quoteAmount > 0n ? event.quoteAmount : event.solAmount)
+        : event.quoteAmount;
+      if (amount > 0n) buyerVolumes.set(event.user, (buyerVolumes.get(event.user) ?? 0n) + amount);
     }
+    const distinctBuyers = buyerVolumes.size;
+    const totalBuyVolume = [...buyerVolumes.values()].reduce((sum, amount) => sum + amount, 0n);
     const largestBuyerVolume = [...buyerVolumes.values()].reduce((max, amount) => amount > max ? amount : max, 0n);
     const largestBuyerShareBps = totalBuyVolume > 0n
       ? Number((largestBuyerVolume * 10_000n + totalBuyVolume - 1n) / totalBuyVolume)
@@ -159,9 +180,9 @@ export function buildCandidateTradeFlows(
     const coverageStart = options.coverageStartByMint?.[group.mint];
     const firstFullyCoveredWindow = coverageStart === undefined
       ? null
-      : Math.ceil(coverageStart / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
+      : Math.ceil(coverageStart / TRADE_FLOW_SAMPLE_INTERVAL_SECONDS) * TRADE_FLOW_SAMPLE_INTERVAL_SECONDS;
     const latestCompletedWindowEnd =
-      Math.floor(nowSeconds / TRADE_FLOW_WINDOW_SECONDS) * TRADE_FLOW_WINDOW_SECONDS;
+      Math.floor(nowSeconds / TRADE_FLOW_SAMPLE_INTERVAL_SECONDS) * TRADE_FLOW_SAMPLE_INTERVAL_SECONDS;
     const latestThreeAreFresh = Boolean(latestThree) &&
       latestThree![2]!.endTime === latestCompletedWindowEnd;
     const dataComplete = !incomplete.has(group.mint) &&
@@ -183,6 +204,7 @@ export function buildCandidateTradeFlows(
       quoteMint: group.quoteMint,
       quoteUnit: group.quoteMint === null ? "UNKNOWN" : isSolQuoteMint(group.quoteMint) ? "SOL" : "NON_SOL_RAW",
       windowSeconds: TRADE_FLOW_WINDOW_SECONDS,
+      sampleIntervalSeconds: TRADE_FLOW_SAMPLE_INTERVAL_SECONDS,
       horizonSeconds,
       windows: windows.map(({ buyers: _buyers, buyerVolumes: _buyerVolumes, buyVolume: _buyVolume, sellVolume: _sellVolume, ...window }) => window),
       observedTradeEvents: windows.reduce((sum, window) => sum + window.tradeCount, 0),
@@ -255,8 +277,8 @@ function summarizeWindow(startTime: number, events: readonly PumpTradeEvent[]) {
 function getLatestThreeConsecutive<T extends { startTime: number }>(windows: readonly T[]): T[] | null {
   if (windows.length < 3) return null;
   const latest = windows.slice(-3);
-  return latest[1]!.startTime === latest[0]!.startTime + TRADE_FLOW_WINDOW_SECONDS &&
-    latest[2]!.startTime === latest[1]!.startTime + TRADE_FLOW_WINDOW_SECONDS
+  return latest[1]!.startTime === latest[0]!.startTime + TRADE_FLOW_SAMPLE_INTERVAL_SECONDS &&
+    latest[2]!.startTime === latest[1]!.startTime + TRADE_FLOW_SAMPLE_INTERVAL_SECONDS
     ? latest
     : null;
 }
