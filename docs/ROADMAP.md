@@ -24,7 +24,7 @@
 - [ ] Complete wallet attribution and full holder census; current funding inspection is sampled and top-20 holder evidence is partial
 - [ ] Verified Pump/PumpSwap executable quote adapter using official SDK quote math, dynamic protocol/creator fees, network/priority costs, impact and slippage accounting
 - [x] Durable session journal core (append-only pages, idempotency, atomic session lifecycle, restart markers, pagination and JSON export); Durable Object runtime acceptance tests and six-hour soak remain outstanding
-- [ ] PostgreSQL migrations, append-only event/trade ledger, idempotency and worker leader lease
+- [ ] PostgreSQL event/trade ledger writes, idempotent execution transitions and worker lease integration (ordered migrations and an explicit manual migration runner are implemented)
 - [ ] Deterministic paper executor and migration-aware position state machine
 - [ ] Dynamic exhaustion exit signal backtest/calibration; no maximum holding duration
 - [x] Paper portfolio sizing/capacity policy and pure accounting invariant tests (Worker quote/executor integration remains outstanding)
