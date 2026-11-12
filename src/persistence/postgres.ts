@@ -700,7 +700,7 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
     await client.query("BEGIN");
     const session = await client.query("SELECT id FROM paper_sessions WHERE id=$1 FOR SHARE", [sessionId]);
     if (session.rowCount !== 1) throw new Error("Paper session must be ingested before its Helius archive.");
-    await client.query(
+    const checkpoint = await client.query(
       `INSERT INTO helius_backfill_jobs
         (session_id,mint,bonding_curve,create_signature,launch_block_time,horizon_seconds,max_signatures,
          pages_scanned,scanned_count,before_signature,status,reason,signature_count,signature_state,updated_at)
@@ -709,11 +709,27 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
          pages_scanned=EXCLUDED.pages_scanned,scanned_count=EXCLUDED.scanned_count,
          before_signature=EXCLUDED.before_signature,status=EXCLUDED.status,reason=EXCLUDED.reason,
          signature_count=EXCLUDED.signature_count,signature_state=EXCLUDED.signature_state,updated_at=now()
-       WHERE EXCLUDED.pages_scanned >= helius_backfill_jobs.pages_scanned`,
+       WHERE helius_backfill_jobs.bonding_curve=EXCLUDED.bonding_curve
+         AND helius_backfill_jobs.create_signature=EXCLUDED.create_signature
+         AND helius_backfill_jobs.launch_block_time IS NOT DISTINCT FROM EXCLUDED.launch_block_time
+         AND helius_backfill_jobs.horizon_seconds=EXCLUDED.horizon_seconds
+         AND helius_backfill_jobs.max_signatures=EXCLUDED.max_signatures
+         AND EXCLUDED.pages_scanned >= helius_backfill_jobs.pages_scanned
+         AND EXCLUDED.scanned_count >= helius_backfill_jobs.scanned_count
+         AND (EXCLUDED.pages_scanned > helius_backfill_jobs.pages_scanned OR
+           (EXCLUDED.scanned_count=helius_backfill_jobs.scanned_count
+            AND EXCLUDED.before_signature IS NOT DISTINCT FROM helius_backfill_jobs.before_signature
+            AND EXCLUDED.status=helius_backfill_jobs.status
+            AND EXCLUDED.reason IS NOT DISTINCT FROM helius_backfill_jobs.reason
+            AND EXCLUDED.signature_state=helius_backfill_jobs.signature_state))
+       RETURNING mint`,
       [sessionId,mint,state.bondingCurve,state.createSignature,state.launchBlockTime,state.horizonSeconds,
         state.maxSignatures,state.pagesScanned,state.scannedCount,state.before,state.status,state.reason,
         state.signatures.length,JSON.stringify(state.signatures)]
     );
+    if (checkpoint.rowCount !== 1) {
+      throw new Error("Historical backfill checkpoint conflicts with immutable identity or previously persisted progress.");
+    }
     if (transaction) {
       const raw = JSON.stringify(transaction);
       const result = await client.query(
