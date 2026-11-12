@@ -1,3 +1,4 @@
+import { deriveCanonicalPumpSwapPoolPda, derivePumpBondingCurvePda, derivePumpPoolCreatorAuthorityPda, derivePumpSwapPoolVaultAuthority } from "./pump-pdas.js";
 import {
   decodeVerifiedPumpCurveAccount, toVerifiedPumpCurveEvidence,
   verifyCanonicalPumpSwapPoolSnapshot, type RawProgramAccount
@@ -7,13 +8,12 @@ import { updatePumpMarketState, type PumpMarketState } from "../paper/pump-marke
 export function applyVerifiedPumpCurveAccount(input: {
   state: PumpMarketState;
   account: RawProgramAccount;
-  expectedCurveAddress: string;
   nowMs?: number;
 }): PumpMarketState {
   const decoded = decodeVerifiedPumpCurveAccount({
     account: input.account,
     expectedMint: input.state.mint,
-    expectedCurveAddress: input.expectedCurveAddress
+    expectedCurveAddress: derivePumpBondingCurvePda(input.state.mint)
   });
   return updatePumpMarketState(input.state, {
     curve: toVerifiedPumpCurveEvidence(decoded),
@@ -26,19 +26,21 @@ export function applyVerifiedPumpSwapPoolAccounts(input: {
   poolAccount: RawProgramAccount;
   baseVaultAccount: RawProgramAccount;
   quoteVaultAccount: RawProgramAccount;
-  expectedPoolAddress: string;
-  expectedPoolCreatorAuthority: string;
-  expectedPoolAuthority: string;
   nowMs?: number;
 }): PumpMarketState {
+  const quoteMint = input.state.curve?.quoteMint;
+  if (!quoteMint) throw new Error("A verified curve quote mint is required to derive the canonical PumpSwap pool.");
+  const expectedPoolAddress = deriveCanonicalPumpSwapPoolPda(input.state.mint, quoteMint);
+  const expectedPoolCreatorAuthority = derivePumpPoolCreatorAuthorityPda(input.state.mint);
+  const expectedPoolAuthority = derivePumpSwapPoolVaultAuthority(expectedPoolAddress);
   const pool = verifyCanonicalPumpSwapPoolSnapshot({
     poolAccount: input.poolAccount,
     baseVaultAccount: input.baseVaultAccount,
     quoteVaultAccount: input.quoteVaultAccount,
     expectedMint: input.state.mint,
-    expectedPoolAddress: input.expectedPoolAddress,
-    expectedPoolCreatorAuthority: input.expectedPoolCreatorAuthority,
-    expectedPoolAuthority: input.expectedPoolAuthority,
+    expectedPoolAddress,
+    expectedPoolCreatorAuthority,
+    expectedPoolAuthority,
     ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs })
   });
   return updatePumpMarketState(input.state, {
