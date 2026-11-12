@@ -37,8 +37,8 @@ The integration is being promoted in [PR #40](https://github.com/teddyjeremy/pum
 
 ## What remains
 
-1. **Historical replay:** port replay and decode-coverage migration onto this branch; replay the actual strict strategy chronologically using verified observations.
-2. **Calibrate volume rules:** use chronological training/holdout sets to evaluate pullback contraction and reclaim expansion; do not invent thresholds or promote a weak holdout result.
+1. **Validate historical replay:** run the new replay API against collected sessions, inspect incomplete-coverage outcomes and verify that archived observations match the intended launch windows. Migration 0007 is additive and must be explicitly reviewed/applied before the replay API can read decode-completeness fields.
+2. **Complete strategy replay and calibration:** include every mandatory rule and the documented dynamic exit behavior; use chronological training/holdout sets to evaluate pullback contraction and reclaim expansion. Do not invent thresholds or promote a weak holdout result.
 3. **Complete quote economics:** add supported Token-2022 transfer-fee handling or fail-closed rejection, authoritative network/priority fee estimates, and validated impact/slippage policy.
 4. **Connect paper execution:** connect quote-gated entry/exit lifecycle to the actual Worker position scheduler and persist complete position/trade transitions.
 5. **Complete migration lifecycle:** verify graduation and canonical PumpSwap market state, monitor full-position sellability and keep positions open when quotes are unavailable.
