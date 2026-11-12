@@ -489,8 +489,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
     if (monitoredMints.length === 0) return;
     const report = await this.listTradeFlows() as {
-      flows: Array<{ mint: string; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
-      priceVolumeProfiles: Array<{ mint:string; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
+      flows: Array<{ mint: string; quoteMint: string | null; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
+      priceVolumeProfiles: Array<{ mint:string; quoteMint:string|null; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
       creatorSellRisk: Array<{mint:string;status:string}>;
       walletClusterRisk: Array<{mint:string;status:string}>;
     };
@@ -502,8 +502,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const launchTimestamp = launchEvent ? Number(launchEvent.timestamp) : Number.NaN;
       const ageSeconds = Number.isSafeInteger(launchTimestamp) && launchTimestamp >= 0
         ? Math.max(0, Date.now() / 1000 - launchTimestamp) : null;
-      const profile = report.priceVolumeProfiles.find(item => item.mint === mint) ?? null;
-      const flow = report.flows.find(item => item.mint === mint) ?? null;
+      const profile = report.priceVolumeProfiles.find(item => item.mint === mint && item.quoteMint === SOL_QUOTE_MINT) ?? null;
+      const flow = report.flows.find(item => item.mint === mint && item.quoteMint === SOL_QUOTE_MINT) ?? null;
       const creatorRisk = report.creatorSellRisk.find(item => item.mint === mint);
       const walletRisk = report.walletClusterRisk.find(item => item.mint === mint);
       const links = this.walletLinkSnapshots[mint]?.links ?? [];
