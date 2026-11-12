@@ -379,14 +379,19 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private auditInBackground(kind: AuditKind, mint: string | null, data: unknown, idempotencyKey?: string): void {
-    this.ctx.waitUntil(this.appendAudit(kind, mint, data, idempotencyKey).catch(() => {
+    // Capture the session before asynchronous work: stop() clears the active
+    // pointer after its final transaction, but this event still belongs to it.
+    const sessionId = this.activeSessionId;
+    if (!sessionId) return;
+    this.ctx.waitUntil(this.appendAudit(kind, mint, data, idempotencyKey, sessionId).catch(() => {
       this.status.lastError = "Audit journal append failed.";
     }));
   }
 
-  private async appendAudit(kind: AuditKind, mint: string | null, data: unknown, idempotencyKey?: string): Promise<void> {
-    if (!this.activeSessionId) return;
-    const sessionId = this.activeSessionId;
+  private async appendAudit(kind: AuditKind, mint: string | null, data: unknown,
+    idempotencyKey?: string, sessionIdOverride?: string): Promise<void> {
+    const sessionId = sessionIdOverride ?? this.activeSessionId;
+    if (!sessionId) return;
     const eventId = idempotencyKey ?? crypto.randomUUID();
     await this.ctx.storage.transaction(async txn => {
       const metaKey = `audit_session:${sessionId}`;
