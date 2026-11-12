@@ -2,7 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { fileURLToPath } from "node:url";
 import { applyDatabaseMigrations } from "../src/db/migrate.js";
-import { persistPaperAuditEvents } from "../src/persistence/postgres.js";
+import {
+  acquireWorkerLease,
+  heartbeatWorkerLease,
+  persistPaperAuditEvents,
+  releaseWorkerLease
+} from "../src/persistence/postgres.js";
 
 const { Pool } = pg;
 const databaseUrl = process.env.DATABASE_URL;
@@ -73,6 +78,33 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
 
   afterAll(async () => {
     await inspector?.end();
+  });
+
+
+  it("fences expired PostgreSQL worker leases from stale owners", async () => {
+    const leaseName = `${sessionId}-worker`;
+    const first = await acquireWorkerLease(leaseName, "worker-a", 15);
+    expect(first.acquired).toBe(true);
+
+    const competing = await acquireWorkerLease(leaseName, "worker-b", 15);
+    expect(competing.acquired).toBe(false);
+    expect((await heartbeatWorkerLease(leaseName, "worker-b", 15)).acquired).toBe(false);
+    expect((await heartbeatWorkerLease(leaseName, "worker-a", 15)).acquired).toBe(true);
+    expect(await releaseWorkerLease(leaseName, "worker-b")).toBe(false);
+
+    await inspector!.query(
+      "UPDATE worker_leases SET expires_at=now()-interval '1 second' WHERE lease_name=$1",
+      [leaseName]
+    );
+    const takeover = await acquireWorkerLease(leaseName, "worker-c", 15);
+    expect(takeover.acquired).toBe(true);
+    expect(takeover.ownerId).toBe("worker-c");
+
+    // The former owner must not renew or release the new owner's lease.
+    expect((await heartbeatWorkerLease(leaseName, "worker-a", 15)).acquired).toBe(false);
+    expect(await releaseWorkerLease(leaseName, "worker-a")).toBe(false);
+    expect((await heartbeatWorkerLease(leaseName, "worker-c", 15)).acquired).toBe(true);
+    expect(await releaseWorkerLease(leaseName, "worker-c")).toBe(true);
   });
 
   it("persists projections atomically and makes exact retries idempotent", async () => {
