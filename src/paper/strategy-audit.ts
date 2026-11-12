@@ -48,8 +48,12 @@ function result(rule: string, status: RuleStatus, actual: unknown, expected: str
 export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, evaluatedAt = new Date().toISOString()): StrictStrategyAudit {
   const rules: RuleResult[] = [];
   rules.push(input.candidateAgeSeconds === null || !Number.isFinite(input.candidateAgeSeconds) || input.candidateAgeSeconds < 0
-    ? result("CANDIDATE_AGE", "UNKNOWN", input.candidateAgeSeconds, "verified non-negative launch age; no 60-second entry cutoff", "A valid launch timestamp is unavailable or appears to be in the future.")
-    : result("CANDIDATE_AGE", "PASS", input.candidateAgeSeconds, "monitor eligible candidates for at least 10 minutes; do not reject solely after 60 seconds", "Candidate age is informational. The agreed strategy does not impose a first-minute entry cutoff."));
+    ? result("CANDIDATE_AGE", "UNKNOWN", input.candidateAgeSeconds, "verified launch age from 0 through 60 seconds", "A valid launch timestamp is unavailable or appears to be in the future.")
+    : result("CANDIDATE_AGE", input.candidateAgeSeconds <= 60 ? "PASS" : "FAIL",
+      input.candidateAgeSeconds, "<= 60 seconds from verified launch",
+      input.candidateAgeSeconds <= 60
+        ? "The entry signal is within the agreed first-minute window."
+        : "Entries are only allowed during the first 60 seconds after verified launch."));
   const profile = input.profile;
   rules.push(!profile || !profile.dataComplete || profile.microTradeFilterStatus !== "APPLIED" || profile.impulsePriceChangePct === null
     ? result("IMPULSE", "UNKNOWN", profile?.impulsePriceChangePct ?? null, ">= +20%", "Insufficient verified price history.")
@@ -67,7 +71,7 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
     window.flowWindowPass && window.uniqueBuyers >= 3 && window.uniqueSellers <= window.uniqueBuyers / 2
   );
   rules.push(!input.flow || !input.flow.dataComplete || !threeWindowsAvailable || input.flow.microTradeFilterStatus !== "APPLIED"
-    ? result("THREE_FLOW_WINDOWS", "UNKNOWN", windows, "3 consecutive completed 2-second windows; each >3:1, >=3 buyers, sellers <= half buyers", "Three fully covered consecutive windows are not available.")
+    ? result("THREE_FLOW_WINDOWS", "UNKNOWN", windows, "3 consecutive completed 2-second windows sampled 1 second apart; each >3:1, >=3 buyers, sellers <= half buyers", "Three fully covered consecutive windows are not available.")
     : result("THREE_FLOW_WINDOWS", flowWindowsPass ? "PASS" : "FAIL", windows, "each window >3:1, >=3 buyers, sellers <= half buyers", "Every one of the three latest completed windows must pass."));
   rules.push(!input.flow || !input.flow.dataComplete || input.flow.microTradeFilterStatus !== "APPLIED"
     ? result("DISTINCT_BUYERS", "UNKNOWN", input.flow?.distinctBuyersAcrossLatestThree ?? null, ">= 5 distinct buyers", "Buyer coverage is incomplete.")
