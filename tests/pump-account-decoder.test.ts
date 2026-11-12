@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decodePumpSwapPoolAccount, decodeSplTokenAccount, decodeVerifiedPumpCurveAccount,
-  verifyCanonicalPumpSwapPoolSnapshot, PUMP_AMM_PROGRAM_ID, PUMP_PROGRAM_ID,
+  verifyCanonicalPumpSwapPoolSnapshot, toVerifiedPumpCurveEvidence, PUMP_AMM_PROGRAM_ID, PUMP_PROGRAM_ID,
   SPL_TOKEN_PROGRAM_ID
 } from "../src/ingestion/pump-account-decoder.js";
 
@@ -48,6 +48,10 @@ describe("IDL-aligned Pump account decoders", () => {
     const decoded = decodeVerifiedPumpCurveAccount({
       account: account("curve-pda", PUMP_PROGRAM_ID, curveData()),
       expectedMint: "mint", expectedCurveAddress: "curve-pda"
+    });
+    expect(toVerifiedPumpCurveEvidence(decoded)).toMatchObject({
+      source: "verified-pump-curve-account", verified: true, mint: "mint", curveAddress: "curve-pda",
+      complete: false, migrated: false, tokenReserveBaseUnits: "700", quoteReserveBaseUnits: "1500"
     });
     expect(decoded).toMatchObject({
       mint: "mint", complete: false, migrated: false,
