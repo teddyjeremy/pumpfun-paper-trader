@@ -72,4 +72,53 @@ describe("Helius same-slot account snapshots", () => {
       })
     })).rejects.toThrow(/size limit/);
   });
+
+  it("discovers mint-matched PumpSwap pools but only selects the SDK-identified canonical pool", async () => {
+    const data = new Uint8Array(271);
+    data.set([241, 154, 109, 4, 17, 177, 109, 188], 0);
+    data[8] = 254;
+    data[9] = 0; data[10] = 0;
+    const payload = {
+      result: { context: { slot: 321 }, value: [{
+        pubkey: "canonical-pool",
+        account: { owner: PUMP_AMM_PROGRAM_ID, data: [encoded(Array.from(data)), "base64"] }
+      }] }
+    };
+    const fetcher = async (_url: unknown, _init?: RequestInit) => response(payload);
+    const config = { apiKey: "test", now: () => Date.parse("2026-11-12T12:00:00.000Z"), fetcher };
+    const discovered = await discoverPumpSwapPoolsForMint("11111111111111111111111111111111", config);
+    expect(discovered).toMatchObject({ contextSlot: 321, pools: [{ address: "canonical-pool", index: 0 }] });
+    const selected = await discoverCanonicalPumpSwapPoolForMint({
+      mint: "11111111111111111111111111111111",
+      expectedPoolAddress: "canonical-pool",
+      expectedPoolCreatorAuthority: "11111111111111111111111111111111",
+      config
+    });
+    expect(selected?.pool.address).toBe("canonical-pool");
+    const notCanonical = await discoverCanonicalPumpSwapPoolForMint({
+      mint: "11111111111111111111111111111111",
+      expectedPoolAddress: "other-pool",
+      expectedPoolCreatorAuthority: "11111111111111111111111111111111",
+      config
+    });
+    expect(notCanonical).toBeNull();
+  });
+
+  it("bounds PumpSwap discovery candidates and rejects non-PumpSwap accounts", async () => {
+    const data = new Uint8Array(271);
+    data.set([241, 154, 109, 4, 17, 177, 109, 188], 0);
+    await expect(discoverPumpSwapPoolsForMint("11111111111111111111111111111111", {
+      apiKey: "test", maxPoolCandidates: 0, fetcher: async () => response({
+        result: { context: { slot: 1 }, value: [] }
+      })
+    })).rejects.toThrow(/between 1 and 50/);
+    await expect(discoverPumpSwapPoolsForMint("11111111111111111111111111111111", {
+      apiKey: "test", fetcher: async () => response({
+        result: { context: { slot: 1 }, value: [{
+          pubkey: "fake", account: { owner: "not-pump", data: [encoded(Array.from(data)), "base64"] }
+        }] }
+      })
+    })).rejects.toThrow(/not owned/);
+  });
+
 });
