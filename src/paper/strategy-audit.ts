@@ -19,6 +19,7 @@ export interface StrictStrategyAuditInput {
   } | null;
   flow: {
     dataComplete: boolean;
+    latestThreeWindowFlowPass: boolean;
     windows: Array<{ buySellRatio: number | null; uniqueBuyers: number; uniqueSellers: number }>;
     distinctBuyersAcrossLatestThree: number;
     largestBuyerShareAcrossLatestThreeBps: number | null;
@@ -60,7 +61,7 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
       profile.reclaimAbovePreviousFiveSecondHighPct, ">= +1%", "Reclaim must exceed the previous completed 5-second high."));
   const windows = input.flow?.windows.slice(-3) ?? [];
   const threeWindowsAvailable = windows.length === 3;
-  const flowWindowsPass = threeWindowsAvailable && windows.every(window =>
+  const flowWindowsPass = Boolean(input.flow?.latestThreeWindowFlowPass) && threeWindowsAvailable && windows.every(window =>
     window.buySellRatio !== null && window.buySellRatio > 3 &&
     window.uniqueBuyers >= 3 && window.uniqueSellers <= window.uniqueBuyers / 2
   );

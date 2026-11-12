@@ -5,7 +5,7 @@ import { evaluateStrictStrategyAudit } from "../../../../src/paper/strategy-audi
 
 type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "SESSION_HEARTBEAT" | "WORKER_RESTARTED" | "DISCOVERY" |
   "DISCOVERY_INCOMPLETE" | "DISCOVERY_OVERFLOW" | "CANDIDATE_EXPIRED" | "OBSERVATION" |
-  "FEATURE_SNAPSHOT" | "STRATEGY_DECISION" | "REJECTION_REASON" | "QUOTE_REQUESTED" |
+  "FEATURE_SNAPSHOT" | "STRATEGY_DECISION" | "RULE_EVALUATION" | "REJECTION_REASON" | "QUOTE_REQUESTED" |
   "QUOTE_RESULT" | "PAPER_ENTRY" | "PAPER_EXIT" | "POSITION_MARK" | "DATA_GAP" |
   "PROVIDER_STATUS" | "ERROR" | "RISK_EVIDENCE" | "BANKROLL_TOP_UP" | "CANDIDATE_OUTCOME";
 interface StoredAuditEvent {
@@ -462,7 +462,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
     if (monitoredMints.length === 0) return;
     const report = await this.listTradeFlows() as {
-      flows: Array<{ mint: string; dataComplete: boolean; windows: Array<{buySellRatio:number|null;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
+      flows: Array<{ mint: string; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
       priceVolumeProfiles: Array<{ mint:string; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
       creatorSellRisk: Array<{mint:string;status:string}>;
       walletClusterRisk: Array<{mint:string;status:string}>;
@@ -471,8 +471,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const candidate = await this.ctx.storage.get<Record<string, unknown>>(
         `candidate_seen:${this.activeSessionId}:${mint}`
       );
-      const firstSeenAt = typeof candidate?.firstSeenAt === "string" ? Date.parse(candidate.firstSeenAt) : Number.NaN;
-      const ageSeconds = Number.isFinite(firstSeenAt) ? Math.max(0, (Date.now() - firstSeenAt) / 1000) : null;
+      const launchEvent = this.verifiedTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
+      const launchTimestamp = launchEvent ? Number(launchEvent.timestamp) : Number.NaN;
+      const ageSeconds = Number.isSafeInteger(launchTimestamp) && launchTimestamp >= 0
+        ? Math.max(0, Date.now() / 1000 - launchTimestamp) : null;
       const profile = report.priceVolumeProfiles.find(item => item.mint === mint) ?? null;
       const flow = report.flows.find(item => item.mint === mint) ?? null;
       const creatorRisk = report.creatorSellRisk.find(item => item.mint === mint);
@@ -489,7 +491,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           reclaimVolumeVsPullbackPct: profile.reclaimVolumeVsPullbackPct, dataComplete: profile.dataComplete
         } : null,
         flow: flow ? {
-          dataComplete: flow.dataComplete, windows: flow.windows,
+          dataComplete: flow.dataComplete, latestThreeWindowFlowPass: flow.latestThreeWindowFlowPass, windows: flow.windows,
           distinctBuyersAcrossLatestThree: flow.distinctBuyersAcrossLatestThree,
           largestBuyerShareAcrossLatestThreeBps: flow.largestBuyerShareAcrossLatestThreeBps
         } : null,
@@ -503,11 +505,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         `features:${triggerSignature}:${mint}`);
       await this.appendAudit("STRATEGY_DECISION", mint, evaluated,
         `decision:${triggerSignature}:${mint}`);
-      for (const reason of [...evaluated.rejectionReasons, ...evaluated.watchReasons, ...evaluated.blockingUnknownRules]) {
+      for (const rule of evaluated.rules) {
+        await this.appendAudit("RULE_EVALUATION", mint, { triggerSignature, ...rule },
+          `rule:${triggerSignature}:${mint}:${rule.rule}`);
+      }
+      for (const reason of [...evaluated.rejectionReasons, ...evaluated.watchReasons]) {
         await this.appendAudit("REJECTION_REASON", mint, {
           triggerSignature, reason,
-          classification: evaluated.rejectionReasons.includes(reason) ? "REJECT" :
-            evaluated.watchReasons.includes(reason) ? "WATCH" : "UNKNOWN"
+          classification: evaluated.rejectionReasons.includes(reason) ? "REJECT" : "WATCH"
         }, `decision-reason:${triggerSignature}:${mint}:${reason}`);
       }
     }
