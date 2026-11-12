@@ -1170,14 +1170,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
       const holder = this.holderRiskSnapshots[mint];
       const walletLinks = this.walletLinkSnapshots[mint];
-      const holderNeedsRefresh = !holder ||
-        (holder.status === "OBSERVED"
-          ? now - Date.parse(holder.snapshot.observedAt) >= 120_000
-          : now - lastAttempt >= 60_000);
-      const walletLinksNeedRefresh = !walletLinks ||
-        (walletLinks.status === "OBSERVED"
-          ? now - Date.parse(walletLinks.observedAt) >= 120_000
-          : now - lastAttempt >= 60_000);
+      const holderObservedAt = holder?.status === "OBSERVED" ? Date.parse(holder.snapshot.observedAt) : Number.NaN;
+      const walletLinksObservedAt = walletLinks?.status === "OBSERVED" ? Date.parse(walletLinks.observedAt) : Number.NaN;
+      const holderNeedsRefresh = !holder || !Number.isFinite(holderObservedAt) ||
+        holderObservedAt > now || now - holderObservedAt >= 120_000 ||
+        (holder.status !== "OBSERVED" && now - lastAttempt >= 60_000);
+      const walletLinksNeedRefresh = !walletLinks || !Number.isFinite(walletLinksObservedAt) ||
+        walletLinksObservedAt > now || now - walletLinksObservedAt >= 120_000 ||
+        (walletLinks.status !== "OBSERVED" && now - lastAttempt >= 60_000);
 
       let evidenceType: "HOLDER_CONCENTRATION" | "WALLET_CLUSTER";
       if (holderNeedsRefresh) {
@@ -1195,12 +1195,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.riskEvidenceAttemptedAtByMint[mint] = now;
       await this.ctx.storage.put("risk_evidence_attempted_at_by_mint", this.riskEvidenceAttemptedAtByMint);
       try {
-        if (evidenceType === "HOLDER_CONCENTRATION") {
-          await this.getHolderRisk(mint);
-        } else {
-          await this.collectWalletLinks(mint);
-        }
-        return { status: "COLLECTED", mint, evidenceType };
+        const result = evidenceType === "HOLDER_CONCENTRATION"
+          ? await this.getHolderRisk(mint)
+          : await this.collectWalletLinks(mint);
+        const evidenceStatus = result && typeof result === "object" && "status" in result
+          ? String(result.status) : "UNKNOWN";
+        return {
+          status: evidenceStatus === "OBSERVED" ? "COLLECTED" : "DATA_INCOMPLETE",
+          mint, evidenceType, evidenceStatus
+        };
       } catch (error) {
         await this.appendAudit("DATA_GAP", mint, {
           reason: "AUTOMATED_RISK_EVIDENCE_COLLECTION_FAILED",
