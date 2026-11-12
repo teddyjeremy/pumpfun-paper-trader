@@ -44,10 +44,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS positions_session_external_id_idx
 ALTER TABLE execution_quotes
   ADD COLUMN IF NOT EXISTS session_id TEXT REFERENCES paper_sessions(id),
   ADD COLUMN IF NOT EXISTS external_quote_id TEXT,
-  ADD COLUMN IF NOT EXISTS pump_fee_lamports NUMERIC(30,0),
-  ADD COLUMN IF NOT EXISTS venue TEXT,
-  ADD COLUMN IF NOT EXISTS pool_address TEXT,
-  ADD COLUMN IF NOT EXISTS market_phase TEXT NOT NULL DEFAULT 'bonding_curve';
+  ADD COLUMN IF NOT EXISTS pump_fee_lamports NUMERIC(30,0);
 
 CREATE UNIQUE INDEX IF NOT EXISTS execution_quotes_session_external_id_idx
   ON execution_quotes (session_id, external_quote_id)
