@@ -30,6 +30,8 @@ export interface HeliusSignatureWork {
   /** Null when queued from a provider discovery event without a slot. */
   slot: number | null;
   queuedAt: string;
+  retryAttempt?: number;
+  retryAfterAt?: string;
 }
 
 export interface HeliusMonitorState {
