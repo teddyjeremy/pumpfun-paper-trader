@@ -9,6 +9,9 @@
 - [x] Price/volume and overlapping trade-flow evidence foundations
 - [x] Official Pump SDK offline curve and PumpSwap quote adapters
 - [x] Normalized executable-paper-quote converter with freshness, cost fields and latency expiry checks
+- [x] Exact-size buy/full-output sell quote preflight, same-market sellability checks, SOL/USD normalization and round-trip economics
+- [x] Helius recent priority-fee sampling with explicit compute-unit/signature assumptions, account-specific scope and fee caps
+- [x] 2% per-side price-impact and 4% combined fee/impact/tax cost gates at the paper execution boundary
 - [x] Portfolio sizing and Durable Object session-journal primitives
 - [x] PostgreSQL base migrations, audit ingestion and worker lease primitives
 - [x] Dynamic exit evidence-family evaluator with correlated-signal grouping and two confirmation paths
@@ -28,9 +31,9 @@ These components are already on current `main`:
 
 1. [x] Integrate PostgreSQL ledger projections, Helius backfill archive/checkpoints and resumable retry queue into main.
 2. [x] Implement chronological historical price/volume and rolling-flow replay, verified archive hydration, decode-completeness gating and authenticated read-only replay/backfill APIs (PR #45, merged).
-3. [x] Extend historical replay with creator-sale and wallet-cluster risk statuses, separate market-pattern candidates from risk-cleared candidates, and prevent future-evidence leakage (PR #48, merged).
+3. [x] Add creator-sale and wallet-cluster risk evidence to historical replay, separate market-pattern from risk-cleared candidates, and prevent future-evidence leakage (PR #48). [ ] Require a complete holder census before profitability labels can be assigned; top-20 evidence is reject-only (PR #50). [ ] Hydrate historical risk events from the PostgreSQL audit journal.
 4. [ ] Run replay against collected sessions and calibrate pullback contraction/reclaim expansion with chronological training and holdout data. Require adequate sample sizes and both outcome classes; never auto-promote thresholds.
-5. [ ] Complete Token-2022 transfer-fee handling or explicit fail-closed rejection, authoritative network/priority fee estimation and validated impact/slippage policy. Current paper-entry and paper-exit boundaries enforce <=2% per-side price impact; entry also enforces <=4% combined buy/sell fees.
+5. [x] Add exact-size round-trip quote preflight, Helius priority-fee sampling and explicit fail-closed rejection for unsupported Token-2022 transfer-fee/hook base mints and non-SOL quote mints. [ ] Replace base-fee/signature-count and compute-unit assumptions with transaction-message construction/simulation and account-specific fee estimation before execution integration.
 6. [ ] Connect the reusable quote-gated lifecycle to the Worker position scheduler and persist deterministic paper entry/exit transitions.
 7. [ ] Connect dynamic exit evaluation to the position scheduler and exact full-position sell quotes.
 8. [ ] Complete authoritative migration detection, canonical PumpSwap pool monitoring and exit-blocked recovery.
@@ -42,6 +45,7 @@ These components are already on current `main`:
 ## Safety gates
 
 - Never treat missing or stale evidence as a pass.
+- A top-20 holder snapshot can identify a concentration breach but cannot establish a clean full holder census.
 - Never invent volume thresholds, transaction fees, executable quotes or fills.
 - Migration is not an automatic sell.
 - A position slot is released only after a valid simulated exit and zero token balance confirmation.
