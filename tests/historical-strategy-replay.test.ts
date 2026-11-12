@@ -109,7 +109,7 @@ describe("historical strategy replay", () => {
       decodeReason: "One historical signature exhausted transient retries."
     }, {
       solUsdPriceUsd: 100, minimumTradeUsd: 0.01,
-      label: { minFavorableExcursionPct: 20, maxAdverseExcursionPct: 15 }
+      label: { minFavorableExcursionPct: 20, maxAdverseExcursionPct: 15, roundTripCostPct: 4 }
     });
     expect(result.status).toBe("INCOMPLETE");
     expect(result.decodeReason).toContain("exhausted");
@@ -118,13 +118,32 @@ describe("historical strategy replay", () => {
     expect(result.snapshots.every(snapshot => !snapshot.setupEligible)).toBe(true);
   });
 
+  it("labels a setup as a failure when the supplied round-trip cost makes its final return negative", () => {
+    const result = replayHistoricalCoin({
+      mint, transactions: [verifiedTransaction()], launchBlockTime: 0, decodeComplete: true
+    }, {
+      solUsdPriceUsd: 100, minimumTradeUsd: 0.01,
+      label: { minFavorableExcursionPct: 20, maxAdverseExcursionPct: 15, roundTripCostPct: 20 }
+    });
+    expect(result.outcome?.grossFinalReturnPct).toBeGreaterThan(0);
+    expect(result.outcome?.netFinalReturnPct).toBeLessThan(0);
+    expect(result.outcome?.label).toBe("FAILURE");
+  });
+
+  it("does not assign a profitability label without an explicit round-trip cost", () => {
+    const result = replayHistoricalCoin({
+      mint, transactions: [verifiedTransaction()], launchBlockTime: 0, decodeComplete: true
+    }, { solUsdPriceUsd: 100, minimumTradeUsd: 0.01 });
+    expect(result.outcome?.label).toBe("UNKNOWN");
+    expect(result.outcome?.netFinalReturnPct).toBeNull();
+  });
   it("refuses to recommend volume thresholds from a small sample", () => {
     const replay = replayHistoricalCoin({
       mint, transactions: [verifiedTransaction()], launchBlockTime: 0,
       decodeComplete: true
     }, {
       solUsdPriceUsd: 100,
-      label: { minFavorableExcursionPct: 20, maxAdverseExcursionPct: 15 }
+      label: { minFavorableExcursionPct: 20, maxAdverseExcursionPct: 15, roundTripCostPct: 4 }
     });
     const calibration = calibrateVolumeThresholds([replay, replay, replay, replay]);
     expect(calibration.status).toBe("INSUFFICIENT_SAMPLE");
