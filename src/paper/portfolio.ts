@@ -58,6 +58,7 @@ export interface PaperPortfolioState {
 }
 export const PAPER_PORTFOLIO_POLICY = Object.freeze({
   initialStakeUsd: 1,
+  firstGrowthThresholdUsd: 5,
   maxStakeUsd: 100,
   initialBankrollUsd: 2.70,
   topUpUsd: 2.70,
@@ -128,7 +129,7 @@ function applyEquityAndTopUp(state: PaperPortfolioState, equity: number, occurre
   const cash = round(state.availableCashUsd + (topped.event ? PAPER_PORTFOLIO_POLICY.topUpUsd : 0));
   const highWaterEquityUsd = Math.max(state.highWaterEquityUsd,
     growthEquity({ ...state, bankroll: topped.state }));
-  const limits = capacityForEquity(highWaterEquityUsd, topped.state.initialBankrollUsd);
+  const limits = capacityForEquity(highWaterEquityUsd);
   return {
     bankroll: topped.state, availableCashUsd: cash, highWaterEquityUsd,
     positionSizeUsd: limits.stake, maxConcurrentPositions: limits.slots
@@ -143,11 +144,13 @@ export function createPaperPortfolio(initialBankrollUsd = PAPER_PORTFOLIO_POLICY
     maxConcurrentPositions: 1, positions: [], enteredMints: [], lastMarkedAt: null
   };
 }
-function capacityForEquity(equity: number, initial: number): { stake: number; slots: number } {
-  const doublings = Math.max(0, Math.floor(Math.log2(Math.max(1, equity / initial))));
+function capacityForEquity(equity: number): { stake: number; slots: number } {
+  const levels = equity < PAPER_PORTFOLIO_POLICY.firstGrowthThresholdUsd
+    ? 0
+    : 1 + Math.floor(Math.log2(equity / PAPER_PORTFOLIO_POLICY.firstGrowthThresholdUsd));
   return {
-    stake: Math.min(PAPER_PORTFOLIO_POLICY.maxStakeUsd, round(PAPER_PORTFOLIO_POLICY.initialStakeUsd * Math.pow(1.5, doublings))),
-    slots: Math.min(100, 1 + doublings)
+    stake: Math.min(PAPER_PORTFOLIO_POLICY.maxStakeUsd, round(PAPER_PORTFOLIO_POLICY.initialStakeUsd * Math.pow(1.5, levels))),
+    slots: Math.min(100, 1 + levels)
   };
 }
 export function openPaperPosition(state: PaperPortfolioState, input: {
@@ -157,6 +160,7 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   const now = input.nowMs ?? Date.now();
   if (!input.mint || !input.positionId || !Number.isFinite(Date.parse(input.occurredAt))) throw new Error("Position identity or timestamp is invalid.");
   if (state.enteredMints.includes(input.mint)) throw new Error("A mint may only be bought once per paper session.");
+  if (state.positions.some(position => position.positionId === input.positionId)) throw new Error("Paper position ID must be unique within the session.");
   const existingOpen = currentOpen(state);
   if (existingOpen.length >= state.maxConcurrentPositions) throw new Error("Maximum concurrent paper positions reached.");
   const stake = state.positionSizeUsd;
@@ -186,6 +190,7 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   if (!validPositive(entryPrice)) throw new Error("Buy quote produced an invalid entry price.");
   const initialLiquidationValue = netSellValue(input.sellQuote);
   const initialLiquidationPrice = initialLiquidationValue / humanTokens;
+  if (!Number.isFinite(initialLiquidationPrice)) throw new Error("Initial sell quote cannot be represented as a finite USD price.");
   const position: PaperPosition = {
     positionId: input.positionId, mint: input.mint, openedAt: input.occurredAt,
     stakeUsd: stake, tokenAmountBaseUnits: tokens.toString(), tokenDecimals, buyQuoteId: input.buyQuote.quoteId,
@@ -254,6 +259,7 @@ export function markPaperPosition(state: PaperPortfolioState, input: {
     const liquidationValue = netSellValue(quote);
     const tokens = humanTokenAmount(position.tokenAmountBaseUnits, position.tokenDecimals);
     const price = liquidationValue / tokens;
+    if (!Number.isFinite(price)) throw new Error("Sell quote cannot be represented as a finite USD mark.");
     return {
       ...position,
       latestPriceUsdPerToken: price,
