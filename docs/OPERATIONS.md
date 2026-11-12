@@ -56,7 +56,7 @@ A multi-hour test validates integration and operational behavior, not profitabil
 
 ## Historical replay
 
-Historical replay requires the additive PostgreSQL migrations through `0007_helius_decode_coverage`. Apply migrations only through the documented operator migration command after reviewing the SQL and taking a database backup; application startup does not migrate automatically.
+Historical replay requires the additive PostgreSQL migrations through `0007_helius_decode_coverage`. After reviewing the SQL and taking a database backup, an operator may run `npm run db:migrate` explicitly. Application startup does not migrate automatically.
 
 The replay endpoint excludes live-monitor-only observations and only labels outcomes when:
 - address-history coverage is complete,
