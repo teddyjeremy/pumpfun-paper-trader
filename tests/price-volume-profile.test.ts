@@ -99,6 +99,16 @@ describe("observed price and stage-volume profile", () => {
     expect(profile?.entryEligible).toBe(false);
   });
 
+  it("does not mark an old price profile complete when the latest five-second bucket is stale", () => {
+    const tx = transaction([trade(100n, 1_000n), trade(105n, 1_250n)]);
+    tx.createEvents = [createEvent()];
+    const [profile] = buildCandidatePriceVolumeProfiles([tx], {
+      nowSeconds: 120, horizonSeconds: 60, coverageStartByMint: { [mint]: 100 }
+    });
+    expect(profile?.coverageStatus).toBe("COMPLETE_FROM_LAUNCH");
+    expect(profile?.dataComplete).toBe(false);
+  });
+
   it("reports a candidate with no verified trades as unobserved, not zero-volume", () => {
     const [profile] = buildCandidatePriceVolumeProfiles([], {
       nowSeconds: 120, horizonSeconds: 60, candidateMints: [mint]
