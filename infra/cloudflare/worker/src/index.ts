@@ -606,7 +606,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const events: PaperTransitionEvent[] = [{
           kind: "PAPER_ENTRY",
           data: { position: opened.position, buyQuoteId: input.buyQuote.quoteId,
-            initialSellQuoteId: input.sellQuote.quoteId }
+            initialSellQuoteId: input.sellQuote.quoteId,
+            // Persist full normalized quote evidence in the append-only event
+            // so PostgreSQL can reconstruct fills after a Worker restart.
+            buyQuote: input.buyQuote, initialSellQuote: input.sellQuote }
         }];
         if (opened.state.bankroll.topUpCount > portfolio.bankroll.topUpCount) {
           events.push({
@@ -636,7 +639,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           kind: "PAPER_EXIT",
           mint: closed.position.mint,
           data: { position: closed.position, sellQuoteId: input.sellQuote.quoteId,
-            exitReason: input.exitReason }
+            exitReason: input.exitReason, sellQuote: input.sellQuote }
         }];
         if (closed.state.bankroll.topUpCount > portfolio.bankroll.topUpCount) {
           events.push({
