@@ -207,7 +207,8 @@ export function decodeVerifiedPumpCurveAccount(input: {
   const boundary = [82, 83, 115, 123, 124, 125, 133, 141, 142, 150, 158, 166];
   if (!boundary.includes(data.length)) throw new Error("Pump bonding curve has a partial or unknown field layout.");
   const mint = input.expectedMint;
-  const quoteMint = data.length >= 115 ? readPubkey(data, 83) : NATIVE_SOL_MINT;
+  // Pre-quote-mint curves store PublicKey.default, the legacy native-SOL sentinel.
+  const quoteMint = data.length >= 115 ? readPubkey(data, 83) : "11111111111111111111111111111111";
   return {
     address: account.address, mint, creator: readPubkey(data, 49), quoteMint,
     complete: readBool(data, 48), migrated: false,
