@@ -15,6 +15,8 @@ export interface VerifiedPumpTransaction {
   commitment: "confirmed" | "finalized";
   signature: string;
   slot: number;
+  /** Standard Solana transaction blockTime; null when the RPC cannot prove it. */
+  blockTime?: number | null;
   mint: string;
   createEvents: PumpCreateEvent[];
   tradeEvents: PumpTradeEvent[];
@@ -144,6 +146,11 @@ export async function fetchAndVerifyPumpTransaction(
 
   const createEvents = decoded.createEvents.filter((event) => event.mint === expectedMint);
   const tradeEvents = decoded.tradeEvents.filter((event) => event.mint === expectedMint);
+  const transactionPayload = envelope.result as Record<string, unknown>;
+  const blockTime = Number.isSafeInteger(transactionPayload.blockTime) &&
+    (transactionPayload.blockTime as number) >= 0
+    ? transactionPayload.blockTime as number
+    : null;
   if (createEvents.length === 0 && tradeEvents.length === 0) {
     return { status: "NOT_RELEVANT", reason: "Decoded Pump events do not belong to the expected mint." };
   }
@@ -155,6 +162,7 @@ export async function fetchAndVerifyPumpTransaction(
       commitment,
       signature: decoded.signature,
       slot: decoded.slot,
+      blockTime,
       mint: expectedMint,
       createEvents,
       tradeEvents,
