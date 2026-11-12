@@ -10,6 +10,7 @@ import {
 } from "../src/ingestion/pump-account-decoder.js";
 
 const observedAt = "2026-11-12T12:00:00.000Z";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const slot = 55;
 const ZERO_KEY = "11111111111111111111111111111111";
 
@@ -30,7 +31,7 @@ function curveData(complete = false): Uint8Array {
   data[48] = complete ? 1 : 0;
   data[81] = 0;
   data[82] = 0;
-  data.set(new PublicKey(NATIVE_SOL_MINT).toBytes(), 83);
+  data.set(new PublicKey(USDC_MINT).toBytes(), 83);
   return data;
 }
 function poolData(creator = ZERO_KEY, baseMint = ZERO_KEY, quoteMint = ZERO_KEY, baseVault = ZERO_KEY, quoteVault = ZERO_KEY): Uint8Array {
@@ -110,12 +111,15 @@ describe("IDL-aligned Pump account decoders", () => {
   });
 
   it("only assembles canonical pool evidence when pool, PDA authorities and vaults all match", () => {
-    const pool = account("pool", PUMP_AMM_PROGRAM_ID, poolData());
-    const baseVault = account(ZERO_KEY, SPL_TOKEN_PROGRAM_ID, tokenVault(10_000n));
-    const quoteVault = account(ZERO_KEY, SPL_TOKEN_PROGRAM_ID, tokenVault(20_000n));
+    const baseVaultAddress = new PublicKey(new Uint8Array(32).fill(1)).toBase58();
+    const quoteVaultAddress = new PublicKey(new Uint8Array(32).fill(2)).toBase58();
+    const pool = account(ZERO_KEY, PUMP_AMM_PROGRAM_ID,
+      poolData(ZERO_KEY, ZERO_KEY, ZERO_KEY, baseVaultAddress, quoteVaultAddress));
+    const baseVault = account(baseVaultAddress, SPL_TOKEN_PROGRAM_ID, tokenVault(10_000n, ZERO_KEY, ZERO_KEY));
+    const quoteVault = account(quoteVaultAddress, SPL_TOKEN_PROGRAM_ID, tokenVault(20_000n, ZERO_KEY, ZERO_KEY));
     const snapshot = verifyCanonicalPumpSwapPoolSnapshot({
       poolAccount: pool, baseVaultAccount: baseVault, quoteVaultAccount: quoteVault,
-      expectedMint: ZERO_KEY, expectedPoolAddress: "pool",
+      expectedMint: ZERO_KEY, expectedPoolAddress: ZERO_KEY,
       expectedPoolCreatorAuthority: ZERO_KEY, expectedPoolAuthority: ZERO_KEY,
       nowMs: Date.parse(observedAt)
     });
@@ -135,9 +139,9 @@ describe("IDL-aligned Pump account decoders", () => {
       expectedPoolCreatorAuthority: "not-the-creator", expectedPoolAuthority: ZERO_KEY,
       nowMs: Date.parse(observedAt)
     })).toThrow(/canonical/);
-    const wrongAuthority = tokenVault(10_000n); wrongAuthority.fill(1, 32, 64);
+    const wrongAuthority = tokenVault(10_000n, ZERO_KEY, ZERO_KEY); wrongAuthority.fill(1, 32, 64);
     expect(() => verifyCanonicalPumpSwapPoolSnapshot({
-      poolAccount: pool, baseVaultAccount: account(ZERO_KEY, SPL_TOKEN_PROGRAM_ID, wrongAuthority),
+      poolAccount: pool, baseVaultAccount: account(baseVault.address, SPL_TOKEN_PROGRAM_ID, wrongAuthority),
       quoteVaultAccount: quoteVault, expectedMint: ZERO_KEY, expectedPoolAddress: "pool",
       expectedPoolCreatorAuthority: ZERO_KEY, expectedPoolAuthority: ZERO_KEY,
       nowMs: Date.parse(observedAt)
@@ -145,14 +149,14 @@ describe("IDL-aligned Pump account decoders", () => {
     expect(() => verifyCanonicalPumpSwapPoolSnapshot({
       poolAccount: pool, baseVaultAccount: baseVault,
       quoteVaultAccount: { ...quoteVault, slot: slot + 1 },
-      expectedMint: ZERO_KEY, expectedPoolAddress: "pool",
+      expectedMint: ZERO_KEY, expectedPoolAddress: ZERO_KEY,
       expectedPoolCreatorAuthority: ZERO_KEY, expectedPoolAuthority: ZERO_KEY,
       nowMs: Date.parse(observedAt)
     })).toThrow(/same RPC context slot/);
   });
 
   it("connects decoded curve and canonical pool accounts to the fail-closed market state machine", () => {
-    const mint = ZERO_KEY;
+    const mint = NATIVE_SOL_MINT;
     const curveAddress = derivePumpBondingCurvePda(mint);
     const initial = createUnverifiedMarketState(mint, observedAt);
     const live = applyVerifiedPumpCurveAccount({
@@ -166,14 +170,14 @@ describe("IDL-aligned Pump account decoders", () => {
     });
     expect(pending.status).toBe("MIGRATION_PENDING");
     const creator = derivePumpPoolCreatorAuthorityPda(mint);
-    const poolAddress = deriveCanonicalPumpSwapPoolPda(mint, NATIVE_SOL_MINT);
+    const poolAddress = deriveCanonicalPumpSwapPoolPda(mint, USDC_MINT);
     const baseVault = new PublicKey(new Uint8Array(32).fill(1)).toBase58();
     const quoteVault = new PublicKey(new Uint8Array(32).fill(2)).toBase58();
     const migrated = applyVerifiedPumpSwapPoolAccounts({
       state: pending,
-      poolAccount: account(poolAddress, PUMP_AMM_PROGRAM_ID, poolData(creator, mint, NATIVE_SOL_MINT, baseVault, quoteVault)),
+      poolAccount: account(poolAddress, PUMP_AMM_PROGRAM_ID, poolData(creator, mint, USDC_MINT, baseVault, quoteVault)),
       baseVaultAccount: account(baseVault, SPL_TOKEN_PROGRAM_ID, tokenVault(10_000n, mint, poolAddress)),
-      quoteVaultAccount: account(quoteVault, SPL_TOKEN_PROGRAM_ID, tokenVault(20_000n, NATIVE_SOL_MINT, poolAddress)),
+      quoteVaultAccount: account(quoteVault, SPL_TOKEN_PROGRAM_ID, tokenVault(20_000n, USDC_MINT, poolAddress)),
       nowMs: Date.parse(observedAt)
     });
     expect(migrated.status).toBe("MIGRATED_POOL_VERIFIED");
