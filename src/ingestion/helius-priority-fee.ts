@@ -16,7 +16,7 @@ export interface PaperNetworkFeeEstimate {
   sampleCount: number;
   nonZeroSampleCount: number;
   source: "helius-getRecentPrioritizationFees";
-  baseFeeAssumption: "5000-lamports-per-signature";
+  baseFeeAssumption: string;
 }
 
 /**
@@ -125,6 +125,6 @@ export function buildPaperNetworkFeeEstimate(input: {
     sampleCount: input.samples.length,
     nonZeroSampleCount: nonZero.length,
     source: "helius-getRecentPrioritizationFees",
-    baseFeeAssumption: "5000-lamports-per-signature"
+    baseFeeAssumption: `${baseFeePerSignature}-lamports-per-signature`
   };
 }
