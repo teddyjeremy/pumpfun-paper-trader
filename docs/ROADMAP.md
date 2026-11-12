@@ -28,15 +28,15 @@ These components are already on current `main`:
 
 1. [x] Integrate PostgreSQL ledger projections, Helius backfill archive/checkpoints and resumable retry queue into main.
 2. [x] Implement chronological historical price/volume and rolling-flow replay, verified archive hydration, decode-completeness gating and authenticated read-only replay/backfill APIs (PR #45, merged).
-3. [ ] Extend historical replay outputs to include every mandatory strict-strategy rule, including creator/cluster risk and signal freshness, and score pullback/reclaim volume rules only after reviewed calibration.
+3. [x] Extend historical replay with creator-sale and wallet-cluster risk statuses, separate market-pattern candidates from risk-cleared candidates, and prevent future-evidence leakage (PR #48, merged).
 4. [ ] Run replay against collected sessions and calibrate pullback contraction/reclaim expansion with chronological training and holdout data. Require adequate sample sizes and both outcome classes; never auto-promote thresholds.
 5. [ ] Complete Token-2022 transfer-fee handling or explicit fail-closed rejection, authoritative network/priority fee estimation and validated impact/slippage policy. Current paper-entry and paper-exit boundaries enforce <=2% per-side price impact; entry also enforces <=4% combined buy/sell fees.
 6. [ ] Connect the reusable quote-gated lifecycle to the Worker position scheduler and persist deterministic paper entry/exit transitions.
 7. [ ] Connect dynamic exit evaluation to the position scheduler and exact full-position sell quotes.
 8. [ ] Complete authoritative migration detection, canonical PumpSwap pool monitoring and exit-blocked recovery.
 9. [ ] Test Durable Object eviction/restart, PostgreSQL outages/recovery, queue recovery, provider gaps and lease fencing.
-10. [ ] Complete authenticated dashboard consumption of persisted decisions, quotes, trades and positions.
-11. [ ] Run bounded paper-forward validation before considering any readiness change.
+10. [x] Add authenticated Worker status proxy, combined read-only snapshot and live discovery monitor controls to the dashboard (PR #49, pending CI).\n11. [ ] Complete dashboard consumption of persisted decisions, simulated fills, open positions and exits.
+12. [ ] Run bounded paper-forward validation before considering any readiness change.
 
 ## Safety gates
 
