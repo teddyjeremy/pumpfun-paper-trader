@@ -557,10 +557,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         .map(event => {
           const reserves = event.virtualSolReserves;
           const tokens = event.virtualTokenReserves;
-          if (reserves <= 0n || tokens <= 0n) return null;
+          if (reserves <= 0n || tokens <= 0n) return { timestampSeconds: Number(event.timestamp), price: Number.NaN };
           const scaled = (reserves * 1_000_000_000_000n) / tokens;
           return { timestampSeconds: Number(event.timestamp), price: Number(scaled) / 1_000_000_000_000 };
-        }).filter((item): item is {timestampSeconds:number;price:number} => item !== null);
+        });
       const freshness = calculateReclaimConfirmation({
         reclaimTimeSeconds: profile?.reclaimTime ?? null,
         previousCompletedHigh, nowSeconds, nextObservationPrices
