@@ -1436,8 +1436,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const key = `helius_backfill:${sessionId}:${mint}`;
       const state = await this.ctx.storage.get<HistoricalBackfillState>(key);
       if (!state || state.status === "COMPLETE" || state.status === "INCOMPLETE") continue;
-      if (!this.heliusBucket.tryTake()) {
+      while (!this.heliusBucket.tryTake()) {
         await new Promise(resolve => setTimeout(resolve, this.heliusBucket.retryAfterMs));
+        if (!this.status.enabled || this.activeSessionId !== sessionId) return false;
       }
       const page = await fetchHeliusAddressSignaturesPage(state, {
         apiKey: this.env.HELIUS_API_KEY,
