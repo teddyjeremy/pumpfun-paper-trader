@@ -23,6 +23,7 @@ export interface StrictStrategyAuditInput {
     windows: Array<{ buySellRatio: number | null; flowWindowPass: boolean; uniqueBuyers: number; uniqueSellers: number }>;
     distinctBuyersAcrossLatestThree: number;
     largestBuyerShareAcrossLatestThreeBps: number | null;
+    microTradeFilterStatus?: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE";
   } | null;
   creatorRiskStatus: string | null;
   walletClusterRiskStatus: string | null;
@@ -64,13 +65,13 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
   const flowWindowsPass = Boolean(input.flow?.latestThreeWindowFlowPass) && threeWindowsAvailable && windows.every(window =>
     window.flowWindowPass && window.uniqueBuyers >= 3 && window.uniqueSellers <= window.uniqueBuyers / 2
   );
-  rules.push(!input.flow || !input.flow.dataComplete || !threeWindowsAvailable
+  rules.push(!input.flow || !input.flow.dataComplete || !threeWindowsAvailable || input.flow.microTradeFilterStatus !== "APPLIED"
     ? result("THREE_FLOW_WINDOWS", "UNKNOWN", windows, "3 consecutive completed 2-second windows; each >3:1, >=3 buyers, sellers <= half buyers", "Three fully covered consecutive windows are not available.")
     : result("THREE_FLOW_WINDOWS", flowWindowsPass ? "PASS" : "FAIL", windows, "each window >3:1, >=3 buyers, sellers <= half buyers", "Every one of the three latest completed windows must pass."));
-  rules.push(!input.flow || !input.flow.dataComplete
+  rules.push(!input.flow || !input.flow.dataComplete || input.flow.microTradeFilterStatus !== "APPLIED"
     ? result("DISTINCT_BUYERS", "UNKNOWN", input.flow?.distinctBuyersAcrossLatestThree ?? null, ">= 5 distinct buyers", "Buyer coverage is incomplete.")
     : result("DISTINCT_BUYERS", input.flow.distinctBuyersAcrossLatestThree >= 5 ? "PASS" : "FAIL", input.flow.distinctBuyersAcrossLatestThree, ">= 5", "At least five distinct buyers are required across the three windows."));
-  rules.push(!input.flow || !input.flow.dataComplete || input.flow.largestBuyerShareAcrossLatestThreeBps === null
+  rules.push(!input.flow || !input.flow.dataComplete || input.flow.microTradeFilterStatus !== "APPLIED" || input.flow.largestBuyerShareAcrossLatestThreeBps === null
     ? result("BUYER_CONCENTRATION", "UNKNOWN", input.flow?.largestBuyerShareAcrossLatestThreeBps ?? null, "<= 72%", "Buyer concentration cannot be established from complete evidence.")
     : result("BUYER_CONCENTRATION", input.flow.largestBuyerShareAcrossLatestThreeBps <= 7_200 ? "PASS" : "FAIL",
       input.flow.largestBuyerShareAcrossLatestThreeBps, "<= 7200 bps", "No single buyer may exceed 72% of buy quote volume."));
