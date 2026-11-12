@@ -25,7 +25,7 @@ Provider receipt time is local receipt time, not a chain timestamp. PumpPortal m
 ## Queue and budget behavior
 
 The Worker now wires a deliberately smaller Helius path:
-- It selects at most 10 non-migrated candidates with valid mint and bonding-curve addresses. The bounded selection is prioritized by available identity completeness (valid creator present), repeated discovery observations, then most recent activity/launch. This is only a monitoring-priority order: the discovery feed does not contain trade flow, wallet concentration, creator sells, liquidity, or executable quotes, so it cannot honestly rank trading quality yet. Missing creator data does not cause rejection; the candidate remains eligible for WATCH/monitoring, never an automatic BUY.
+- It selects at most 10 non-migrated candidates with valid mint and bonding-curve addresses. Subscription-slot priority uses available identity completeness (valid creator present), repeated discovery observations, then most recent activity/launch. The separate `GET /flow` analysis ranks confirmed creator-sale risk and verified trade-flow evidence; neither rank is an entry decision. The discovery feed itself does not contain wallet concentration, liquidity, or executable quotes. Missing creator data does not cause rejection; the candidate remains eligible for WATCH/monitoring, never an automatic BUY.
 - Each candidate receives one standard `logsSubscribe` using a single-address `mentions` filter. No program-wide logs subscription or Enhanced WebSocket method is used.
 - Only notifications with `err === null` enter the durable signature queue. Failed transactions are counted and never fetched as observations.
 - The durable queue is capped at 100 signatures; signature deduplication retains the most recent 5,000 signatures. Queue overflow and malformed notifications mark the affected mint incomplete.
@@ -59,8 +59,8 @@ The token bucket is process-local and resets on Durable Object restart; it is co
 - Candidate admission limits selected from measured launch volume and Cloudflare budget.
 - Evidence-based trading-quality ranking. The current monitor priority deliberately uses only identity completeness, repeated discovery observations, and recency; it must not pretend these are buyer-flow, liquidity, creator-risk, or executable-exit measurements.
 - Helius backfill/reconciliation for reconnect gaps.
-- Full price observation windows and strict strategy evaluation. Trade-flow windows are now calculated, but are not connected to entry execution.
-- Creator/linked-wallet/cluster risk evidence.
+- Full strategy evaluation and paper execution integration. Trade-flow and curve price/volume profiles are calculated for analysis, but no profile is connected to entry execution.
+- Creator-linked wallet and high-confidence cluster attribution, token-holder concentration, and linked-wallet distribution evidence. Only direct creator sells are currently screened.
 - Executable quotes, fee/impact accounting, paper execution and ledger integration.
 
 No candidate is eligible for a paper entry until every required evidence source is complete and fresh. If capacity overflows, the counter is visible and affected candidates must remain WATCH / DATA_INCOMPLETE; no silent drop may become an entry. No reserve-delta estimate or chart price may be substituted for an executable quote.
