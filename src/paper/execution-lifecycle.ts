@@ -92,6 +92,25 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
     const sellQuote = buildExecutablePaperQuote({
       quote: sell.quote, solUsd: sell.context.solUsd, costs: sell.context.costs, nowMs: executionNow()
     });
+
+    // These limits are already part of the documented strategy audit. Keep
+    // them enforced at the final execution boundary as well: a passing signal
+    // must not bypass quote economics.
+    if (buyQuote.priceImpactPct > 2 || sellQuote.priceImpactPct > 2) {
+      return { status: "BLOCKED", reason: "Price impact exceeds the 2% per-side execution limit." };
+    }
+    const feeUsd = (quote: ExecutablePaperQuoteWithLatency) =>
+      Object.values(quote.feeBreakdownUsd).reduce((sum, amount) => sum + amount, 0);
+    const roundTripFeesUsd = feeUsd(buyQuote) + feeUsd(sellQuote);
+    const roundTripFeePct = roundTripFeesUsd / stakeUsd * 100;
+    if (!Number.isFinite(roundTripFeePct) || roundTripFeePct > 4) {
+      return { status: "BLOCKED", reason: "Combined buy/sell fees exceed the 4% round-trip execution-cost limit." };
+    }
+    const netLiquidationUsd = sellQuote.outputUsd - feeUsd(sellQuote);
+    if (!Number.isFinite(netLiquidationUsd) || netLiquidationUsd <= 0) {
+      return { status: "BLOCKED", reason: "Exact-size initial sell quote has no positive net liquidation value after fees." };
+    }
+
     const buyObservedAt = Date.parse(buyQuote.observedAt);
     const sellObservedAt = Date.parse(sellQuote.observedAt);
     if (Math.abs(sellObservedAt - buyObservedAt) > 2_000) {

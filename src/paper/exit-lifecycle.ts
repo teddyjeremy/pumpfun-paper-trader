@@ -110,6 +110,9 @@ export async function executePaperExit(input: PaperExitExecutionInput): Promise<
       quote: sdkQuote, solUsd: result.context.solUsd,
       costs: result.context.costs, nowMs: afterQuoteNow
     });
+    if (sellQuote.priceImpactPct > 2) {
+      return { status: "BLOCKED", reason: "Price impact exceeds the 2% per-side execution limit." };
+    }
     const netProceedsUsd = sellQuote.outputUsd - feeTotal(sellQuote);
     if (!Number.isFinite(netProceedsUsd) || netProceedsUsd < 0) {
       return { status: "BLOCKED", reason: "Executable sell quote has invalid net proceeds after all fees." };

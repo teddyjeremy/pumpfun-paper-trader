@@ -33,6 +33,13 @@ export interface StrictStrategyAuditInput {
   signalAgeSeconds: number | null;
   nextObservationConfirmed: boolean | null;
   executableQuoteAvailable: boolean;
+  /** Only populated from a reviewed chronological training-set calibration. */
+  volumeThresholds?: {
+    maxPullbackVolumeVsImpulsePct: number;
+    minReclaimVolumeVsPullbackPct: number;
+  } | null;
+  /** Combined executable buy + exact-size sell cost as a percentage of stake. */
+  roundTripCostPct?: number | null;
 }
 export interface StrictStrategyAudit {
   decision: "REJECT" | "WATCH";
@@ -93,10 +100,26 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
   rules.push(input.attributionConfidenceBps === null || input.attributionConfidenceBps < 7_000
     ? result("ATTRIBUTION_CONFIDENCE", "UNKNOWN", input.attributionConfidenceBps, ">= 7000 bps", "No independently verified wallet link meets the 70% confidence floor.")
     : result("ATTRIBUTION_CONFIDENCE", "PASS", input.attributionConfidenceBps, ">= 7000 bps", "Attribution confidence meets the minimum threshold."));
-  rules.push(result("PULLBACK_VOLUME_CONTRACTION", "UNKNOWN", profile?.pullbackVolumeVsImpulsePct ?? null,
-    "Numeric threshold not yet agreed", "Volume contraction is recorded but not scored until its threshold is agreed."));
-  rules.push(result("RECLAIM_VOLUME_EXPANSION", "UNKNOWN", profile?.reclaimVolumeVsPullbackPct ?? null,
-    "Numeric threshold not yet agreed", "Volume expansion is recorded but not scored until its threshold is agreed."));
+  const thresholds = input.volumeThresholds ?? null;
+  const validVolumeThresholds = thresholds !== null &&
+    Number.isFinite(thresholds!.maxPullbackVolumeVsImpulsePct) &&
+    thresholds!.maxPullbackVolumeVsImpulsePct >= 0 &&
+    Number.isFinite(thresholds!.minReclaimVolumeVsPullbackPct) &&
+    thresholds!.minReclaimVolumeVsPullbackPct >= 0;
+  rules.push(!profile || !profile.dataComplete || profile.pullbackVolumeVsImpulsePct === null || !validVolumeThresholds
+    ? result("PULLBACK_VOLUME_CONTRACTION", "UNKNOWN", profile?.pullbackVolumeVsImpulsePct ?? null,
+      "Reviewed max pullback/impulse volume ratio required", "Volume contraction is recorded but cannot be scored without complete data and an explicitly reviewed calibration.")
+    : result("PULLBACK_VOLUME_CONTRACTION",
+      profile.pullbackVolumeVsImpulsePct <= thresholds!.maxPullbackVolumeVsImpulsePct ? "PASS" : "FAIL",
+      profile.pullbackVolumeVsImpulsePct, `<= ${thresholds!.maxPullbackVolumeVsImpulsePct}%`,
+      "Pullback volume is compared with the reviewed training-set threshold."));
+  rules.push(!profile || !profile.dataComplete || profile.reclaimVolumeVsPullbackPct === null || !validVolumeThresholds
+    ? result("RECLAIM_VOLUME_EXPANSION", "UNKNOWN", profile?.reclaimVolumeVsPullbackPct ?? null,
+      "Reviewed min reclaim/pullback volume ratio required", "Volume expansion is recorded but cannot be scored without complete data and an explicitly reviewed calibration.")
+    : result("RECLAIM_VOLUME_EXPANSION",
+      profile.reclaimVolumeVsPullbackPct >= thresholds!.minReclaimVolumeVsPullbackPct ? "PASS" : "FAIL",
+      profile.reclaimVolumeVsPullbackPct, `>= ${thresholds!.minReclaimVolumeVsPullbackPct}%`,
+      "Reclaim volume is compared with the reviewed training-set threshold."));
   rules.push(input.signalAgeSeconds === null || input.nextObservationConfirmed === null
     ? result("SIGNAL_FRESHNESS", "UNKNOWN", { ageSeconds: input.signalAgeSeconds, nextObservationConfirmed: input.nextObservationConfirmed },
       "1-2 seconds and confirmed by next observation", "Signal freshness confirmation is not yet available.")
@@ -105,7 +128,14 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
       "1-2 seconds and confirmed by next observation", "Reclaim signal must be fresh and confirmed by a subsequent observation."));
   rules.push(result("EXECUTABLE_QUOTE", input.executableQuoteAvailable ? "PASS" : "UNKNOWN",
     input.executableQuoteAvailable, "Fresh size-specific executable quote", "No quote adapter is connected; reserve prices are not executable quotes."));
-  rules.push(result("ROUND_TRIP_COST", "UNKNOWN", null, "Impact <=2% each side, taxes <=2% each side, total <=4%", "Fees, impact and taxes cannot be verified without executable quotes."));
+  const roundTripCostPct = input.roundTripCostPct;
+  rules.push(roundTripCostPct === null || roundTripCostPct === undefined ||
+      !Number.isFinite(roundTripCostPct) || roundTripCostPct < 0
+    ? result("ROUND_TRIP_COST", "UNKNOWN", roundTripCostPct ?? null,
+      "Impact <=2% each side, taxes <=2% each side, total <=4%",
+      "Combined executable buy/sell cost is unavailable or invalid.")
+    : result("ROUND_TRIP_COST", roundTripCostPct <= 4 ? "PASS" : "FAIL",
+      roundTripCostPct, "<= 4%", "Combined executable fees must remain within the agreed round-trip cost limit."));
   // A known failure of any mandatory entry rule rejects the candidate.
   // Missing evidence remains UNKNOWN/WATCH and is never silently treated as a pass.
   const rejectionReasons = rules.filter(rule => rule.status === "FAIL").map(rule => rule.rule);
