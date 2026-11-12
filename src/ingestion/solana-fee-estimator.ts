@@ -1,8 +1,11 @@
+import { Buffer } from "node:buffer";
+import { Message, VersionedMessage } from "@solana/web3.js";
 import { buildHeliusRpcUrl } from "./helius.js";
 
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
+const COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111";
 const MIN_RECENT_FEE_SAMPLES = 10;
 const RECENT_SLOT_WINDOW = 150;
 
@@ -62,6 +65,9 @@ export async function estimateSolanaTransactionFees(
       config.messageBase64.length > 2_000 ||
       !BASE64.test(config.messageBase64)) {
     return unavailable("A valid base64 compiled transaction message is required.");
+  }
+  if (!messageOmitsComputeUnitPrice(config.messageBase64)) {
+    return unavailable("The compiled transaction message is malformed or already contains SetComputeUnitPrice.");
   }
   if (!Array.isArray(config.writableAccountKeys) || config.writableAccountKeys.length < 1 ||
       config.writableAccountKeys.length > 128 ||
