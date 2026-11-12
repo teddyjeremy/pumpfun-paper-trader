@@ -114,8 +114,8 @@ export async function estimateFeesForUnsignedInstructions(input: {
       messageBase64: compiled.messageBase64,
       writableAccountKeys: compiled.writableAccountKeys,
       computeUnitLimit: compiled.computeUnitLimit,
-      fetcher: input.fetcher,
-      nowMs: input.nowMs
+      ...(input.fetcher ? { fetcher: input.fetcher } : {}),
+      ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs })
     });
   } catch {
     return {
