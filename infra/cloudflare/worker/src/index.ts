@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "../../../../src/paper/session-ledger.js";
 import { updateCandidatePriceTracker, type CandidatePriceTracker } from "../../../../src/paper/candidate-price-ledger.js";
-import { evaluateStrictStrategyAudit } from "../../../../src/paper/strategy-audit.js";
+import { evaluateStrictStrategyAudit, calculateReclaimConfirmation } from "../../../../src/paper/strategy-audit.js";
 import { createPaperPortfolio, type PaperPortfolioState } from "../../../../src/paper/portfolio.js";
 
 type AuditKind = "SESSION_STARTED" | "SESSION_STOPPED" | "SESSION_HEARTBEAT" | "WORKER_RESTARTED" | "DISCOVERY" |
@@ -490,7 +490,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (monitoredMints.length === 0) return;
     const report = await this.listTradeFlows() as {
       flows: Array<{ mint: string; quoteMint: string | null; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
-      priceVolumeProfiles: Array<{ mint:string; quoteMint:string|null; baselinePrice:number|null; buckets:Array<{closePrice:number;endTime:number}>; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
+      priceVolumeProfiles: Array<{ mint:string; quoteMint:string|null; baselinePrice:number|null; reclaimTime:number|null; buckets:Array<{closePrice:number;highPrice:number;endTime:number}>; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean }>;
       creatorSellRisk: Array<{mint:string;status:string}>;
       walletClusterRisk: Array<{mint:string;status:string}>;
     };
@@ -508,6 +508,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const walletRisk = report.walletClusterRisk.find(item => item.mint === mint);
       const links = this.walletLinkSnapshots[mint]?.links ?? [];
       const confidence = links.reduce((max, link) => Math.max(max, link.confidenceBps), 0);
+      const reclaimBucketIndex = profile?.reclaimTime === null || profile?.reclaimTime === undefined
+        ? -1 : profile.buckets.findIndex(bucket => bucket.endTime === profile.reclaimTime);
+      const previousCompletedHigh = reclaimBucketIndex > 0
+        ? profile!.buckets[reclaimBucketIndex - 1]!.highPrice : null;
+      const nowSeconds = Date.now() / 1000;
+      const nextObservationPrices = this.verifiedTransactions.flatMap(transaction => transaction.tradeEvents)
+        .filter(event => event.mint === mint && event.quoteMint === SOL_QUOTE_MINT &&
+          Number(event.timestamp) > (profile?.reclaimTime ?? Number.POSITIVE_INFINITY))
+        .map(event => {
+          const reserves = event.virtualSolReserves;
+          const tokens = event.virtualTokenReserves;
+          if (reserves <= 0n || tokens <= 0n) return null;
+          const scaled = (reserves * 1_000_000_000_000n) / tokens;
+          return { timestampSeconds: Number(event.timestamp), price: Number(scaled) / 1_000_000_000_000 };
+        }).filter((item): item is {timestampSeconds:number;price:number} => item !== null);
+      const freshness = calculateReclaimConfirmation({
+        reclaimTimeSeconds: profile?.reclaimTime ?? null,
+        previousCompletedHigh, nowSeconds, nextObservationPrices
+      });
       const evaluated = evaluateStrictStrategyAudit({
         candidateAgeSeconds: ageSeconds,
         profile: profile ? {
@@ -525,7 +544,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         creatorRiskStatus: creatorRisk?.status ?? null,
         walletClusterRiskStatus: walletRisk?.status ?? null,
         attributionConfidenceBps: confidence > 0 ? confidence : null,
-        signalAgeSeconds: null, nextObservationConfirmed: null,
+        signalAgeSeconds: freshness.signalAgeSeconds, nextObservationConfirmed: freshness.nextObservationConfirmed,
         executableQuoteAvailable: false
       });
       await this.appendAudit("FEATURE_SNAPSHOT", mint, { triggerSignature, profile, flow },

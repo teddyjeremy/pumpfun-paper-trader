@@ -110,3 +110,25 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
     buyAllowed: false, evaluatedAt, rules, rejectionReasons, watchReasons, blockingUnknownRules
   };
 }
+
+export function calculateReclaimConfirmation(input: {
+  reclaimTimeSeconds: number | null;
+  previousCompletedHigh: number | null;
+  nowSeconds: number;
+  nextObservationPrices: Array<{ timestampSeconds: number; price: number }>;
+}): { signalAgeSeconds: number | null; nextObservationConfirmed: boolean | null } {
+  if (input.reclaimTimeSeconds === null || input.previousCompletedHigh === null ||
+      !Number.isFinite(input.reclaimTimeSeconds) || !Number.isFinite(input.previousCompletedHigh) ||
+      input.previousCompletedHigh <= 0 || !Number.isFinite(input.nowSeconds)) {
+    return { signalAgeSeconds: null, nextObservationConfirmed: null };
+  }
+  const signalAgeSeconds = input.nowSeconds - input.reclaimTimeSeconds;
+  if (signalAgeSeconds < 0) return { signalAgeSeconds: null, nextObservationConfirmed: null };
+  const threshold = input.previousCompletedHigh * 1.01;
+  const nextObservationConfirmed = input.nextObservationPrices.some(observation =>
+    Number.isFinite(observation.timestampSeconds) && observation.timestampSeconds > input.reclaimTimeSeconds! &&
+    observation.timestampSeconds <= input.nowSeconds && Number.isFinite(observation.price) &&
+    observation.price >= threshold
+  );
+  return { signalAgeSeconds, nextObservationConfirmed };
+}

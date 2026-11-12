@@ -35,7 +35,7 @@ describe("candidate price follow-up ledger", () => {
  });
 });
 
-import { evaluateStrictStrategyAudit } from "../src/paper/strategy-audit.js";
+import { evaluateStrictStrategyAudit, calculateReclaimConfirmation } from "../src/paper/strategy-audit.js";
 describe("strict strategy audit", () => {
  const base = {
   candidateAgeSeconds: 25,
@@ -66,6 +66,14 @@ describe("strict strategy audit", () => {
   expect(result.rules.find(rule=>rule.rule==="IMPULSE")?.status).toBe("UNKNOWN");
   expect(result.rules.find(rule=>rule.rule==="PULLBACK")?.status).toBe("UNKNOWN");
   expect(result.rules.find(rule=>rule.rule==="RECLAIM")?.status).toBe("UNKNOWN");
+ });
+ it("confirms reclaim only with a later observation at least 1% above the previous completed high", () => {
+  const result=calculateReclaimConfirmation({reclaimTimeSeconds:100,previousCompletedHigh:1,nowSeconds:101.5,
+   nextObservationPrices:[{timestampSeconds:101,price:1.012}]});
+  expect(result).toEqual({signalAgeSeconds:1.5,nextObservationConfirmed:true});
+  const failed=calculateReclaimConfirmation({reclaimTimeSeconds:100,previousCompletedHigh:1,nowSeconds:101.5,
+   nextObservationPrices:[{timestampSeconds:101,price:1.005}]});
+  expect(failed.nextObservationConfirmed).toBe(false);
  });
 });
 
