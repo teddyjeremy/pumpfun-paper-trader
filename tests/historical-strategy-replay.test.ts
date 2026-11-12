@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PumpCreateEvent, PumpTradeEvent } from "../src/ingestion/pump-events.js";
 import type { VerifiedPumpTransaction } from "../src/ingestion/helius.js";
-import { calibrateVolumeThresholds, classifyHistoricalWalletClusterRisk, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
+import { calibrateVolumeThresholds, classifyHistoricalWalletClusterRisk, hasCompleteHistoricalEntryEvidence, hydrateArchivedVerifiedTransaction, replayHistoricalCoin } from "../src/strategy/historical-replay.js";
 
 const mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const quoteMint = "So11111111111111111111111111111111111111112";
@@ -72,6 +72,13 @@ describe("historical strategy replay", () => {
     largestLinkedClusterSellShareBps: null, largestClusterBuyVolumeShareBps: null,
     largestClusterHoldingShareBps: null, reasons: [], limitations: []
   };
+
+  it("requires full entry evidence to be timestamped no later than the candidate", () => {
+    expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20 })).toBe(false);
+    expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 20 })).toBe(true);
+    expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 19 })).toBe(true);
+    expect(hasCompleteHistoricalEntryEvidence({ entryAt: 20, entryEvidenceCompleteAt: 21 })).toBe(false);
+  });
 
   it("does not clear a top-20 holder snapshot without a full holder census", () => {
     expect(classifyHistoricalWalletClusterRisk({
