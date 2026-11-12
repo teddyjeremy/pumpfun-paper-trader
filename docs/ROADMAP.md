@@ -14,26 +14,24 @@
 - [x] Dynamic exit evidence-family evaluator with correlated-signal grouping and two confirmation paths
 - [x] Read-only dashboard/API and deployment blueprints
 
-## Integration branch work — PR #40
+## Recently merged integration — PR #40
 
-The following previously feature-branch-only components are included in [PR #40](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/40), which promotes them onto current main:
+These components are already on current `main`:
 
-- [x] PostgreSQL paper-ledger projections and idempotent event projection (PR #19 work).
-- [x] Resumable Helius backfill queue and bounded transient retries (PR #22/#24 work).
-- [x] Session-scoped Helius backfill checkpoints and verified transaction archive (PR #28 work).
-- [x] Scheduled holder and wallet-link evidence collection with incomplete/stale handling (PR #31 work).
-- [x] One-second sampled overlapping flow windows and distinct buyer aggregation (PR #33 work).
-- [x] Strict strategy-to-paper execution lifecycle and quote-gated dynamic-exit component.
-- [ ] Rebase historical replay and decode-coverage migration from the closed PR #37 onto current main after this integration lands.
+- [x] PostgreSQL paper-ledger projections and idempotent event projection.
+- [x] Resumable Helius backfill queue, bounded transient retries, checkpoints and verified transaction archive.
+- [x] Scheduled holder and wallet-link evidence collection with incomplete/stale handling.
+- [x] One-second sampled overlapping flow windows and distinct buyer aggregation.
+- [x] Strict strategy-to-paper execution and quote-gated exit lifecycle primitives.
 
 ## Remaining implementation
 
-1. [ ] Integrate PostgreSQL ledger projections, Helius backfill archive/checkpoints and resumable retry queue into main. Preserve the current mainline candidate monitoring, official SDK quote adapters and latest exit-evidence fix.
-2. [ ] Port historical replay with verified archived transaction hydration and explicit transaction-decoding completeness.
-3. [ ] Replay the complete strict strategy: impulse, pullback, reclaim, rolling flow, creator/cluster risk, signal freshness, and pullback/reclaim volume profile.
-4. [ ] Calibrate pullback contraction and reclaim expansion with chronological training and holdout data. Require adequate sample sizes and both outcome classes; never auto-promote thresholds.
-5. [ ] Complete Token-2022 transfer-fee support or fail-closed rejection, network/priority fee estimation and impact/slippage policy.
-6. [ ] Wire quote generation and strict strategy authorization into deterministic paper entry/exit transitions and PostgreSQL persistence.
+1. [x] Integrate PostgreSQL ledger projections, Helius backfill archive/checkpoints and resumable retry queue into main.
+2. [x] Implement chronological historical price/volume and rolling-flow replay, verified archive hydration, decode-completeness gating and authenticated read-only replay/backfill APIs (PR #45, pending merge).
+3. [ ] Extend replay to evaluate every mandatory strict-strategy rule, including creator/cluster risk and signal freshness, and explicitly score pullback/reclaim volume rules only after calibration.
+4. [ ] Run replay against collected sessions and calibrate pullback contraction/reclaim expansion with chronological training and holdout data. Require adequate sample sizes and both outcome classes; never auto-promote thresholds.
+5. [ ] Complete Token-2022 transfer-fee handling or explicit fail-closed rejection, authoritative network/priority fee estimation and validated impact/slippage policy.
+6. [ ] Connect the reusable quote-gated lifecycle to the Worker position scheduler and persist deterministic paper entry/exit transitions.
 7. [ ] Connect dynamic exit evaluation to the position scheduler and exact full-position sell quotes.
 8. [ ] Complete authoritative migration detection, canonical PumpSwap pool monitoring and exit-blocked recovery.
 9. [ ] Test Durable Object eviction/restart, PostgreSQL outages/recovery, queue recovery, provider gaps and lease fencing.

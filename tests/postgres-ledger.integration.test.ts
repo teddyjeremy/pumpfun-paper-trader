@@ -193,11 +193,17 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       createEvents: [{ mint: backfillMint, bondingCurve: state.bondingCurve }],
       tradeEvents: []
     };
-    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction });
-    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction });
+    const pendingDecode = { complete: false, reason: "Historical signatures are still being checked.", verifiedTransactionCount: 0 };
+    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction, decodeCoverage: pendingDecode });
+    await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction, decodeCoverage: pendingDecode });
+    await ledgerPersistence!.persistHeliusBackfillArchive({
+      sessionId, mint: backfillMint, state, transaction,
+      decodeCoverage: { complete: true, reason: null, verifiedTransactionCount: 1 }
+    });
 
     const archived = await inspector!.query(
-      `SELECT j.status,j.pages_scanned,j.signature_count,j.launch_block_time,
+      `SELECT j.status,j.pages_scanned,j.signature_count,j.launch_block_time,j.decoded_complete,
+        j.verified_transaction_count,
         (SELECT COUNT(*)::int FROM helius_transaction_observations t
           WHERE t.session_id=j.session_id AND t.mint=j.mint) AS transactions
        FROM helius_backfill_jobs j WHERE j.session_id=$1 AND j.mint=$2`,
@@ -205,12 +211,20 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     );
     expect(archived.rows[0]).toEqual({
       status: "COMPLETE", pages_scanned: 1, signature_count: 1,
-      launch_block_time: "1762941600", transactions: 1
+      launch_block_time: "1762941600", decoded_complete: true,
+      verified_transaction_count: 1, transactions: 1
     });
+    const replayDataset = await ledgerPersistence!.getHeliusBackfillReplayDataset(sessionId);
+    expect(replayDataset).toHaveLength(1);
+    expect(replayDataset[0]).toMatchObject({
+      mint: backfillMint, launchBlockTime: 1762941600, decodedComplete: true,
+      signatureCount: 1, verifiedTransactionCount: 1
+    });
+    expect(replayDataset[0]?.transactions).toHaveLength(1);
 
     await expect(ledgerPersistence!.persistHeliusBackfillArchive({
       sessionId, mint: backfillMint, state,
-      transaction: { ...transaction, slot: 124 }
+      transaction: { ...transaction, slot: 124 }, decodeCoverage: pendingDecode
     })).rejects.toThrow(/verified signature evidence|conflicts/);
 
     const incompleteMint = "11111111111111111111111111111111";
@@ -225,7 +239,8 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       reason: "Verified launch block time is unavailable."
     };
     await ledgerPersistence!.persistHeliusBackfillArchive({
-      sessionId, mint: incompleteMint, state: incomplete
+      sessionId, mint: incompleteMint, state: incomplete,
+      decodeCoverage: { complete: false, reason: "Verified launch block time is unavailable.", verifiedTransactionCount: 0 }
     });
     const incompleteRow = await inspector!.query(
       "SELECT status,launch_block_time,reason FROM helius_backfill_jobs WHERE session_id=$1 AND mint=$2",

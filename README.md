@@ -6,7 +6,7 @@ A **paper-only** Pump.fun research, market-monitoring and trading-simulation sys
 
 The current `main` branch contains the discovery and monitoring foundation, verified Pump/PumpSwap account and transaction evidence, strict strategy audit, quote adapters, portfolio simulation primitives, and dashboard/API foundations.
 
-**Main is not yet paper-trading ready.** The strict evaluator intentionally cannot authorize a BUY while the pullback/reclaim volume thresholds, executable quote economics, and quote-to-position lifecycle are incomplete.
+**Main is not yet paper-trading ready.** The merged ledger and reusable execution components are not yet connected to an automatic position scheduler, and strict entry remains fail-closed. The strict evaluator intentionally cannot authorize a BUY while the pullback/reclaim volume thresholds, executable quote economics, and quote-to-position lifecycle are incomplete.
 
 ### Implemented on main
 
@@ -22,7 +22,7 @@ The current `main` branch contains the discovery and monitoring foundation, veri
 
 Relevant mainline work: [PR #34](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/34), [PR #36](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/36), [PR #39](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/39).
 
-### Integrated paper-trading stack (this branch)
+### Integrated paper-trading stack (merged PR #40)
 
 This branch promotes the previously feature-branch-only work into mainline as one tested integration:
 
@@ -33,12 +33,12 @@ This branch promotes the previously feature-branch-only work into mainline as on
 - One-second sampled overlapping flow windows and distinct buyer aggregation (PR #33 work).
 - Strict strategy-to-paper execution lifecycle and reusable quote-gated dynamic exit component.
 
-The integration is being promoted in [PR #40](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/40). Historical replay and decode-coverage completeness remain separate work; [PR #37](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/37) was closed because its stale branch base produced a large conflicting diff.
+The integration was merged in [PR #40](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/40). The historical replay foundation, decode-completeness tracking and read-only replay API are included in [PR #45](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/45). The replay still does not simulate the complete strategy or executable fills; calibration remains advisory.
 
 ## What remains
 
-1. **Historical replay:** port replay and decode-coverage migration onto this branch; replay the actual strict strategy chronologically using verified observations.
-2. **Calibrate volume rules:** use chronological training/holdout sets to evaluate pullback contraction and reclaim expansion; do not invent thresholds or promote a weak holdout result.
+1. **Validate historical replay:** run the new replay API against collected sessions, inspect incomplete-coverage outcomes and verify that archived observations match the intended launch windows. Migration 0007 is additive and must be explicitly reviewed/applied before the replay API can read decode-completeness fields.
+2. **Complete strategy replay and calibration:** include every mandatory rule and the documented dynamic exit behavior; use chronological training/holdout sets to evaluate pullback contraction and reclaim expansion. Do not invent thresholds or promote a weak holdout result.
 3. **Complete quote economics:** add supported Token-2022 transfer-fee handling or fail-closed rejection, authoritative network/priority fee estimates, and validated impact/slippage policy.
 4. **Connect paper execution:** connect quote-gated entry/exit lifecycle to the actual Worker position scheduler and persist complete position/trade transitions.
 5. **Complete migration lifecycle:** verify graduation and canonical PumpSwap market state, monitor full-position sellability and keep positions open when quotes are unavailable.

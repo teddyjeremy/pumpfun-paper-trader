@@ -7,8 +7,13 @@ import { trackingSnapshot } from "./diagnostics/tracker.js";
 import {
   acquireWorkerLease, heartbeatWorkerLease, persistPaperAuditEvents,
   releaseWorkerLease, getPersistenceStatus, getTradingDashboardSnapshot, getPaperSessionLedgerSnapshot,
-  persistHeliusBackfillArchive
+  persistHeliusBackfillArchive, getHeliusBackfillReplayDataset,
+  getHeliusBackfillDashboardSnapshot
 } from "./persistence/postgres.js";
+import { fetchSolUsdPrice } from "./ingestion/sol-usd-price.js";
+import {
+  calibrateVolumeThresholds, hydrateArchivedVerifiedTransaction, replayHistoricalCoin
+} from "./strategy/historical-replay.js";
 
 export const app = Fastify({
   logger: { level: config.LOG_LEVEL, redact: ["*.HELIUS_API_KEY", "*.apiKey", "*.secret", "*.authorization"] }
@@ -72,8 +77,9 @@ app.post("/internal/helius-backfill", async (request, reply) => {
   const body = request.body && typeof request.body === "object"
     ? request.body as Record<string, unknown> : {};
   if (typeof body.sessionId !== "string" || typeof body.mint !== "string" ||
-      !body.state || typeof body.state !== "object") {
-    return reply.code(400).send({ error: "sessionId, mint and backfill state are required." });
+      !body.state || typeof body.state !== "object" ||
+      !body.decodeCoverage || typeof body.decodeCoverage !== "object") {
+    return reply.code(400).send({ error: "sessionId, mint, backfill state and decode coverage are required." });
   }
   try {
     await persistHeliusBackfillArchive(body as never);
@@ -138,6 +144,93 @@ app.get("/api/paper-ledger", async request => {
   const sessionId = (request.query as Record<string, unknown>).sessionId;
   return getPaperSessionLedgerSnapshot(typeof sessionId === "string" ? sessionId : undefined);
 });
+
+app.get("/api/helius/backfills", async (request, reply) => {
+  const sessionId = (request.query as Record<string, unknown>).sessionId;
+  if (typeof sessionId !== "string" || !sessionId.trim()) {
+    return reply.code(400).send({ error: "sessionId is required." });
+  }
+  try {
+    return { sessionId, backfills: await getHeliusBackfillDashboardSnapshot(sessionId) };
+  } catch {
+    return reply.code(503).send({ error: "Historical backfill archive is unavailable; verify database migrations and connectivity." });
+  }
+});
+
+app.get("/api/strategy/replay", async (request, reply) => {
+  const query = request.query as Record<string, unknown>;
+  const sessionId = query.sessionId;
+  if (typeof sessionId !== "string" || !sessionId.trim()) {
+    return reply.code(400).send({ error: "sessionId is required." });
+  }
+  const parseOptionalPercent = (value: unknown): number | undefined => {
+    if (typeof value !== "string" || value.trim() === "") return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= 10_000 ? parsed : undefined;
+  };
+  const minFavorableExcursionPct = parseOptionalPercent(query.minFavorableExcursionPct);
+  const maxAdverseExcursionPct = parseOptionalPercent(query.maxAdverseExcursionPct);
+  const roundTripCostPct = parseOptionalPercent(query.roundTripCostPct);
+  const anyOutcomeThreshold = query.minFavorableExcursionPct !== undefined ||
+    query.maxAdverseExcursionPct !== undefined;
+  if ((query.minFavorableExcursionPct !== undefined && minFavorableExcursionPct === undefined) ||
+      (query.maxAdverseExcursionPct !== undefined && maxAdverseExcursionPct === undefined) ||
+      (query.roundTripCostPct !== undefined && roundTripCostPct === undefined) ||
+      (anyOutcomeThreshold && (minFavorableExcursionPct === undefined || maxAdverseExcursionPct === undefined || roundTripCostPct === undefined)) ||
+      (minFavorableExcursionPct !== undefined && minFavorableExcursionPct <= 0) ||
+      (roundTripCostPct !== undefined && !anyOutcomeThreshold)) {
+    return reply.code(400).send({ error: "Supply both valid outcome excursion thresholds and an explicit round-trip cost to assign profitability labels." });
+  }
+  try {
+    const price = await fetchSolUsdPrice();
+    if (price.status !== "AVAILABLE") {
+      return reply.code(503).send({ error: "Fresh SOL/USD reference unavailable; replay micro-trade filtering is blocked." });
+    }
+    const rows = await getHeliusBackfillReplayDataset(sessionId);
+    const label = minFavorableExcursionPct !== undefined &&
+      maxAdverseExcursionPct !== undefined && roundTripCostPct !== undefined
+      ? {
+          minFavorableExcursionPct,
+          maxAdverseExcursionPct,
+          roundTripCostPct: roundTripCostPct as number
+        }
+      : undefined;
+    const replays = rows.map(row => {
+      if (row.launchBlockTime === null) {
+        return {
+          mint: row.mint, launchBlockTime: 0, horizonSeconds: row.horizonSeconds,
+          decodeComplete: false,
+          decodeReason: row.decodedReason ?? row.reason ?? "Verified launch block time is unavailable.",
+          verifiedTransactionCount: row.verifiedTransactionCount, verifiedTradeCount: 0,
+          snapshots: [], firstSetup: null, outcome: null, status: "INCOMPLETE" as const
+        };
+      }
+      const transactions = row.transactions.map(hydrateArchivedVerifiedTransaction);
+      return replayHistoricalCoin({
+        mint: row.mint, transactions, launchBlockTime: row.launchBlockTime,
+        horizonSeconds: row.horizonSeconds, decodeComplete: row.decodedComplete,
+        decodeReason: row.decodedReason ?? row.reason
+      }, {
+        solUsdPriceUsd: price.observation.priceUsd,
+        minimumTradeUsd: 0.01,
+        horizonSeconds: row.horizonSeconds,
+        ...(label ? { label } : {})
+      });
+    });
+    return {
+      sessionId,
+      solUsdReference: price.observation,
+      replayCount: replays.length,
+      replays,
+      calibration: calibrateVolumeThresholds(replays),
+      interpretation: "This is historical reserve-price and rule-evidence replay, not an executable-fill simulation. Volume thresholds are not promoted automatically; incomplete decoding remains unlabelled."
+    };
+  } catch (error) {
+    request.log.error({ error }, "Historical strategy replay failed");
+    return reply.code(503).send({ error: "Historical replay could not be completed; archived evidence may be incomplete or migrations unavailable." });
+  }
+});
+
 
 app.get("/api/results/summary", async () => {
   const state = snapshot();

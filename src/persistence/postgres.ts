@@ -639,6 +639,7 @@ export interface HeliusBackfillArchiveInput {
     status: "PENDING" | "PAGING" | "READY_TO_FETCH" | "COMPLETE" | "INCOMPLETE";
     reason: string | null;
   };
+  decodeCoverage: { complete: boolean; reason: string | null; verifiedTransactionCount: number };
   transaction?: {
     mint: string;
     signature: string;
@@ -685,6 +686,13 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
   if (state.scannedCount < state.signatures.length) {
     throw new Error("Historical signature count exceeds the verified scan count.");
   }
+  if (typeof input.decodeCoverage?.complete !== "boolean" ||
+      (input.decodeCoverage.complete && state.status !== "COMPLETE") ||
+      !Number.isSafeInteger(input.decodeCoverage.verifiedTransactionCount) ||
+      input.decodeCoverage.verifiedTransactionCount < 0 ||
+      !(input.decodeCoverage.reason === null || typeof input.decodeCoverage.reason === "string")) {
+    throw new Error("Historical transaction decoding coverage fields are invalid.");
+  }
   if (transaction) {
     const signatureEvidence = state.signatures.find(item => item.signature === transaction.signature);
     if (transaction.mint !== mint || !signaturePattern.test(transaction.signature) ||
@@ -706,12 +714,20 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
     const checkpoint = await client.query(
       `INSERT INTO helius_backfill_jobs
         (session_id,mint,bonding_curve,create_signature,launch_block_time,horizon_seconds,max_signatures,
-         pages_scanned,scanned_count,before_signature,status,reason,signature_count,signature_state,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,now())
+         pages_scanned,scanned_count,before_signature,status,reason,signature_count,signature_state,
+         decoded_complete,decoded_reason,verified_transaction_count,decoded_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,
+         CASE WHEN $15 THEN now() ELSE NULL END,now())
        ON CONFLICT (session_id,mint) DO UPDATE SET
          pages_scanned=EXCLUDED.pages_scanned,scanned_count=EXCLUDED.scanned_count,
          before_signature=EXCLUDED.before_signature,status=EXCLUDED.status,reason=EXCLUDED.reason,
-         signature_count=EXCLUDED.signature_count,signature_state=EXCLUDED.signature_state,updated_at=now()
+         signature_count=EXCLUDED.signature_count,signature_state=EXCLUDED.signature_state,
+         decoded_complete=helius_backfill_jobs.decoded_complete OR EXCLUDED.decoded_complete,
+         decoded_reason=CASE WHEN helius_backfill_jobs.decoded_complete OR EXCLUDED.decoded_complete THEN NULL
+           ELSE COALESCE(EXCLUDED.decoded_reason,helius_backfill_jobs.decoded_reason) END,
+         verified_transaction_count=GREATEST(helius_backfill_jobs.verified_transaction_count,EXCLUDED.verified_transaction_count),
+         decoded_at=CASE WHEN EXCLUDED.decoded_complete THEN COALESCE(helius_backfill_jobs.decoded_at,now()) ELSE helius_backfill_jobs.decoded_at END,
+         updated_at=now()
        WHERE helius_backfill_jobs.bonding_curve=EXCLUDED.bonding_curve
          AND helius_backfill_jobs.create_signature=EXCLUDED.create_signature
          AND helius_backfill_jobs.launch_block_time IS NOT DISTINCT FROM EXCLUDED.launch_block_time
@@ -728,7 +744,8 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
        RETURNING mint`,
       [sessionId,mint,state.bondingCurve,state.createSignature,state.launchBlockTime,state.horizonSeconds,
         state.maxSignatures,state.pagesScanned,state.scannedCount,state.before,state.status,state.reason,
-        state.signatures.length,JSON.stringify(state.signatures)]
+        state.signatures.length,JSON.stringify(state.signatures),input.decodeCoverage.complete,input.decodeCoverage.reason,
+        input.decodeCoverage.verifiedTransactionCount]
     );
     if (checkpoint.rowCount !== 1) {
       throw new Error("Historical backfill checkpoint conflicts with immutable identity or previously persisted progress.");
@@ -747,6 +764,15 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
           transaction.receivedAt,JSON.stringify(transaction.createEvents),JSON.stringify(transaction.tradeEvents),raw]
       );
       if (result.rowCount !== 1) throw new Error("Historical transaction signature conflicts with previously archived evidence.");
+      if (transaction.source === "HISTORICAL_BACKFILL") {
+        await client.query(
+          `UPDATE helius_backfill_jobs SET verified_transaction_count=(
+             SELECT COUNT(*)::int FROM helius_transaction_observations
+             WHERE session_id=$1 AND mint=$2 AND observation_source='HISTORICAL_BACKFILL'
+           ) WHERE session_id=$1 AND mint=$2`,
+          [sessionId,mint]
+        );
+      }
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -755,4 +781,79 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
   } finally {
     client.release();
   }
+}
+
+
+
+export interface HeliusBackfillReplayDatasetRow {
+  mint: string;
+  launchBlockTime: number | null;
+  horizonSeconds: number;
+  status: "PENDING" | "PAGING" | "READY_TO_FETCH" | "COMPLETE" | "INCOMPLETE";
+  reason: string | null;
+  decodedComplete: boolean;
+  decodedReason: string | null;
+  signatureCount: number;
+  verifiedTransactionCount: number;
+  transactions: unknown[];
+}
+
+/** Read only verified historical observations; live-monitor observations are excluded from replay. */
+export async function getHeliusBackfillReplayDataset(sessionId: string): Promise<HeliusBackfillReplayDatasetRow[]> {
+  if (!pool) throw new Error("PostgreSQL persistence is not configured.");
+  if (!sessionId.trim() || sessionId.length > 128) throw new Error("A valid paper session ID is required.");
+  const result = await pool.query(
+    `SELECT j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
+       j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count,
+       COALESCE(
+         json_agg(t.raw_observation ORDER BY t.slot ASC,t.signature ASC)
+           FILTER (WHERE t.signature IS NOT NULL AND t.observation_source='HISTORICAL_BACKFILL'),
+         '[]'::json
+       ) AS transactions
+     FROM helius_backfill_jobs j
+     LEFT JOIN helius_transaction_observations t
+       ON t.session_id=j.session_id AND t.mint=j.mint
+     WHERE j.session_id=$1
+     GROUP BY j.session_id,j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
+       j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count
+     ORDER BY j.launch_block_time ASC NULLS LAST,j.mint ASC`,
+    [sessionId]
+  );
+  return result.rows.map(row => ({
+    mint: String(row.mint),
+    launchBlockTime: row.launch_block_time === null ? null : Number(row.launch_block_time),
+    horizonSeconds: Number(row.horizon_seconds),
+    status: row.status,
+    reason: row.reason === null ? null : String(row.reason),
+    decodedComplete: row.decoded_complete === true,
+    decodedReason: row.decoded_reason === null ? null : String(row.decoded_reason),
+    signatureCount: Number(row.signature_count),
+    verifiedTransactionCount: Number(row.verified_transaction_count),
+    transactions: Array.isArray(row.transactions) ? row.transactions : []
+  }));
+}
+
+export async function getHeliusBackfillDashboardSnapshot(sessionId: string): Promise<Array<{
+  mint: string; status: string; reason: string | null; launchBlockTime: number | null;
+  pagesScanned: number; scannedCount: number; signatureCount: number;
+  decodedComplete: boolean; decodedReason: string | null; verifiedTransactionCount: number;
+}>> {
+  if (!pool) throw new Error("PostgreSQL persistence is not configured.");
+  if (!sessionId.trim() || sessionId.length > 128) throw new Error("A valid paper session ID is required.");
+  const result = await pool.query(
+    `SELECT mint,status,reason,launch_block_time,pages_scanned,scanned_count,signature_count,
+       decoded_complete,decoded_reason,verified_transaction_count
+     FROM helius_backfill_jobs WHERE session_id=$1
+     ORDER BY launch_block_time ASC NULLS LAST,mint ASC`,
+    [sessionId]
+  );
+  return result.rows.map(row => ({
+    mint: String(row.mint), status: String(row.status),
+    reason: row.reason === null ? null : String(row.reason),
+    launchBlockTime: row.launch_block_time === null ? null : Number(row.launch_block_time),
+    pagesScanned: Number(row.pages_scanned), scannedCount: Number(row.scanned_count),
+    signatureCount: Number(row.signature_count), decodedComplete: row.decoded_complete === true,
+    decodedReason: row.decoded_reason === null ? null : String(row.decoded_reason),
+    verifiedTransactionCount: Number(row.verified_transaction_count)
+  }));
 }
