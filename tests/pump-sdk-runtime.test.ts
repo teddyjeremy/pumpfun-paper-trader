@@ -10,20 +10,23 @@ describe("official Pump SDK runtime surface", () => {
     expect(officialPumpSdkModulesAvailable()).toEqual({ curve: true, pumpSwap: true });
   });
 
-  it("reports the installed SDK method surface without assuming undocumented names", () => {
+  it("records static exports and online prototype surfaces independently", () => {
     const surface = officialPumpSdkMethodSurface();
     console.info("PINNED_PUMP_SDK_METHOD_SURFACE", JSON.stringify(surface));
     expect(surface.curveStatic.length).toBeGreaterThan(0);
-    expect(surface.curveOnline.length).toBeGreaterThan(0);
     expect(surface.pumpSwapStatic.length).toBeGreaterThan(0);
-    expect(surface.pumpSwapOnline.length).toBeGreaterThan(0);
+    // The pinned SDK exposes these instruction builders on static SDK objects.
+    // Empty online prototypes are valid and must not make module inspection fail.
+    expect(Array.isArray(surface.curveOnline)).toBe(true);
+    expect(Array.isArray(surface.pumpSwapOnline)).toBe(true);
   });
 
-  it("reports raw instruction-builder capabilities as explicit booleans", () => {
+  it("reports instruction-builder capabilities only when the pinned runtime exports them", () => {
     const capabilities = officialPumpSdkInstructionCapabilities();
-    for (const venue of Object.values(capabilities)) {
-      expect(typeof venue.buy).toBe("boolean");
-      expect(typeof venue.sell).toBe("boolean");
-    }
+    expect(capabilities).toEqual({
+      curveV3: { buy: true, sell: true },
+      curveV2: { buy: true, sell: true },
+      pumpSwapV2: { buy: true, sell: true }
+    });
   });
 });
