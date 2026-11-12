@@ -12,8 +12,10 @@ export interface HistoricalReplayCoinInput {
   horizonSeconds?: number;
   decodeComplete: boolean;
   decodeReason?: string | null;
-  /** Historical second at which independently sourced wallet-link and holder coverage became complete. */
+  /** Historical second at which the sampled wallet-link evidence was fully ingested. */
   walletClusterEvidenceCompleteAt?: number;
+  /** Historical second at which a genuinely complete holder census was independently verified. Top-20 snapshots do not qualify. */
+  holderCensusCompleteAt?: number;
   walletLinks?: readonly WalletLinkEvidence[];
   walletHoldings?: readonly WalletHoldingEvidence[];
 }
@@ -256,7 +258,12 @@ export function replayHistoricalCoin(
       const creatorRiskStatus = creatorRisk?.status ?? "UNKNOWN";
       const walletClusterRiskStatus = walletRisk?.status === "REJECT_OBSERVED"
         ? "REJECT_OBSERVED"
-        : Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) && input.walletClusterEvidenceCompleteAt! <= evaluatedAt && walletRisk !== null ? "PASS_COMPLETE" : "UNKNOWN";
+        : Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) &&
+          input.walletClusterEvidenceCompleteAt! <= evaluatedAt &&
+          Number.isSafeInteger(input.holderCensusCompleteAt) &&
+          input.holderCensusCompleteAt! <= evaluatedAt &&
+          walletRisk !== null && walletRisk.attributionStatus !== "INVALID_EVIDENCE"
+          ? "PASS_COMPLETE" : "UNKNOWN";
       const setupEligible = input.decodeComplete && profile.dataComplete &&
         profile.microTradeFilterStatus === "APPLIED" &&
         profile.reclaimDetected && profile.pullbackVolumeVsImpulsePct !== null &&
