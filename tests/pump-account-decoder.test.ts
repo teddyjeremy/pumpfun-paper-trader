@@ -142,7 +142,7 @@ describe("IDL-aligned Pump account decoders", () => {
     const wrongAuthority = tokenVault(10_000n, ZERO_KEY, ZERO_KEY); wrongAuthority.fill(1, 32, 64);
     expect(() => verifyCanonicalPumpSwapPoolSnapshot({
       poolAccount: pool, baseVaultAccount: account(baseVault.address, SPL_TOKEN_PROGRAM_ID, wrongAuthority),
-      quoteVaultAccount: quoteVault, expectedMint: ZERO_KEY, expectedPoolAddress: "pool",
+      quoteVaultAccount: quoteVault, expectedMint: ZERO_KEY, expectedPoolAddress: ZERO_KEY,
       expectedPoolCreatorAuthority: ZERO_KEY, expectedPoolAuthority: ZERO_KEY,
       nowMs: Date.parse(observedAt)
     })).toThrow(/vault/);
