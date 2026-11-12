@@ -177,8 +177,8 @@ export function applyAddressSignaturesPage(
 
   const merged = [...current.signatures, ...additions];
   const scannedCount = current.scannedCount + parsed.length;
-  if (merged.length > current.maxSignatures || scannedCount > current.maxSignatures + current.pagesScanned * DEFAULT_BACKFILL_PAGE_SIZE) {
-    return incomplete("Historical backfill reached its configured work cap before coverage was proven.");
+  if (merged.length > current.maxSignatures || scannedCount > current.maxSignatures) {
+    return incomplete("Historical backfill reached its configured signature-scan cap before coverage was proven.");
   }
 
   const last = parsed[parsed.length - 1]!;
