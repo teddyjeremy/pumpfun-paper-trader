@@ -639,15 +639,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       items.push(tracker);
       byMint.set(tracker.mint, items);
     }
-    return [...candidates.values()].map(candidate => {
+    return Promise.all([...candidates.values()].map(async candidate => {
       const mint = String(candidate.mint);
       const observed = byMint.get(mint) ?? [];
+      const refs = await this.ctx.storage.get<{
+        decisionPriceQuotePerToken: number | null; decisionAt: string | null;
+        discoveryPriceQuotePerToken: number | null;
+      }>(`candidate_price_refs:${sessionId}:${mint}:${SOL_QUOTE_MINT}`);
       return {
         ...candidate,
+        decisionPriceQuotePerToken: refs?.decisionPriceQuotePerToken ?? null,
+        decisionAt: refs?.decisionAt ?? null,
+        discoveryPriceQuotePerToken: refs?.discoveryPriceQuotePerToken ?? null,
+        quoteMint: SOL_QUOTE_MINT,
         followUpStatus: observed.length > 0 ? "PARTIAL" : "MISSING",
         priceTrackers: observed.sort((a, b) => a.quoteMint.localeCompare(b.quoteMint))
       };
-    }).sort((a, b) => String(a.mint).localeCompare(String(b.mint)));
+    })).then(items => items.sort((a, b) => String(a.mint).localeCompare(String(b.mint))));
   }
 
   async listAuditEvents(after = 0, limit = 100, requestedSessionId?: string): Promise<unknown> {
