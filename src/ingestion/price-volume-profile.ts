@@ -85,12 +85,21 @@ function quoteAmount(event: PumpTradeEvent): bigint {
   return event.quoteAmount;
 }
 
-function priceOf(event: PumpTradeEvent): number | null {
-  const quote = quoteAmount(event);
-  if (quote <= 0n || event.tokenAmount <= 0n) return null;
-  const scaled = (quote * PRICE_SCALE) / event.tokenAmount;
+function reservePrice(
+  quoteReserves: bigint,
+  tokenReserves: bigint
+): number | null {
+  if (quoteReserves <= 0n || tokenReserves <= 0n) return null;
+  const scaled = (quoteReserves * PRICE_SCALE) / tokenReserves;
   const value = Number(scaled) / Number(PRICE_SCALE);
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function priceOf(event: PumpTradeEvent): number | null {
+  const quoteReserves = event.quoteMint === SOL_QUOTE_MINT
+    ? event.virtualSolReserves
+    : event.virtualQuoteReserves;
+  return reservePrice(quoteReserves, event.virtualTokenReserves);
 }
 
 function summarizeBucket(bucket: MutableBucket): PriceVolumeBucket | null {
@@ -185,12 +194,18 @@ export function buildCandidatePriceVolumeProfiles(
     throw new Error("Invalid price-volume profile time range.");
   }
   const lower = now - horizon;
-  const groups = new Map<string, { mint: string; quoteMint: string | null; trades: TimedTrade[]; launchTime: number | null }>();
+  const groups = new Map<string, {
+    mint: string;
+    quoteMint: string | null;
+    trades: TimedTrade[];
+    launchTime: number | null;
+    launchPrice: number | null;
+  }>();
   const ensure = (mint: string, quoteMint: string | null) => {
     const key = `${mint}:${quoteMint ?? "UNKNOWN"}`;
     let group = groups.get(key);
     if (!group) {
-      group = { mint, quoteMint, trades: [], launchTime: null };
+      group = { mint, quoteMint, trades: [], launchTime: null, launchPrice: null };
       groups.set(key, group);
     }
     return group;
@@ -201,15 +216,23 @@ export function buildCandidatePriceVolumeProfiles(
       const timestamp = Number(created.timestamp);
       if (!Number.isSafeInteger(timestamp) || timestamp < 0) continue;
       const group = ensure(created.mint, created.quoteMint);
-      group.launchTime = group.launchTime === null ? timestamp : Math.min(group.launchTime, timestamp);
+      if (group.launchTime === null || timestamp < group.launchTime) {
+        group.launchTime = timestamp;
+        const quoteReserves = created.quoteMint === SOL_QUOTE_MINT
+          ? created.virtualSolReserves
+          : created.virtualQuoteReserves;
+        group.launchPrice = reservePrice(quoteReserves, created.virtualTokenReserves);
+      }
     }
     for (const event of transaction.tradeEvents) {
       const timestamp = Number(event.timestamp);
       if (!Number.isSafeInteger(timestamp) || timestamp < lower || timestamp > now) continue;
+      const group = ensure(event.mint, event.quoteMint);
+      if (group.launchTime !== null && timestamp < group.launchTime) continue;
       const price = priceOf(event);
       const amount = quoteAmount(event);
       if (price === null || amount <= 0n) continue;
-      ensure(event.mint, event.quoteMint).trades.push({
+      group.trades.push({
         event, timestamp, price, quoteAmount: amount,
         slot: transaction.slot, signature: transaction.signature
       });
@@ -234,7 +257,9 @@ export function buildCandidatePriceVolumeProfiles(
     const buckets = [...mutable.values()].sort((a, b) => a.startTime - b.startTime)
       .map(summarizeBucket).filter((value): value is PriceVolumeBucket => value !== null);
     const empty = summarizeStage([]);
-    const baseline = buckets[0]?.openPrice ?? null;
+    // Prefer the verified CreateEvent reserve price. If unavailable, use the
+    // first observed trade only as a partial baseline; coverage remains UNKNOWN.
+    const baseline = group.launchPrice ?? buckets[0]?.openPrice ?? null;
     const thresholdIndex = baseline === null
       ? -1
       : buckets.findIndex(bucket => bucket.highPrice >= baseline * 1.2);
@@ -350,7 +375,8 @@ export function buildCandidatePriceVolumeProfiles(
       buckets,
       profileStatus,
       coverageStatus,
-      dataComplete: coverageStatus === "COMPLETE_FROM_LAUNCH",
+      dataComplete: coverageStatus === "COMPLETE_FROM_LAUNCH" &&
+        buckets.at(-1)?.endTime === Math.floor(now / PRICE_VOLUME_BUCKET_SECONDS) * PRICE_VOLUME_BUCKET_SECONDS,
       coverage: "OBSERVED_EVENTS_ONLY",
       entryEligible: false
     });
