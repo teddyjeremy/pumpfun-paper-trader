@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { PumpTradeEvent } from "../src/ingestion/pump-events.js";
 import type { VerifiedPumpTransaction } from "../src/ingestion/helius.js";
-import { buildCandidateTradeFlows, SOL_QUOTE_MINT } from "../src/ingestion/trade-flow.js";
+import { buildCandidateTradeFlows, isSolQuoteMint, LEGACY_SOL_QUOTE_MINT, SOL_QUOTE_MINT } from "../src/ingestion/trade-flow.js";
 
 const mint = "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi";
 const trader = (n: number) => `wallet-${n}`;
 
 function trade(timestamp: bigint, user: string, isBuy: boolean, quoteAmount: bigint, quoteMint = SOL_QUOTE_MINT): PumpTradeEvent {
   return {
-    mint, solAmount: quoteMint === SOL_QUOTE_MINT ? quoteAmount : 9_999n, tokenAmount: 1n, isBuy, user, timestamp,
+    mint, solAmount: isSolQuoteMint(quoteMint) ? quoteAmount : 9_999n, tokenAmount: 1n, isBuy, user, timestamp,
     virtualSolReserves: 1n, virtualTokenReserves: 1n, realSolReserves: 1n, realTokenReserves: 1n,
     feeRecipient: trader(90), feeBasisPoints: 0n, fee: 0n, creator: trader(91),
     creatorFeeBasisPoints: 0n, creatorFee: 0n, trackVolume: false, totalUnclaimedTokens: 0n,
@@ -30,6 +30,26 @@ function tx(events: PumpTradeEvent[]): VerifiedPumpTransaction {
 describe("verified Pump.fun trade-flow windows", () => {
   it("recognizes the canonical wrapped-SOL quote mint", () => {
     expect(SOL_QUOTE_MINT).toBe("So11111111111111111111111111111111111111112");
+    expect(LEGACY_SOL_QUOTE_MINT).toBe("11111111111111111111111111111111");
+    expect(isSolQuoteMint(LEGACY_SOL_QUOTE_MINT)).toBe(true);
+    expect(isSolQuoteMint(SOL_QUOTE_MINT)).toBe(true);
+    expect(isSolQuoteMint("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")).toBe(false);
+  });
+
+  it("applies SOL/USD and micro-trade filtering to legacy default-key SOL quote events", () => {
+    const events = [100n, 102n, 104n].flatMap((timestamp, i) => [
+      trade(timestamp, trader(i * 3 + 1), true, 100_000_000n, LEGACY_SOL_QUOTE_MINT),
+      trade(timestamp, trader(i * 3 + 2), true, 100_000_000n, LEGACY_SOL_QUOTE_MINT),
+      trade(timestamp, trader(i * 3 + 3), true, 100_000_000n, LEGACY_SOL_QUOTE_MINT),
+      trade(timestamp, trader(80 + i), false, 10_000_000n, LEGACY_SOL_QUOTE_MINT)
+    ]);
+    const [flow] = buildCandidateTradeFlows([tx(events)], {
+      solUsdPriceUsd: 100, minimumTradeUsd: 0.01, nowSeconds: 106, horizonSeconds: 60
+    });
+    expect(flow).toMatchObject({
+      quoteUnit: "SOL", microTradeFilterStatus: "APPLIED",
+      latestThreeWindowFlowPass: true, dataComplete: true
+    });
   });
 
   it("aggregates three consecutive two-second windows and applies the agreed flow filters", () => {
