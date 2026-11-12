@@ -130,8 +130,17 @@ export async function getTradingDashboardSnapshot() {
 
   const persistence = await getPersistenceStatus();
   if (!persistence.connected) return unavailable("PostgreSQL is not connected");
-  if (!["0004_paper_session_event_ingestion", "0005_paper_trade_projections"].includes(persistence.migrationVersion ?? "")) {
-    return unavailable("Required ledger migrations 0001, 0002, 0003 and 0004 are not all applied");
+  try {
+    const requiredMigrations = await pool.query<{ version: string }>(
+      "SELECT version FROM schema_migrations WHERE version = ANY($1::text[])",
+      [["0001_initial_ledger", "0002_migration_aware_positions",
+        "0003_dynamic_exit_observations", "0004_paper_session_event_ingestion"]]
+    );
+    if (requiredMigrations.rows.length !== 4) {
+      return unavailable("Required ledger migrations 0001, 0002, 0003 and 0004 are not all applied");
+    }
+  } catch {
+    return unavailable("Ledger migration status could not be verified");
   }
 
   try {
@@ -547,8 +556,15 @@ export async function getPaperSessionLedgerSnapshot(sessionId?: string) {
   if (!pool) return unavailable("DATABASE_URL is not configured");
   const persistence = await getPersistenceStatus();
   if (!persistence.connected) return unavailable("PostgreSQL is not connected");
-  if (persistence.migrationVersion !== "0005_paper_trade_projections") {
-    return unavailable("Migration 0005_paper_trade_projections must be explicitly applied before reading the paper ledger projection");
+  try {
+    const projectionMigration = await pool.query(
+      "SELECT 1 FROM schema_migrations WHERE version='0005_paper_trade_projections' LIMIT 1"
+    );
+    if (projectionMigration.rows.length === 0) {
+      return unavailable("Migration 0005_paper_trade_projections must be explicitly applied before reading the paper ledger projection");
+    }
+  } catch {
+    return unavailable("Paper ledger migration status could not be verified");
   }
   if (sessionId !== undefined && (!sessionId.trim() || sessionId.length > 128)) {
     return unavailable("Invalid paper session id");
