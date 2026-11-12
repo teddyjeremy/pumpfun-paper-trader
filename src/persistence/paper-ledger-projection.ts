@@ -123,8 +123,9 @@ function projectQuote(value: unknown): PaperProjectionQuote {
   const observedAt = text(q.observedAt, "quote observedAt");
   const expiresAt = text(q.expiresAt, "quote expiresAt");
   const simulatedFillAt = text(q.simulatedFillAt, "quote simulatedFillAt");
-  if (![observedAt, expiresAt, simulatedFillAt].every(value => Number.isFinite(Date.parse(value)))) {
-    throw new Error("Paper projection quote timestamps are invalid.");
+  if (![observedAt, expiresAt, simulatedFillAt].every(value => Number.isFinite(Date.parse(value))) ||
+      Date.parse(expiresAt) <= Date.parse(observedAt)) {
+    throw new Error("Paper projection quote timestamps are invalid or expiry is not after observation.");
   }
   return {
     quoteId: text(q.quoteId, "quote id"),
@@ -174,9 +175,15 @@ export function buildPaperLedgerProjection(event: AuditEvent): PaperLedgerProjec
     const position = projectPosition(data.position);
     const buy = projectQuote(data.buyQuote);
     const initialSell = projectQuote(data.initialSellQuote);
+    const stakeDifference = Math.abs(buy.requestedUsd - position.stakeUsd);
+    const stakeTolerance = Math.max(1e-8, position.stakeUsd * 1e-8);
     if (buy.side !== "BUY" || initialSell.side !== "SELL" ||
         buy.mint !== position.mint || initialSell.mint !== position.mint ||
+        (event.mint !== null && event.mint !== position.mint) ||
+        buy.outputAmountBaseUnits !== position.tokenAmountBaseUnits ||
+        stakeDifference > stakeTolerance ||
         initialSell.inputAmountBaseUnits !== position.tokenAmountBaseUnits ||
+        (buy.venue !== undefined && initialSell.venue !== undefined && buy.venue !== initialSell.venue) ||
         buy.quoteId !== data.buyQuoteId || initialSell.quoteId !== data.initialSellQuoteId) {
       throw new Error("Paper entry projection quote and position identities do not reconcile.");
     }
@@ -187,6 +194,7 @@ export function buildPaperLedgerProjection(event: AuditEvent): PaperLedgerProjec
     const position = projectPosition(data.position, event.occurredAt);
     const sell = projectQuote(data.sellQuote);
     if (position.status !== "CLOSED" || sell.side !== "SELL" ||
+        (event.mint !== null && event.mint !== position.mint) ||
         sell.mint !== position.mint || sell.quoteId !== data.sellQuoteId ||
         sell.inputAmountBaseUnits !== position.tokenAmountBaseUnits) {
       throw new Error("Paper exit projection quote and closed position identities do not reconcile.");
