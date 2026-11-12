@@ -411,6 +411,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       if (historicalSignature) {
         mintArchived.add(transaction.signature);
         await this.ctx.storage.put(mintKey, [...mintArchived].slice(-500));
+        const verifiedKey = `helius_verified_historical_signatures:${sessionId}:${transaction.mint}`;
+        const verified = new Set(await this.ctx.storage.get<string[]>(verifiedKey) ?? []);
+        verified.add(transaction.signature);
+        await this.ctx.storage.put(verifiedKey, [...verified].slice(-500));
+        const transactionKey = `helius_verified_historical_transactions:${sessionId}:${transaction.mint}`;
+        const pendingTransactions = await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(transactionKey) ?? {};
+        delete pendingTransactions[transaction.signature];
+        await this.ctx.storage.put(transactionKey, pendingTransactions);
       }
     } catch {
       this.status.lastError = "Verified historical transaction is waiting for PostgreSQL persistence.";
