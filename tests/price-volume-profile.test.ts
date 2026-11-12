@@ -85,6 +85,8 @@ describe("observed price and stage-volume profile", () => {
       solUsdPriceUsd: 100, minimumTradeUsd: 0.01
     });
     expect(profile?.microTradeFilterStatus).toBe("APPLIED");
+    expect(profile?.ignoredMicroTradeCount).toBe(2);
+    expect(profile?.ignoredMicroTradeQuoteVolume).toBe("2");
     expect(profile?.pullbackVolumeVsImpulsePct).toBeCloseTo(95.56, 2);
     expect(profile?.reclaimVolumeVsPullbackPct).toBeCloseTo(55.81, 2);
     expect(profile?.pullbackVolume.sellQuoteVolume).toBe("2000000");
