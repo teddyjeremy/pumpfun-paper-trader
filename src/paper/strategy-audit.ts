@@ -47,9 +47,9 @@ function result(rule: string, status: RuleStatus, actual: unknown, expected: str
 }
 export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, evaluatedAt = new Date().toISOString()): StrictStrategyAudit {
   const rules: RuleResult[] = [];
-  rules.push(input.candidateAgeSeconds === null
-    ? result("ENTRY_WINDOW", "UNKNOWN", null, "candidate age <= 60 seconds", "Discovery timestamp is unavailable.")
-    : result("ENTRY_WINDOW", input.candidateAgeSeconds <= 60 ? "PASS" : "FAIL", input.candidateAgeSeconds, "<= 60 seconds", "Entry window is limited to the first 60 seconds."));
+  rules.push(input.candidateAgeSeconds === null || !Number.isFinite(input.candidateAgeSeconds) || input.candidateAgeSeconds < 0
+    ? result("CANDIDATE_AGE", "UNKNOWN", input.candidateAgeSeconds, "verified non-negative launch age; no 60-second entry cutoff", "A valid launch timestamp is unavailable or appears to be in the future.")
+    : result("CANDIDATE_AGE", "PASS", input.candidateAgeSeconds, "monitor eligible candidates for at least 10 minutes; do not reject solely after 60 seconds", "Candidate age is informational. The agreed strategy does not impose a first-minute entry cutoff."));
   const profile = input.profile;
   rules.push(!profile || !profile.dataComplete || profile.microTradeFilterStatus !== "APPLIED" || profile.impulsePriceChangePct === null
     ? result("IMPULSE", "UNKNOWN", profile?.impulsePriceChangePct ?? null, ">= +20%", "Insufficient verified price history.")
@@ -125,10 +125,14 @@ export function calculateReclaimConfirmation(input: {
   const signalAgeSeconds = input.nowSeconds - input.reclaimTimeSeconds;
   if (signalAgeSeconds < 0) return { signalAgeSeconds: null, nextObservationConfirmed: null };
   const threshold = input.previousCompletedHigh * 1.01;
-  const nextObservationConfirmed = input.nextObservationPrices.some(observation =>
-    Number.isFinite(observation.timestampSeconds) && observation.timestampSeconds > input.reclaimTimeSeconds! &&
-    observation.timestampSeconds <= input.nowSeconds && Number.isFinite(observation.price) &&
-    observation.price >= threshold
-  );
+  // Confirmation means the immediate next valid observation holds the reclaim.
+  // A later recovery must not erase a failed first observation.
+  const nextObservation = input.nextObservationPrices
+    .filter(observation => Number.isFinite(observation.timestampSeconds) &&
+      observation.timestampSeconds > input.reclaimTimeSeconds! &&
+      observation.timestampSeconds <= input.nowSeconds &&
+      Number.isFinite(observation.price) && observation.price > 0)
+    .sort((a, b) => a.timestampSeconds - b.timestampSeconds)[0];
+  const nextObservationConfirmed = nextObservation !== undefined && nextObservation.price >= threshold;
   return { signalAgeSeconds, nextObservationConfirmed };
 }
