@@ -39,6 +39,11 @@ function sameContext(a: RawExitWindowSample, b: RawExitWindowSample): boolean {
 }
 function validSample(sample: RawExitWindowSample): boolean {
   return Boolean(sample.mint && sample.quoteMint) &&
+    (sample.marketPhase === "bonding_curve" || sample.marketPhase === "migrated_market") &&
+    (sample.venue === "pump_curve" || sample.venue === "pumpswap") &&
+    (sample.windowSeconds === 2 || sample.windowSeconds === 5 || sample.windowSeconds === 10 || sample.windowSeconds === 30) &&
+    typeof sample.complete === "boolean" &&
+    (sample.largeHolderDistributionDetected === null || typeof sample.largeHolderDistributionDetected === "boolean") &&
     Number.isSafeInteger(sample.endedAtMs) && sample.endedAtMs >= 0 &&
     validUnits(sample.buyQuoteVolumeBaseUnits) && validUnits(sample.sellQuoteVolumeBaseUnits) &&
     Number.isSafeInteger(sample.uniqueBuyers) && sample.uniqueBuyers >= 0 &&
