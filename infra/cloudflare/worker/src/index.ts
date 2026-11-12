@@ -101,6 +101,8 @@ const PERSIST_EVERY_EVENTS = 25;
 export class PumpFunCoordinator extends DurableObject<Env> {
   private socket: WebSocket | null = null;
   private heliusSocket: WebSocket | null = null;
+  private heliusConnectedAtMs = 0;
+  private heliusConnectingSinceMs = 0;
   private heliusState: HeliusMonitorState = emptyHeliusMonitorState();
   private heliusBucket = new TokenBucket(2, 2);
   private drainingHelius = false;
@@ -203,6 +205,19 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     await this.persist();
 
+    if (this.heliusSocket?.readyState === WebSocket.OPEN &&
+        this.heliusConnectedAtMs > 0 && Date.now() - this.heliusConnectedAtMs >= 14 * 60 * 1000) {
+      const oldHeliusSocket = this.heliusSocket;
+      this.heliusSocket = null;
+      this.status.heliusConnected = false;
+      oldHeliusSocket.close(4001, "Scheduled Helius connection rotation");
+    }
+    if (this.heliusSocket?.readyState === WebSocket.CONNECTING &&
+        this.heliusConnectingSinceMs > 0 && Date.now() - this.heliusConnectingSinceMs >= 30_000) {
+      const oldHeliusSocket = this.heliusSocket;
+      this.heliusSocket = null;
+      oldHeliusSocket.close(4000, "Helius connection attempt timed out");
+    }
     if (!this.heliusSocket && this.status.enabled) this.connectHelius();
     if (this.socket?.readyState === WebSocket.OPEN) {
       const connectedAtMs = this.status.connectedAt ? Date.parse(this.status.connectedAt) : 0;
@@ -382,12 +397,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     try {
       const socket = new WebSocket(buildHeliusWebSocketUrl(this.env.HELIUS_API_KEY));
       this.heliusSocket = socket;
+      this.heliusConnectingSinceMs = Date.now();
       socket.addEventListener("open", () => {
         if (this.heliusSocket !== socket || !this.status.enabled) {
           socket.close(1000, "Coordinator disabled before Helius connection opened");
           return;
         }
         this.status.heliusConnected = true;
+        this.heliusConnectedAtMs = Date.now();
+        this.heliusConnectingSinceMs = 0;
         this.heliusState = resetHeliusSubscriptionIds(this.heliusState);
         this.sendHeliusSubscriptions();
         void this.persist().then(() => this.drainHeliusQueue()).catch(() => undefined);
@@ -435,6 +453,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         if (this.heliusSocket !== socket) return;
         this.heliusSocket = null;
         this.status.heliusConnected = false;
+        this.heliusConnectedAtMs = 0;
+        this.heliusConnectingSinceMs = 0;
         void this.persist().catch(() => undefined);
       });
       socket.addEventListener("error", () => {
@@ -445,6 +465,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     } catch {
       this.heliusSocket = null;
       this.status.heliusConnected = false;
+      this.heliusConnectedAtMs = 0;
+      this.heliusConnectingSinceMs = 0;
       this.status.lastError = "Unable to create the Helius WebSocket connection.";
     }
   }
