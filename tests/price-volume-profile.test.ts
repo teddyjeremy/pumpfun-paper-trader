@@ -10,7 +10,7 @@ function trade(timestamp: bigint, price: bigint, isBuy = true): PumpTradeEvent {
   const tokenAmount = 1_000n;
   return {
     mint, solAmount: price, tokenAmount, isBuy, user: `wallet-${timestamp}`, timestamp,
-    virtualSolReserves: 1n, virtualTokenReserves: 1n, realSolReserves: 1n, realTokenReserves: 1n,
+    virtualSolReserves: price, virtualTokenReserves: tokenAmount, realSolReserves: 1n, realTokenReserves: 1n,
     feeRecipient: "fee", feeBasisPoints: 0n, fee: 0n, creator: "creator",
     creatorFeeBasisPoints: 0n, creatorFee: 0n, trackVolume: false,
     totalUnclaimedTokens: 0n, totalClaimedTokens: 0n, currentSolVolume: 0n,
