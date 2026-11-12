@@ -755,41 +755,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         .filter(candidate => candidate.status === "DISCOVERED")
         .map(candidate => candidate.mint)
     });
-    const flowByMint = new Map(flows.map(flow => [flow.mint, flow]));
-    const profileByMint = new Map(priceVolumeProfiles.map(profile => [profile.mint, profile]));
-    const strategyAudits = candidateMints.map(mint => {
-      const candidate = this.discovery.candidates.find(item => item.mint === mint);
-      const flow = flowByMint.get(mint);
-      const profile = profileByMint.get(mint);
-      const links = this.walletLinkSnapshots[mint]?.links ?? [];
-      const confidence = links.reduce((best, link) => Math.max(best, link.confidenceBps), 0);
-      return { mint, ...evaluateStrictStrategyAudit({
-        candidateAgeSeconds: candidate?.firstSeenAt ? Math.max(0, (Date.now() - Date.parse(candidate.firstSeenAt)) / 1000) : null,
-        profile: profile ? {
-          impulsePriceChangePct: profile.impulsePriceChangePct, pullbackPct: profile.pullbackPct,
-          reclaimDetected: profile.reclaimDetected,
-          reclaimAbovePreviousFiveSecondHighPct: profile.reclaimAbovePreviousFiveSecondHighPct,
-          pullbackVolumeVsImpulsePct: profile.pullbackVolumeVsImpulsePct,
-          reclaimVolumeVsPullbackPct: profile.reclaimVolumeVsPullbackPct, dataComplete: profile.dataComplete
-        } : null,
-        flow: flow ? {
-          dataComplete: flow.dataComplete,
-          windows: flow.windows.map(w => ({buySellRatio:w.buySellRatio,uniqueBuyers:w.uniqueBuyers,uniqueSellers:w.uniqueSellers})),
-          distinctBuyersAcrossLatestThree:flow.distinctBuyersAcrossLatestThree,
-          largestBuyerShareAcrossLatestThreeBps:flow.largestBuyerShareAcrossLatestThreeBps
-        } : null,
-        creatorRiskStatus: creatorRiskByMint.get(mint)?.status ?? "UNKNOWN",
-        walletClusterRiskStatus: walletClusterRisk.find(x => x.mint === mint)?.status ?? "WATCH",
-        attributionConfidenceBps: confidence >= 7000 ? confidence : null,
-        signalAgeSeconds:null,nextObservationConfirmed:null,executableQuoteAvailable:false
-      })};
-    });
-    for (const item of strategyAudits) {
-      const eventTime = item.evaluatedAt.slice(0,16);
-      await this.appendAudit("FEATURE_SNAPSHOT",item.mint,{profile:profileByMint.get(item.mint)??null,flow:flowByMint.get(item.mint)??null},`features:${item.mint}:${eventTime}`);
-      await this.appendAudit("STRATEGY_DECISION",item.mint,item,`strategy:${item.mint}:${eventTime}`);
-      await this.appendAudit("REJECTION_REASON",item.mint,{decision:item.decision,rejectionReasons:item.rejectionReasons,watchReasons:item.watchReasons,blockingUnknownRules:item.blockingUnknownRules},`reasons:${item.mint}:${eventTime}`);
-    }
     return {
       provider: "helius",
       mode: "paper",
@@ -811,8 +776,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         };
       }),
       flows: rankedFlows.map((flow, index) => ({ rank: index + 1, ...flow })),
-      priceVolumeProfiles,
-      strategyAudits
+      priceVolumeProfiles
     };
   }
 
