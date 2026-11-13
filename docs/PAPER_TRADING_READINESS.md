@@ -178,6 +178,13 @@ Do not rotate the shared ingestion token without coordinated authorization to up
 - [ ] Build complete historical wallet/holder evidence and verified fee-inclusive entry/exit execution evidence before using replay to estimate profitability.
 - [ ] Use a separate control sample of rejected/low-activity launches before making population-wide claims; the top-30% shortlist is activity-biased and is for triage only.
 
+## Forward live-market paper session
+
+- [x] Add a four-hour forward paper-session runbook covering deployment preflight, paper-only acceptance, frozen strategy configuration, health monitoring, stop conditions, reconciliation and post-session analysis: [LIVE_PAPER_SESSION_RUNBOOK.md](./LIVE_PAPER_SESSION_RUNBOOK.md).
+- [ ] Complete the deployed Worker-to-Neon simulated entry/exit acceptance test before starting the four-hour session.
+- [ ] Run the four-hour live-market-data paper session and archive its complete evidence and operational metrics.
+- [ ] Repeat across independent sessions before considering any live-money review; this paper trader remains non-signing and non-submitting.
+
 ## First-paper-trade acceptance test
 
 Paper trading may be declared started only after a reproducible test demonstrates all of the following:
