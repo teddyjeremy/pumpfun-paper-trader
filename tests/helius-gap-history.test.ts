@@ -24,7 +24,7 @@ describe("Helius gap address-history scan", () => {
         : [row("4", 103), row("3", 102), row("2", 101)] });
     };
     const result = await fetchHeliusGapAddressHistory("11111111111111111111111111111111", gap,
-      { apiKey: "test", fetcher });
+      { apiKey: "test", fetcher }, fetcher, 3);
     expect(result).toMatchObject({ complete: true, pagesScanned: 2 });
     if (result.complete) expect(result.signatures.map(item => item.signature)).toEqual([sig("3"), sig("2"), sig("1")]);
   });
