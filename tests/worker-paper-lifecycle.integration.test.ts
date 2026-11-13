@@ -100,6 +100,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
         leaseRetained: false, leaseReleased: true
       });
       expect(result.sessionId).toMatch(/^smoke-test-worker-/);
+      expect(await storage.get("enabled")).not.toBe(true);
       expect(calls.filter(call => call.path === "/internal/paper-events")).toHaveLength(2);
       const [first, replay] = calls.filter(call => call.path === "/internal/paper-events");
       expect(first?.body).toEqual(replay?.body);
