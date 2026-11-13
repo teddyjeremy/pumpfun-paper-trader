@@ -1,5 +1,10 @@
 # Paper-trading readiness
 
+> **Post-merge status correction (2026-11-13, main `5a24c70`):** PR #77 and PR #78 are merged. The Vercel production deployment for `5a24c70` is READY, and the Cloudflare Worker deployment workflow for this commit succeeded. This supersedes older snapshot statements below that say PR #77 is open, the Worker release is pending, or the historical dashboard integration is not merged. These deployments do **not** mean paper trading is active. Neon migrations through `0010`, the historical workflow run, reviewed calibration, and the production Worker-to-Neon entry/exit acceptance test still require verification. Keep `tradingReady=false` until the first-paper-trade acceptance test below passes.
+
+> **Concurrent operation:** Historical replay and a forward live-market-data paper session are independent workloads and do not need to wait for one another to finish. They may overlap after Neon migrations are applied and each workload's own preflight passes. Historical replay uses its dated artifacts/checkpoint and shared 30,000-credit historical ceiling; the forward session uses its own Worker lease, paper portfolio, event stream, and approved wallet-history caps. Do not share checkpoints, portfolio state, or leases. Monitor total Helius account usage across both workloads; do not increase approved caps or refresh frequency. Historical replay is research-only and must never toggle the live Worker or alter the paper portfolio. The forward session remains blocked until its separate production acceptance test passes.
+
+
 Last reviewed: 2026-11-13
 
 ## Latest verification snapshot — 2026-11-13
