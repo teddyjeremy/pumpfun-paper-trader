@@ -74,9 +74,11 @@ export async function collectCompleteWalletTransactionHistory(
   const authorityEvidence = new Map<string, Map<string, { signatures: Set<string>; timestamps: number[] }>>();
   let transactionsChecked = 0;
   let pagesScanned = 0;
+  let walletsChecked = 0;
   let incomplete = !walletSetComplete;
 
   for (const wallet of selectedWallets) {
+    walletsChecked += 1;
     const seenSignatures = new Set<string>();
     const funders = new Map<string, { signatures: Set<string>; timestamps: number[] }>();
     const authorities = new Map<string, { signatures: Set<string>; timestamps: number[] }>();
@@ -210,7 +212,7 @@ export async function collectCompleteWalletTransactionHistory(
           links.push({
             mint, walletA: pair[0]!, walletB: pair[1]!, confidenceBps: 7_000,
             evidence: evidenceType === "COMMON_FUNDER"
-              ? ["COMMON_FUNDER", "REPEATED_FUNDING"] : ["SHARED_AUTHORITY"],
+              ? ["COMMON_FUNDER", "REPEATED_FUNDING"] as const : ["SHARED_AUTHORITY"] as const,
             observedAt: new Date().toISOString()
           });
         }
@@ -223,7 +225,7 @@ export async function collectCompleteWalletTransactionHistory(
   const dataComplete = !incomplete && walletSetComplete && completedWallets.size === selectedWallets.length;
   if (links.length === 0) warnings.push("No common funder or shared-authority relationship was observed in the completely collected wallet histories.");
   return result(mint, dataComplete, walletSetComplete, uniqueWallets,
-    [...completedWallets], selectedWallets.length, transactionsChecked, pagesScanned,
+    [...completedWallets], walletsChecked, transactionsChecked, pagesScanned,
     pagesScanned * 100, warnings, links);
 }
 
