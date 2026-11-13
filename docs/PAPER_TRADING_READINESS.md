@@ -23,12 +23,14 @@ This document is the operational checklist for reaching the first verified simul
 ### 2. Historical data completeness
 
 - [x] Backfill coverage helper rejects empty/duplicate source signatures, unrelated queue entries, archived-but-unverified signatures, and signatures that are both queued and terminal.
+- [x] Historical terminal outcomes must agree with the original RPC `err` field; successful transactions cannot be marked failed, and failed/unknown-status transactions cannot be marked verified.
+- [x] Address-history pagination rejects duplicate records, non-newest-to-oldest ordering, repeated prior-page cursors, and cross-page movement to newer slots/timestamps.
 - [x] Worker passes unfiltered stored evidence to the integrity checker and fails closed on inconsistent state.
 - [ ] Confirm the live backfill worker archives every expected signature and records verified/failed terminal outcomes.
 - [x] Worker marks monitored mints incomplete immediately on Helius WebSocket transport errors, connection failures, and socket closure; transport errors force the close/reconnect path.
 - [x] Exit-window evidence rejects transaction buffers whose per-window event counts do not reconcile with the claimed complete-flow snapshots.
-- [ ] Demonstrate contiguous, complete launch-window event coverage with persisted provenance. A reconnect restores future subscriptions but does not prove that notifications were complete or recover events missed during the gap.
-- [ ] Ensure retry exhaustion, pagination truncation, missing transactions, and decoder errors cannot be interpreted as complete coverage.
+- [ ] Demonstrate contiguous, complete launch-window event coverage with persisted provenance, including scan address, provider/commitment, page/cursor boundaries, and the exact interval recovered. A reconnect restores future subscriptions but does not prove that notifications were complete or recover events missed during the gap.
+- [ ] Ensure retry exhaustion, pagination truncation, missing transactions, and decoder errors cannot be interpreted as complete coverage. Cross-page pagination integrity is now checked, but exact interruption-interval recovery provenance is still missing.
 
 ### 3. Buyer, wallet-cluster, and holder risk
 
