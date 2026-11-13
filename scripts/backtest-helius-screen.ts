@@ -56,7 +56,12 @@ try {
       !Array.isArray(artifact.results) || !Number.isSafeInteger(artifact.nextIndex) ||
       artifact.nextIndex < 0 || artifact.nextIndex > discovery.launches.length ||
       !Number.isSafeInteger(artifact.creditsUsed) || artifact.creditsUsed < 0 ||
-      artifact.creditsUsed > maxCredits) throw new Error("Saved screen checkpoint does not match this run's inputs.");
+      artifact.creditsUsed > maxCredits ||
+      artifact.results.length !== artifact.nextIndex ||
+      artifact.results.some((row, index) => row.index !== index) ||
+      new Set(artifact.results.map(row => row.index)).size !== artifact.results.length) {
+    throw new Error("Saved screen checkpoint does not match this run's inputs or has a non-contiguous result cursor.");
+  }
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   artifact = {
@@ -67,7 +72,6 @@ try {
   };
   await save(path, artifact);
 }
-const resultByIndex = new Map(artifact.results.map(row => [row.index, row.result]));
 let lastRequestAt = 0;
 for (let index = artifact.nextIndex; index < discovery.launches.length; index += 1) {
   if (artifact.creditsUsed >= maxCredits) {
@@ -77,8 +81,10 @@ for (let index = artifact.nextIndex; index < discovery.launches.length; index +=
   const wait = 250 - (Date.now() - lastRequestAt);
   if (lastRequestAt > 0 && wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
   const launch = discovery.launches[index]!;
-  artifact.creditsUsed += 1; // Count attempted RPC calls before I/O.
+  artifact.creditsUsed += 1; // Persist the attempt before I/O so a crash cannot hide a charged RPC.
   lastRequestAt = Date.now();
+  artifact.updatedAt = new Date().toISOString();
+  await save(path, artifact);
   const result = await screenHistoricalLaunchActivity({
     mint: launch.event.mint, bondingCurve: launch.event.bondingCurve,
     createSignature: launch.signature, launchBlockTime: launch.blockTime,
