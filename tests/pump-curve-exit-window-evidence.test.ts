@@ -65,13 +65,20 @@ function transaction(): VerifiedPumpTransaction {
 describe("Pump curve exit-window evidence", () => {
   it("builds only the latest three complete consecutive 2-second windows", () => {
     const result = buildPumpCurveExitWindowEvidence({
-      marketState: market(), flow: flow(), transactions: [transaction()]
+      marketState: market(), flow: flow({ coverage: "VERIFIED_COMPLETE_EVENT_STREAM" }), transactions: [transaction()]
     });
     expect(result).toHaveLength(3);
     expect(result.every(window => window.complete && window.windowSeconds === 2)).toBe(true);
     expect(result[1]?.buyVolumeDeclinePct).toBe(40);
     expect(result[2]?.buyVolumeDeclinePct).toBe(50);
     expect(result[2]?.liquidityChangePct).toBe(-5.55);
+  });
+
+  it("does not treat observed-events-only flow as complete dynamic-exit evidence", () => {
+    expect(flow().coverage).toBe("OBSERVED_EVENTS_ONLY");
+    expect(buildPumpCurveExitWindowEvidence({
+      marketState: market(), flow: flow(), transactions: [transaction()]
+    })).toEqual([]);
   });
 
   it("does not reuse Pump curve flow as PumpSwap evidence after migration", () => {
@@ -83,19 +90,19 @@ describe("Pump curve exit-window evidence", () => {
 
   it("keeps incomplete, gapped, or mismatched flow evidence unknown", () => {
     expect(buildPumpCurveExitWindowEvidence({
-      marketState: market(), flow: flow({ dataComplete: false }),
+      marketState: market(), flow: flow({ coverage: "VERIFIED_COMPLETE_EVENT_STREAM", dataComplete: false }),
       transactions: [transaction()]
     })).toEqual([]);
     expect(buildPumpCurveExitWindowEvidence({
       marketState: market(),
-      flow: flow({ windows: [
+      flow: flow({ coverage: "VERIFIED_COMPLETE_EVENT_STREAM", windows: [
         flow().windows[0]!, flow().windows[1]!,
         { ...flow().windows[2]!, startTime: 104, endTime: 106 }
       ] }),
       transactions: [transaction()]
     })).toEqual([]);
     expect(buildPumpCurveExitWindowEvidence({
-      marketState: market(), flow: flow({ quoteMint: "11111111111111111111111111111111" }),
+      marketState: market(), flow: flow({ coverage: "VERIFIED_COMPLETE_EVENT_STREAM", quoteMint: "11111111111111111111111111111111" }),
       transactions: [transaction()]
     })).toEqual([]);
   });
