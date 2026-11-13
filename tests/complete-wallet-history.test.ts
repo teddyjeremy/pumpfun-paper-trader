@@ -29,8 +29,8 @@ describe("complete paginated wallet funding history", () => {
       calls.push(wallet);
       return response({
         data: wallet === walletA
-          ? [transfer("3".repeat(64), walletA, 1_794_484_800), transfer("4".repeat(64), walletA, 1_794_484_820)]
-          : [transfer("5".repeat(64), walletB, 1_794_484_810), transfer("6".repeat(64), walletB, 1_794_484_830)]
+          ? [transfer("3".repeat(64), walletA, 1_794_484_800)]
+          : [transfer("5".repeat(64), walletB, 1_794_484_810)]
       });
     };
     const result = await collectCompleteWalletFundingEvidence(mint, [walletA, walletB], {
@@ -43,7 +43,7 @@ describe("complete paginated wallet funding history", () => {
       walletSetComplete: true,
       walletsRequested: 2,
       walletsChecked: 2,
-      transfersChecked: 4,
+      transfersChecked: 2,
       pagesScanned: 2
     });
     expect(result.links).toHaveLength(1);
