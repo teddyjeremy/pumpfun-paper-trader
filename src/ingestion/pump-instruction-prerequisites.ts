@@ -1,5 +1,8 @@
+import { Buffer } from "node:buffer";
 import { PublicKey } from "@solana/web3.js";
-import type { HeliusAccountReadConfig } from "./helius-accounts.js";
+import { fetchHeliusMultipleAccounts, type HeliusAccountReadConfig } from "./helius-accounts.js";
+import { buildHeliusRpcUrl } from "./helius.js";
+import { PUMP_PROGRAM_ID } from "./pump-account-decoder.js";
 import {
   inspectVirtualTraderAtaPrerequisites,
   type VirtualTraderAtaPrerequisites
@@ -12,14 +15,74 @@ import type { NonSigningVirtualTraderIdentity } from "./virtual-trader-identity.
 import type { PumpCurveV3UnsignedInstruction } from "./pump-sdk-curve-quote-adapter.js";
 import type { PumpSwapV2UnsignedInstruction } from "./pump-sdk-quote-adapter.js";
 
+export interface PumpUserVolumeAccumulatorPrerequisite {
+  address: string;
+  state: "PRESENT_AND_VERIFIED" | "MISSING_INIT_IF_NEEDED";
+  accountSpaceBytes: 137;
+  minimumRentLamports: number | null;
+  slot: number;
+  observedAt: string;
+}
+
 export interface PumpInstructionAccountPrerequisites {
   venue: "PUMP_CURVE" | "PUMPSWAP";
   owner: string;
   ataSnapshot: VirtualTraderAtaPrerequisites;
   rentEstimate: VirtualTraderAtaRentEstimate;
+  volumeAccumulator?: PumpUserVolumeAccumulatorPrerequisite;
+  totalNewRentReserveLamports: number | null;
   executionReady: false;
   paperEntryAuthorized: false;
   blockers: string[];
+}
+
+
+async function inspectPumpUserVolumeAccumulator(input: {
+  user: string;
+  address: string;
+  config: HeliusAccountReadConfig;
+}): Promise<PumpUserVolumeAccumulatorPrerequisite> {
+  const snapshot = await fetchHeliusMultipleAccounts([input.address], input.config);
+  const nowMs = (input.config.now ?? Date.now)();
+  const observedMs = Date.parse(snapshot.observedAt);
+  if (!Number.isFinite(nowMs) || !Number.isFinite(observedMs) ||
+      observedMs > nowMs || nowMs - observedMs > 2_000) {
+    throw new Error("Pump user volume accumulator snapshot is stale or invalid.");
+  }
+  const account = snapshot.accounts[0] ?? null;
+  if (account) {
+    if (account.address !== input.address || account.slot !== snapshot.slot ||
+        account.observedAt !== snapshot.observedAt || account.owner !== PUMP_PROGRAM_ID ||
+        Buffer.from(account.data, "base64").length !== 137) {
+      throw new Error("Pump user volume accumulator has an unexpected owner, size or snapshot context.");
+    }
+    return {
+      address: input.address, state: "PRESENT_AND_VERIFIED",
+      accountSpaceBytes: 137, minimumRentLamports: null,
+      slot: snapshot.slot, observedAt: snapshot.observedAt
+    };
+  }
+
+  const fetcher = input.config.fetcher ?? fetch;
+  const response = await fetcher(buildHeliusRpcUrl(input.config.apiKey), {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: "paper-user-volume-accumulator-rent",
+      method: "getMinimumBalanceForRentExemption",
+      params: [137, { commitment: input.config.commitment ?? "confirmed" }]
+    })
+  });
+  if (!response.ok) throw new Error("Helius volume accumulator rent request failed.");
+  const envelope = await response.json() as { error?: unknown; result?: unknown };
+  if (envelope.error || typeof envelope.result !== "number" ||
+      !Number.isSafeInteger(envelope.result) || envelope.result < 0) {
+    throw new Error("Helius returned invalid user volume accumulator rent evidence.");
+  }
+  return {
+    address: input.address, state: "MISSING_INIT_IF_NEEDED",
+    accountSpaceBytes: 137, minimumRentLamports: envelope.result,
+    slot: snapshot.slot, observedAt: snapshot.observedAt
+  };
 }
 
 function removeBlocker(blockers: string[], blocker: string): void {
@@ -52,6 +115,15 @@ export async function inspectPumpCurveV3InstructionPrerequisites(input: {
   const rentEstimate = await estimateVirtualTraderAtaRent({
     prerequisites: ataSnapshot, config: input.config
   });
+  const volumeAccumulator = await inspectPumpUserVolumeAccumulator({
+    user: input.instruction.user,
+    address: input.instruction.userVolumeAccumulatorAddress,
+    config: input.config
+  });
+  const volumeRent = volumeAccumulator.state === "MISSING_INIT_IF_NEEDED"
+    ? volumeAccumulator.minimumRentLamports : 0;
+  const totalNewRentReserveLamports = rentEstimate.newAtaRentReserveLamports === null || volumeRent === null
+    ? null : rentEstimate.newAtaRentReserveLamports + volumeRent;
   const blockers = [...input.instruction.blockers];
   if (ataSnapshot.accountsPresent) {
     removeBlocker(blockers, "USER_BASE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED");
@@ -61,9 +133,16 @@ export async function inspectPumpCurveV3InstructionPrerequisites(input: {
   if (rentEstimate.allNewAtaRentKnown) removeBlocker(blockers, "ATA_RENT_AND_VIRTUAL_PAYER_BALANCE_NOT_VERIFIED");
   else blockers.push("ATA_RENT_LAYOUT_OR_AMOUNT_UNSUPPORTED");
   removeBlocker(blockers, "BUYBACK_FEE_RECIPIENT_ACCOUNT_EXISTENCE_AND_STATE_NOT_VERIFIED");
+  if (volumeAccumulator.state === "PRESENT_AND_VERIFIED") {
+    removeBlocker(blockers, "USER_VOLUME_ACCUMULATOR_STATE_AND_RENT_NOT_VERIFIED");
+  } else if (volumeAccumulator.minimumRentLamports !== null) {
+    removeBlocker(blockers, "USER_VOLUME_ACCUMULATOR_STATE_AND_RENT_NOT_VERIFIED");
+    blockers.push("USER_VOLUME_ACCUMULATOR_RENT_RESERVE_NOT_RECORDED_IN_PAPER_PORTFOLIO");
+  }
   blockers.push("VIRTUAL_PAYER_BALANCE_NOT_VERIFIED");
   return {
     venue: "PUMP_CURVE", owner: ataSnapshot.owner, ataSnapshot, rentEstimate,
+    volumeAccumulator, totalNewRentReserveLamports,
     executionReady: false, paperEntryAuthorized: false, blockers: [...new Set(blockers)]
   };
 }
@@ -93,6 +172,7 @@ export async function inspectPumpSwapV2InstructionPrerequisites(input: {
   const rentEstimate = await estimateVirtualTraderAtaRent({
     prerequisites: ataSnapshot, config: input.config
   });
+  const totalNewRentReserveLamports = rentEstimate.newAtaRentReserveLamports;
   const blockers = [...input.instruction.blockers];
   const rolesPresent = (role: "base" | "quote" | "buyback") =>
     ataSnapshot.requirements.filter(item => item.role === role)
@@ -106,6 +186,7 @@ export async function inspectPumpSwapV2InstructionPrerequisites(input: {
   blockers.push("VIRTUAL_PAYER_BALANCE_NOT_VERIFIED");
   return {
     venue: "PUMPSWAP", owner: ataSnapshot.owner, ataSnapshot, rentEstimate,
+    totalNewRentReserveLamports,
     executionReady: false, paperEntryAuthorized: false, blockers: [...new Set(blockers)]
   };
 }
