@@ -119,6 +119,108 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     expect(recovered.reservedAccountRentUsd).toBe(0);
   });
 
+  it("clears a WebSocket gap only when its full launch-window interval is decoded and Neon-acknowledged", async () => {
+    const storage = new MemoryDurableStorage();
+    const sessionId = "worker-gap-recovery-session";
+    const mint = "11111111111111111111111111111111";
+    const older = "5".repeat(88);
+    const newer = "6".repeat(88);
+    const startedAt = "2026-11-13T10:00:00.000Z";
+    const endedAt = "2026-11-13T10:00:10.000Z";
+    await storage.put("active_audit_session_id", sessionId);
+    await storage.put("enabled", false);
+    await storage.put(`audit_session:${sessionId}`, {
+      sessionId, startedAt, stoppedAt: null, strategyVersion: "strict-v1",
+      eventCount: 1, initialBankrollUsd: 2.7, topUpAmountUsd: 2.7,
+      topUpThresholdUsd: 1, topUpCount: 0, totalTopUpsUsd: 0
+    });
+    await storage.put(`audit_events:${sessionId}:00000000`, [{
+      sessionId, sequence: 1, eventId: "gap-session-start", kind: "SESSION_STARTED",
+      occurredAt: startedAt, mint: null, strategyVersion: "strict-v1", data: {}
+    }]);
+    await storage.put("helius_monitor_state", {
+      subscriptions: [], queue: [], seenSignatures: [], incompleteMints: [mint],
+      coverageGaps: [{
+        mint, startedAt, endedAt, startSignature: older, startSlot: 1,
+        endSignature: newer, endSlot: 2, recoveredAt: null
+      }],
+      failedTransactions: 0, droppedSignatures: 0, duplicateSignatures: 0, nextRequestId: 1
+    });
+    await storage.put(`helius_backfill:${sessionId}:${mint}`, {
+      mint, bondingCurve: "11111111111111111111111111111111",
+      createSignature: older, launchBlockTime: 1, horizonSeconds: 600, maxSignatures: 120,
+      signatures: [
+        { signature: newer, slot: 2, blockTime: 2, err: null },
+        { signature: older, slot: 1, blockTime: 1, err: null }
+      ],
+      pagesScanned: 1, scannedCount: 2, before: null,
+      lastPageSlot: 1, lastPageBlockTime: 1, status: "COMPLETE", reason: null
+    });
+    await storage.put(`helius_backfill_queue_cursor:${sessionId}:${mint}`, 2);
+    await storage.put(`helius_verified_historical_signatures:${sessionId}:${mint}`, [newer, older]);
+    await storage.put(`helius_archived_transaction_signatures:${sessionId}:${mint}`, [newer, older]);
+
+    const coordinator = new PumpFunCoordinator(context(storage) as never, {} as never);
+    await coordinator.getStatus();
+    await (coordinator as unknown as { recoverCoveredHeliusGaps(): Promise<void> })
+      .recoverCoveredHeliusGaps();
+
+    const monitor = await storage.get<{ incompleteMints: string[]; coverageGaps: Array<{ recoveredAt: string | null }> }>("helius_monitor_state");
+    expect(monitor?.incompleteMints).not.toContain(mint);
+    expect(monitor?.coverageGaps[0]?.recoveredAt).toBeTruthy();
+  });
+
+  it("does not recover a gap while a successful transaction lacks Neon archive acknowledgement", async () => {
+    const storage = new MemoryDurableStorage();
+    const sessionId = "worker-gap-unarchived-session";
+    const mint = "11111111111111111111111111111111";
+    const older = "5".repeat(88);
+    const newer = "6".repeat(88);
+    const startedAt = "2026-11-13T10:00:00.000Z";
+    const endedAt = "2026-11-13T10:00:10.000Z";
+    await storage.put("active_audit_session_id", sessionId);
+    await storage.put("enabled", false);
+    await storage.put(`audit_session:${sessionId}`, {
+      sessionId, startedAt, stoppedAt: null, strategyVersion: "strict-v1",
+      eventCount: 1, initialBankrollUsd: 2.7, topUpAmountUsd: 2.7,
+      topUpThresholdUsd: 1, topUpCount: 0, totalTopUpsUsd: 0
+    });
+    await storage.put(`audit_events:${sessionId}:00000000`, [{
+      sessionId, sequence: 1, eventId: "gap-unarchived-start", kind: "SESSION_STARTED",
+      occurredAt: startedAt, mint: null, strategyVersion: "strict-v1", data: {}
+    }]);
+    await storage.put("helius_monitor_state", {
+      subscriptions: [], queue: [], seenSignatures: [], incompleteMints: [mint],
+      coverageGaps: [{
+        mint, startedAt, endedAt, startSignature: older, startSlot: 1,
+        endSignature: newer, endSlot: 2, recoveredAt: null
+      }],
+      failedTransactions: 0, droppedSignatures: 0, duplicateSignatures: 0, nextRequestId: 1
+    });
+    await storage.put(`helius_backfill:${sessionId}:${mint}`, {
+      mint, bondingCurve: "11111111111111111111111111111111",
+      createSignature: older, launchBlockTime: 1, horizonSeconds: 600, maxSignatures: 120,
+      signatures: [
+        { signature: newer, slot: 2, blockTime: 2, err: null },
+        { signature: older, slot: 1, blockTime: 1, err: null }
+      ],
+      pagesScanned: 1, scannedCount: 2, before: null,
+      lastPageSlot: 1, lastPageBlockTime: 1, status: "COMPLETE", reason: null
+    });
+    await storage.put(`helius_backfill_queue_cursor:${sessionId}:${mint}`, 2);
+    await storage.put(`helius_verified_historical_signatures:${sessionId}:${mint}`, [newer, older]);
+    await storage.put(`helius_archived_transaction_signatures:${sessionId}:${mint}`, [older]);
+
+    const coordinator = new PumpFunCoordinator(context(storage) as never, {} as never);
+    await coordinator.getStatus();
+    await (coordinator as unknown as { recoverCoveredHeliusGaps(): Promise<void> })
+      .recoverCoveredHeliusGaps();
+
+    const monitor = await storage.get<{ incompleteMints: string[]; coverageGaps: Array<{ recoveredAt: string | null }> }>("helius_monitor_state");
+    expect(monitor?.incompleteMints).toContain(mint);
+    expect(monitor?.coverageGaps[0]?.recoveredAt).toBeNull();
+  });
+
   it("keeps the Neon outbox cursor behind on ingestion failure and advances only after acknowledgement", async () => {
     const storage = new MemoryDurableStorage();
     const sessionId = "worker-outbox-session";
