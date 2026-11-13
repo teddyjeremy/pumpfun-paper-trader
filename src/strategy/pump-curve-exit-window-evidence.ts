@@ -31,6 +31,21 @@ export function buildPumpCurveExitWindowEvidence(input: {
 
   const allEvents = input.transactions.flatMap(transaction => transaction.tradeEvents)
     .filter(event => event.mint === marketState.mint && event.quoteMint === quoteMint);
+
+  // The claimed complete flow snapshot and the transaction payload supplied to
+  // the exit evaluator must describe the same event set for every window.
+  // Otherwise a stale/partial transaction buffer could silently understate
+  // selling pressure while inheriting a separate coverage flag.
+  const transactionCountsMatch = latest.every(window => {
+    const count = allEvents.filter(event => {
+      const timestamp = Number(event.timestamp);
+      return Number.isSafeInteger(timestamp) &&
+        timestamp >= window.startTime && timestamp < window.endTime;
+    }).length;
+    return count === window.tradeCount;
+  });
+  if (!transactionCountsMatch) return [];
+
   const samples = latest.map(window => {
     const events = allEvents.filter(event => {
       const timestamp = Number(event.timestamp);
