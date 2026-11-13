@@ -11,7 +11,7 @@ const base={
 describe("historical transaction decode coverage",()=>{
  it("requires every signature to have a terminal verified or failed outcome",()=>{
   expect(assessHistoricalDecodeCoverage(base).complete).toBe(true);
-  expect(assessHistoricalDecodeCoverage({...base,verifiedSignatures:["sig-a"],failedSignatures:[]}).complete).toBe(false);
+  expect(assessHistoricalDecodeCoverage({...base,verifiedSignatures:["sig-a","sig-b"],failedSignatures:[]}).complete).toBe(false);
  });
  it("requires all verified transactions to be durably archived",()=>{
   const result=assessHistoricalDecodeCoverage({...base,archivedSignatures:["sig-a"]});
