@@ -479,16 +479,24 @@ export async function buildPumpSwapV2UnsignedInstructions(input: {
 
   const baseTokenProgram = new PublicKey(requiredAccount(input.snapshot, "baseMint").owner);
   const quoteTokenProgram = new PublicKey(requiredAccount(input.snapshot, "quoteMint").owner);
+  const marketAccount = requiredAccount(input.snapshot, "market");
   const swapSolanaState = {
+    globalConfig: context.globalConfig,
+    feeConfig: context.feeConfig,
+    poolKey: new PublicKey(marketAccount.address),
+    poolAccountInfo: accountInfo(marketAccount),
     pool: context.pool,
     poolBaseAmount: context.baseReserve,
     poolQuoteAmount: context.quoteVaultReserve,
-    globalConfig: context.globalConfig,
-    feeConfig: context.feeConfig,
+    baseTokenProgram,
+    quoteTokenProgram,
     baseMint: context.mint,
     baseMintAccount: context.baseMintAccount,
     user,
-    associatedUserAccountInfo: null
+    userBaseTokenAccount: getAssociatedTokenAddressSync(context.mint, user, false, baseTokenProgram),
+    userQuoteTokenAccount: getAssociatedTokenAddressSync(context.quoteMint, user, false, quoteTokenProgram),
+    userBaseAccountInfo: null,
+    userQuoteAccountInfo: null
   } satisfies Parameters<typeof PUMP_AMM_SDK.buyV2Instructions>[0];
   const rawInstructions = input.side === "BUY"
     ? await PUMP_AMM_SDK.buyV2Instructions(swapSolanaState, tokenAmount, quoteAmount)
