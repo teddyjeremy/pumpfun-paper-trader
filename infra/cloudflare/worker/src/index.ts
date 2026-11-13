@@ -1559,6 +1559,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           const attemptKey = `automatic_quote_attempt:${this.activeSessionId}:${mint}:${profile.reclaimTime}`;
           const previousAttempt = await this.ctx.storage.get<Record<string, unknown>>(attemptKey);
           if (!previousAttempt) {
+            // Claim the reclaim signal before any network call. If the DO is
+            // evicted mid-probe, a restart will not fan out another quote.
+            await this.ctx.storage.put(attemptKey, {
+              status: "VERIFYING_MARKET", reclaimTime: profile.reclaimTime,
+              startedAt: new Date().toISOString()
+            });
             try {
               const marketState = await refreshPumpMarketStateFromHelius({
                 state: createUnverifiedMarketState(mint),
@@ -1569,53 +1575,76 @@ export class PumpFunCoordinator extends DurableObject<Env> {
               const marketQuoteMint = venue === "PUMP_CURVE" ? marketState.curve?.quoteMint
                 : venue === "PUMPSWAP" ? marketState.pool?.quoteMint : null;
               const poolAddress = venue === "PUMPSWAP" ? marketState.pool?.poolAddress : undefined;
-              if (venue && marketQuoteMint === profile.quoteMint &&
-                  (venue !== "PUMPSWAP" || poolAddress)) {
-                const rawLamports = portfolio.positionSizeUsd / solUsdObservation.priceUsd * 1_000_000_000;
-                const buyAmountLamports = Math.round(rawLamports);
-                if (Number.isSafeInteger(buyAmountLamports) && buyAmountLamports > 0 &&
-                    BigInt(buyAmountLamports) <= 18_446_744_073_709_551_615n) {
-                  await this.ctx.storage.put(attemptKey, {
-                    status: "REQUESTED", reclaimTime: profile.reclaimTime,
-                    stakeUsd: portfolio.positionSizeUsd, buyAmountBaseUnits: String(buyAmountLamports),
-                    venue, requestedAt: new Date().toISOString()
-                  });
-                  try {
-                    await this.requestExecutableRoundTripQuote({
-                      mint, venue, buyAmountBaseUnits: String(buyAmountLamports),
-                      ...(poolAddress ? { poolAddress } : {}),
-                      precomputedReport: report,
-                      solUsd: solUsdObservation
-                    });
-                  } catch (error) {
-                    const rawReason = error instanceof Error ? error.message : "Automatic quote request failed.";
-                    const reason = this.env.HELIUS_API_KEY
-                      ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
-                      : rawReason;
-                    await this.ctx.storage.put(attemptKey, {
-                      status: "FAILED", reclaimTime: profile.reclaimTime,
-                      venue, failedAt: new Date().toISOString(), reason
-                    });
-                    await this.appendAudit("ERROR", mint, {
-                      triggerSignature, stage: "AUTOMATIC_ROUND_TRIP_QUOTE", reason
-                    }, `automatic-quote-error:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
-                  }
-                  // The quote method re-runs this mint's audit with the fresh
-                  // quote and can commit only after the independent plan and
-                  // durable portfolio authorization gates pass.
-                  continue;
-                }
+              if (!venue || marketQuoteMint !== profile.quoteMint ||
+                  (venue === "PUMPSWAP" && !poolAddress)) {
+                const reason = "A verified live Pump curve or canonical SOL-quoted PumpSwap pool was unavailable for this reclaim signal.";
                 await this.ctx.storage.put(attemptKey, {
-                  status: "BLOCKED", reason: "Exact stake cannot be represented as safe SOL lamports.",
-                  reclaimTime: profile.reclaimTime
+                  status: "BLOCKED", reclaimTime: profile.reclaimTime,
+                  blockedAt: new Date().toISOString(), reason
                 });
+                await this.appendAudit("ERROR", mint, {
+                  triggerSignature, stage: "AUTOMATIC_MARKET_VERIFICATION", reason
+                }, `automatic-market-blocked:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
+                continue;
+              }
+
+              const rawLamports = portfolio.positionSizeUsd / solUsdObservation.priceUsd * 1_000_000_000;
+              const buyAmountLamports = Math.round(rawLamports);
+              if (!Number.isSafeInteger(buyAmountLamports) || buyAmountLamports <= 0 ||
+                  BigInt(buyAmountLamports) > 18_446_744_073_709_551_615n) {
+                const reason = "Exact stake cannot be represented as a safe positive SOL lamport amount.";
+                await this.ctx.storage.put(attemptKey, {
+                  status: "BLOCKED", reclaimTime: profile.reclaimTime,
+                  blockedAt: new Date().toISOString(), reason
+                });
+                await this.appendAudit("ERROR", mint, {
+                  triggerSignature, stage: "AUTOMATIC_QUOTE_SIZE", reason
+                }, `automatic-quote-size-blocked:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
+                continue;
+              }
+
+              await this.ctx.storage.put(attemptKey, {
+                status: "REQUESTED", reclaimTime: profile.reclaimTime,
+                stakeUsd: portfolio.positionSizeUsd, buyAmountBaseUnits: String(buyAmountLamports),
+                venue, requestedAt: new Date().toISOString()
+              });
+              try {
+                await this.requestExecutableRoundTripQuote({
+                  mint, venue, buyAmountBaseUnits: String(buyAmountLamports),
+                  ...(poolAddress ? { poolAddress } : {}),
+                  precomputedReport: report,
+                  solUsd: solUsdObservation
+                });
+              } catch (error) {
+                const rawReason = error instanceof Error ? error.message : "Automatic quote request failed.";
+                const reason = this.env.HELIUS_API_KEY
+                  ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
+                  : rawReason;
+                await this.ctx.storage.put(attemptKey, {
+                  status: "FAILED", reclaimTime: profile.reclaimTime,
+                  venue, failedAt: new Date().toISOString(), reason
+                });
+                await this.appendAudit("ERROR", mint, {
+                  triggerSignature, stage: "AUTOMATIC_ROUND_TRIP_QUOTE", reason
+                }, `automatic-quote-error:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
               }
             } catch (error) {
-              const reason = error instanceof Error ? error.message : "Automatic market verification failed.";
+              const rawReason = error instanceof Error ? error.message : "Automatic market verification failed.";
+              const reason = this.env.HELIUS_API_KEY
+                ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
+                : rawReason;
+              await this.ctx.storage.put(attemptKey, {
+                status: "FAILED", reclaimTime: profile.reclaimTime,
+                failedAt: new Date().toISOString(), reason
+              });
               await this.appendAudit("ERROR", mint, {
                 triggerSignature, stage: "AUTOMATIC_MARKET_VERIFICATION", reason
               }, `automatic-market-error:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
             }
+            // The quote method re-runs this mint's audit with the fresh quote
+            // and can commit only after independent plan and durable portfolio
+            // authorization gates pass. One attempt is allowed per reclaim.
+            continue;
           }
         }
       }
