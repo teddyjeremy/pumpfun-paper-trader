@@ -49,6 +49,12 @@ jobs:
         run: |
           test -n "$HELIUS_API_KEY" || { echo "HELIUS_API_KEY repository secret is missing"; exit 1; }
 
+      - name: Validate Neon dashboard publishing secret
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          test -n "$DATABASE_URL" || { echo "DATABASE_URL GitHub Actions secret is required to publish results to the dashboard; stopping before Helius credits are spent."; exit 1; }
+
       - name: Discover the bounded time-stratified launch sample (first run only)
         run: |
           DISCOVERY="artifacts/pump-launch-discovery-$BACKTEST_DATE.json"
