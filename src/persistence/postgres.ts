@@ -796,29 +796,45 @@ export interface HeliusBackfillReplayDatasetRow {
   signatureCount: number;
   verifiedTransactionCount: number;
   transactions: unknown[];
+  riskEvidence: Array<{ occurredAt: string; payload: unknown }>;
 }
 
-/** Read only verified historical observations; live-monitor observations are excluded from replay. */
+/** Read verified historical observations and the timestamped risk evidence recorded during the same session. */
 export async function getHeliusBackfillReplayDataset(sessionId: string): Promise<HeliusBackfillReplayDatasetRow[]> {
   if (!pool) throw new Error("PostgreSQL persistence is not configured.");
   if (!sessionId.trim() || sessionId.length > 128) throw new Error("A valid paper session ID is required.");
-  const result = await pool.query(
-    `SELECT j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
-       j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count,
-       COALESCE(
-         json_agg(t.raw_observation ORDER BY t.slot ASC,t.signature ASC)
-           FILTER (WHERE t.signature IS NOT NULL AND t.observation_source='HISTORICAL_BACKFILL'),
-         '[]'::json
-       ) AS transactions
-     FROM helius_backfill_jobs j
-     LEFT JOIN helius_transaction_observations t
-       ON t.session_id=j.session_id AND t.mint=j.mint
-     WHERE j.session_id=$1
-     GROUP BY j.session_id,j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
-       j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count
-     ORDER BY j.launch_block_time ASC NULLS LAST,j.mint ASC`,
-    [sessionId]
-  );
+  const [result, evidenceResult] = await Promise.all([
+    pool.query(
+      `SELECT j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
+         j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count,
+         COALESCE(
+           json_agg(t.raw_observation ORDER BY t.slot ASC,t.signature ASC)
+             FILTER (WHERE t.signature IS NOT NULL AND t.observation_source='HISTORICAL_BACKFILL'),
+           '[]'::json
+         ) AS transactions
+       FROM helius_backfill_jobs j
+       LEFT JOIN helius_transaction_observations t
+         ON t.session_id=j.session_id AND t.mint=j.mint
+       WHERE j.session_id=$1
+       GROUP BY j.session_id,j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
+         j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count
+       ORDER BY j.launch_block_time ASC NULLS LAST,j.mint ASC`,
+      [sessionId]
+    ),
+    pool.query(
+      `SELECT mint,occurred_at,payload FROM paper_session_events
+       WHERE session_id=$1 AND event_type='RISK_EVIDENCE' AND mint IS NOT NULL
+       ORDER BY occurred_at ASC,sequence ASC`,
+      [sessionId]
+    )
+  ]);
+  const evidenceByMint = new Map<string, Array<{ occurredAt: string; payload: unknown }>>();
+  for (const event of evidenceResult.rows) {
+    const mint = String(event.mint);
+    const items = evidenceByMint.get(mint) ?? [];
+    items.push({ occurredAt: new Date(String(event.occurred_at)).toISOString(), payload: event.payload });
+    evidenceByMint.set(mint, items);
+  }
   return result.rows.map(row => ({
     mint: String(row.mint),
     launchBlockTime: row.launch_block_time === null ? null : Number(row.launch_block_time),
@@ -829,7 +845,8 @@ export async function getHeliusBackfillReplayDataset(sessionId: string): Promise
     decodedReason: row.decoded_reason === null ? null : String(row.decoded_reason),
     signatureCount: Number(row.signature_count),
     verifiedTransactionCount: Number(row.verified_transaction_count),
-    transactions: Array.isArray(row.transactions) ? row.transactions : []
+    transactions: Array.isArray(row.transactions) ? row.transactions : [],
+    riskEvidence: evidenceByMint.get(String(row.mint)) ?? []
   }));
 }
 
