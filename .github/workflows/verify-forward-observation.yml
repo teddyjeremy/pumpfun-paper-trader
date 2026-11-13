@@ -1,0 +1,48 @@
+name: Verify forward paper observation session
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/verify-forward-observation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-observation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      WORKER_URL: https://pumpfun-paper-worker.teddyjeremy12.workers.dev
+      CONTROL_TOKEN: ${{ secrets.PAPER_WORKER_CONTROL_TOKEN }}
+    steps:
+      - name: Verify paper mode, live streams, lease, and closed entry gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CONTROL_TOKEN" || { echo "PAPER_WORKER_CONTROL_TOKEN is missing"; exit 1; }
+          STATUS=$(curl --fail --silent --show-error -H "Authorization: Bearer $CONTROL_TOKEN" "$WORKER_URL/status")
+          printf '%s' "$STATUS" | node -e '
+            let raw = "";
+            process.stdin.on("data", chunk => raw += chunk);
+            process.stdin.on("end", () => {
+              const s = JSON.parse(raw);
+              const blockers = Array.isArray(s.readinessBlockers) ? s.readinessBlockers : [];
+              const calibrationBlocked = blockers.some(x => String(x).includes("Reviewed chronological volume calibration is not configured"));
+              const checks = {
+                paperMode: s.mode === "paper",
+                sessionEnabled: s.enabled === true,
+                discoveryConnected: s.discoveryConnected === true,
+                discoverySubscribed: s.discoverySubscribed === true,
+                heliusConnected: s.heliusConnected === true,
+                persistenceLeaseHeld: s.persistenceLeaseHeld === true,
+                simulatedEntriesLocked: s.tradingReady === false && calibrationBlocked
+              };
+              process.stdout.write(JSON.stringify(checks));
+              if (Object.values(checks).some(value => value !== true)) {
+                console.error("Forward observation session is not fully connected or its entry gate is not closed.");
+                process.exit(1);
+              }
+            });
+          '
