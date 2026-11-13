@@ -26,7 +26,7 @@ A four-hour run is an operational observation window, not proof of profitability
 
 ## Phase 1 — paper-only lifecycle acceptance
 
-The Nov 12 historical replay is running independently in [GitHub Actions run 43488935615](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43488935615). It must not share or mutate the forward Worker portfolio, lease, or session checkpoint.
+The first Nov 12 replay attempt [43488935615](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43488935615) ended incomplete: 11 launches were verified, but 89 buckets were left incomplete after selected signatures could not be fetched or decoded. It spent 2,100 of the 5,000 discovery credits (2,900 remain). PR [#80](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/80) fixes cursor-based continuation within the existing five-page/5,000-credit limits. After PR #80 is reviewed, merged and CI passes, rerun the workflow using `previous_run_id=43488935615`. It must not share or mutate the forward Worker portfolio, lease, or session checkpoint.
 
 
 Before the forward session, run the CI and integration suite and demonstrate against the deployed Worker/Neon environment:
