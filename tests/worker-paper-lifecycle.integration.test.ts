@@ -4,6 +4,7 @@ import { PumpFunCoordinator } from "../infra/cloudflare/worker/src/index.js";
 
 class MemoryDurableStorage {
   private values = new Map<string, unknown>();
+  private transactionChain: Promise<void> = Promise.resolve();
   async get<T>(key: string): Promise<T | undefined> {
     return this.values.get(key) as T | undefined;
   }
@@ -18,14 +19,18 @@ class MemoryDurableStorage {
     get<T = unknown>(key: string): Promise<T | undefined>;
     put<T = unknown>(key: string, value: T): Promise<void>;
   }) => Promise<T>): Promise<T> {
-    const staged = new Map(this.values);
-    const txn = {
-      get: async <V>(key: string) => staged.get(key) as V | undefined,
-      put: async <V>(key: string, value: V) => { staged.set(key, structuredClone(value)); }
-    };
-    const result = await closure(txn);
-    this.values = staged;
-    return result;
+    const run = this.transactionChain.then(async () => {
+      const staged = new Map(this.values);
+      const txn = {
+        get: async <V>(key: string) => staged.get(key) as V | undefined,
+        put: async <V>(key: string, value: V) => { staged.set(key, structuredClone(value)); }
+      };
+      const result = await closure(txn);
+      this.values = staged;
+      return result;
+    });
+    this.transactionChain = run.then(() => undefined, () => undefined);
+    return run;
   }
 }
 
