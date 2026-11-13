@@ -152,7 +152,7 @@ export async function collectCompleteWalletFundingEvidence(
   const walletByFunder = new Map<string, Array<{ wallet: string; timestamps: number[] }>>();
   for (const [wallet, counts] of funderCounts) {
     for (const [funder, evidence] of counts) {
-      if (evidence.signatures.size < 2 || evidence.timestamps.length < 2) continue;
+      if (evidence.signatures.size < 1 || evidence.timestamps.length < 1) continue;
       const sorted = [...evidence.timestamps].sort((a, b) => a - b);
       if (sorted[sorted.length - 1]! - sorted[0]! > 60) continue;
       const recipients = walletByFunder.get(funder) ?? [];
