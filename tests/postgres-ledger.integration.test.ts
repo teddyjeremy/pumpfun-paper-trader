@@ -304,7 +304,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       lastPageSlot: 122,
       lastPageBlockTime: 1762941599,
       signatures: [
-        ...state.signatures,
+        state.signatures[1]!,
         { signature: "7".repeat(64), slot: 122, blockTime: 1762941599, err: null }
       ]
     };
