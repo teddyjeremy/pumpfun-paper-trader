@@ -278,6 +278,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       throw new Error("PostgreSQL worker lease was not acquired; another coordinator may hold the unexpired lease.");
     }
     this.postgresLeaseHeld = true;
+    try {
+      await this.ctx.storage.setAlarm(Date.now() + 60_000);
+    } catch {
+      // The one-minute cron also renews the lease; alarm scheduling is a
+      // best-effort backup and must not discard an acquired database lease.
+    }
   }
 
   private async heartbeatPostgresWorkerLease(): Promise<boolean> {
@@ -761,7 +767,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const now = Date.now();
       const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
       const hasOpenPositions = Boolean(portfolio?.positions.some(position => position.status !== "CLOSED"));
-      const nextCycleDelayMs = hasOpenPositions ? 5_000 : 15_000;
+      const nextCycleDelayMs = hasOpenPositions ? 5_000 : 60_000;
       const pendingRetryAt = this.heliusState.queue
         .map(item => item.retryAfterAt ? Date.parse(item.retryAfterAt) : Number.NaN)
         .filter(at => Number.isFinite(at) && at > now)
