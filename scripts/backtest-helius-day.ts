@@ -121,12 +121,18 @@ if (artifact.status === "INCOMPLETE") {
   const resumableIndex = findFirstResumableParsedLaunchBucket(artifact.buckets, maxPagesPerBucket);
   if (resumableIndex !== null) {
     const retryBucket = artifact.buckets[resumableIndex]!;
-    if (retryBucket.hasUnverifiedMatch === true && !retryBucket.paginationToken &&
+    const hasFailedSelectedMatch = retryBucket.hasUnverifiedMatch === true ||
+      (typeof retryBucket.reason === "string" &&
+        (retryBucket.reason.includes("Selected Create transaction") ||
+         retryBucket.reason.includes("Pump event log payload") ||
+         retryBucket.reason.includes("Pump CreateEvent")));
+    if (hasFailedSelectedMatch && !retryBucket.paginationToken &&
         (retryBucket.rescanAttempts ?? 0) < 1) {
       retryBucket.pagesScanned = 0;
       retryBucket.scannedTransactions = 0;
       retryBucket.reason = null;
       retryBucket.status = "RUNNING";
+      retryBucket.hasUnverifiedMatch = true;
       retryBucket.rescanAttempts = (retryBucket.rescanAttempts ?? 0) + 1;
       artifact.buckets[resumableIndex] = retryBucket;
     }
