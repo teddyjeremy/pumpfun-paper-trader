@@ -603,7 +603,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           latestFlowWindows[2]!.startTime === latestFlowWindows[1]!.startTime + 1;
         // PumpTradeEvent currently provides Pump bonding-curve observations;
         // do not relabel those historical events as PumpSwap after migration.
-        const exitWindowSamples = quoteMint && marketState.status === "LIVE_CURVE"
+        const exitWindowSamples = quoteMint && marketState.status === "LIVE_CURVE" &&
+          isSolQuoteMint(quoteMint)
           ? latestFlowWindows.map(window => {
               const events = this.verifiedTransactions.flatMap(transaction => transaction.tradeEvents)
                 .filter(event => event.mint === position.mint && event.quoteMint === quoteMint &&
