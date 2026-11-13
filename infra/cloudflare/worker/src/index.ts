@@ -59,6 +59,7 @@ import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.
 import { classifyWalletClusterRiskWithCoverage, evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
 import { collectCompleteWalletFundingEvidence, type CompleteWalletFundingEvidenceResult } from "../../../../src/ingestion/complete-wallet-history.js";
 import { collectCompleteWalletTransactionHistory, type CompleteWalletTransactionHistoryResult } from "../../../../src/ingestion/complete-wallet-transaction-history.js";
+import { normalizeFullWalletHistoryMaxPages, selectFullWalletHistoryScope } from "../../../../src/ingestion/full-wallet-history-budget.js";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
@@ -194,7 +195,6 @@ const INITIAL_STATUS: CoordinatorStatus = {
 };
 
 const MAX_CANDIDATES = 100;
-const MAX_FULL_WALLET_HISTORY_WALLETS = 16;
 const PERSIST_EVERY_EVENTS = 25;
 
 export class PumpFunCoordinator extends DurableObject<Env> {
@@ -1949,18 +1949,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       fetcher
     });
     const fullHistoryEnabled = this.env.FULL_WALLET_HISTORY_ENABLED === "true";
-    const configuredMaxPages = Number(this.env.FULL_WALLET_HISTORY_MAX_PAGES ?? "2");
-    const fullHistoryWallets = wallets.slice(0, MAX_FULL_WALLET_HISTORY_WALLETS);
-    const fullHistoryExpectedSignatures = Object.fromEntries(fullHistoryWallets.map(wallet => [
-      wallet, expectedSignaturesByWallet[wallet] ?? []
-    ]));
+    const fullHistoryScope = selectFullWalletHistoryScope(
+      wallets, expectedSignaturesByWallet, tradeCoverageComplete
+    );
     const fullWalletHistory = fullHistoryEnabled
-      ? await collectCompleteWalletTransactionHistory(mint, fullHistoryWallets, {
+      ? await collectCompleteWalletTransactionHistory(mint, fullHistoryScope.wallets, {
           apiKey: this.env.HELIUS_API_KEY,
-          walletSetVerifiedComplete: tradeCoverageComplete && wallets.length <= MAX_FULL_WALLET_HISTORY_WALLETS,
-          maxPages: Number.isSafeInteger(configuredMaxPages) && configuredMaxPages >= 1 &&
-            configuredMaxPages <= 2 ? configuredMaxPages : 2,
-          expectedSignaturesByWallet: fullHistoryExpectedSignatures,
+          walletSetVerifiedComplete: fullHistoryScope.walletSetVerifiedComplete,
+          maxPages: normalizeFullWalletHistoryMaxPages(this.env.FULL_WALLET_HISTORY_MAX_PAGES),
+          expectedSignaturesByWallet: fullHistoryScope.expectedSignaturesByWallet,
           fetcher
         })
       : null;
