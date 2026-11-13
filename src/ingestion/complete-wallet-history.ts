@@ -28,6 +28,8 @@ export interface CompleteWalletFundingEvidenceResult {
 
 export interface CompleteWalletFundingEvidenceConfig {
   apiKey: string;
+  /** Caller must prove the supplied buyer set came from complete verified trade coverage. */
+  walletSetVerifiedComplete: boolean;
   fetcher?: typeof fetch;
 }
 
@@ -49,14 +51,14 @@ export async function collectCompleteWalletFundingEvidence(
 ): Promise<CompleteWalletFundingEvidenceResult> {
   const warnings: string[] = [];
   const uniqueWallets = [...new Set(wallets.filter(wallet => ADDRESS.test(wallet)))];
-  const walletSetComplete = uniqueWallets.length <= WALLET_HISTORY_MAX_WALLETS &&
-    uniqueWallets.length === wallets.length;
+  const walletSetComplete = config.walletSetVerifiedComplete === true &&
+    uniqueWallets.length <= WALLET_HISTORY_MAX_WALLETS && uniqueWallets.length === wallets.length;
   if (!ADDRESS.test(mint) || uniqueWallets.length < 2) {
     return result(mint, "DATA_INCOMPLETE", false, walletSetComplete, uniqueWallets.length, 0, 0, 0,
       ["A valid mint and at least two unique wallets are required."]);
   }
   if (!walletSetComplete) {
-    warnings.push("The supplied wallet set exceeds the bounded sixteen-wallet collection limit or contains invalid/duplicate wallet entries; only the first sixteen wallets are scanned for positive risk evidence.");
+    warnings.push("The buyer set is not independently complete, exceeds the bounded sixteen-wallet limit, or contains invalid/duplicate wallet entries; only the first sixteen wallets are scanned for positive risk evidence.");
   }
 
   const selectedWallets = uniqueWallets.slice(0, WALLET_HISTORY_MAX_WALLETS);
