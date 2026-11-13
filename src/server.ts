@@ -15,6 +15,7 @@ import { fetchSolUsdPrice } from "./ingestion/sol-usd-price.js";
 import {
   calibrateVolumeThresholds, hydrateArchivedVerifiedTransaction, replayHistoricalCoin
 } from "./strategy/historical-replay.js";
+import type { WalletHoldingEvidence, WalletLinkEvidence } from "./ingestion/wallet-cluster-risk.js";
 
 export const app = Fastify({
   logger: { level: config.LOG_LEVEL, redact: ["*.HELIUS_API_KEY", "*.apiKey", "*.secret", "*.authorization"] }
@@ -261,10 +262,67 @@ app.get("/api/strategy/replay", async (request, reply) => {
         };
       }
       const transactions = row.transactions.map(hydrateArchivedVerifiedTransaction);
+      const walletLinks: WalletLinkEvidence[] = [];
+      const walletHoldings: WalletHoldingEvidence[] = [];
+      const walletClusterEvidenceTimeline: Array<{ observedAt: number; complete: boolean }> = [];
+      const holderCensusEvidenceTimeline: Array<{ observedAt: number; complete: boolean }> = [];
+      const asRecord = (value: unknown): Record<string, unknown> | null =>
+        value !== null && typeof value === "object" && !Array.isArray(value)
+          ? value as Record<string, unknown> : null;
+      for (const evidenceEvent of row.riskEvidence ?? []) {
+        const payload = asRecord(evidenceEvent.payload);
+        if (!payload) continue;
+        if (payload.evidenceType === "WALLET_CLUSTER") {
+          const funding = asRecord(payload.fundingEvidence);
+          const observedAt = typeof funding?.observedAt === "string"
+            ? Date.parse(funding.observedAt) / 1_000
+            : Date.parse(evidenceEvent.occurredAt) / 1_000;
+          if (!Number.isSafeInteger(Math.floor(observedAt)) || observedAt < 0) continue;
+          const requested = Array.isArray(funding?.requestedWallets) ? funding.requestedWallets : [];
+          const covered = Array.isArray(funding?.walletsCovered) ? funding.walletsCovered : [];
+          const complete = funding?.status === "OBSERVED" && funding.dataComplete === true &&
+            funding.walletSetComplete === true && requested.length > 0 &&
+            requested.length === covered.length &&
+            requested.every(wallet => typeof wallet === "string" && covered.includes(wallet));
+          walletClusterEvidenceTimeline.push({ observedAt: Math.floor(observedAt), complete });
+          if (Array.isArray(funding?.links)) {
+            for (const rawLink of funding.links) {
+              const link = asRecord(rawLink);
+              if (!link || link.mint !== row.mint || typeof link.walletA !== "string" ||
+                  typeof link.walletB !== "string" || !Number.isInteger(link.confidenceBps) ||
+                  !Array.isArray(link.evidence) || typeof link.observedAt !== "string") continue;
+              walletLinks.push(link as unknown as WalletLinkEvidence);
+            }
+          }
+        } else if (payload.evidenceType === "HOLDER_CONCENTRATION") {
+          const result = asRecord(payload.result);
+          const snapshot = asRecord(result?.snapshot);
+          const observedAt = typeof snapshot?.observedAt === "string"
+            ? Date.parse(snapshot.observedAt) / 1_000
+            : Date.parse(evidenceEvent.occurredAt) / 1_000;
+          if (!Number.isSafeInteger(Math.floor(observedAt)) || observedAt < 0) continue;
+          const complete = result?.status === "OBSERVED" && snapshot?.dataComplete === true &&
+            snapshot.coverage === "FULL_TOKEN_ACCOUNT_CENSUS_STABLE";
+          holderCensusEvidenceTimeline.push({ observedAt: Math.floor(observedAt), complete });
+          if (complete && Array.isArray(snapshot?.accounts)) {
+            for (const rawAccount of snapshot.accounts) {
+              const account = asRecord(rawAccount);
+              if (!account || typeof account.owner !== "string" ||
+                  typeof account.amount !== "string" || !/^[0-9]+$/.test(account.amount)) continue;
+              walletHoldings.push({
+                mint: row.mint, wallet: account.owner, amount: account.amount,
+                observedAt: new Date(Math.floor(observedAt) * 1_000).toISOString()
+              });
+            }
+          }
+        }
+      }
       return replayHistoricalCoin({
         mint: row.mint, transactions, launchBlockTime: row.launchBlockTime,
         horizonSeconds: row.horizonSeconds, decodeComplete: row.decodedComplete,
-        decodeReason: row.decodedReason ?? row.reason
+        decodeReason: row.decodedReason ?? row.reason,
+        walletLinks, walletHoldings,
+        walletClusterEvidenceTimeline, holderCensusEvidenceTimeline
       }, {
         solUsdPriceUsd: price.observation.priceUsd,
         minimumTradeUsd: 0.01,
