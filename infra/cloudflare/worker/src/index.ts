@@ -73,6 +73,7 @@ import {
 } from "../../../../src/ingestion/executable-quote-service.js";
 import { deriveNonSigningVirtualTraderIdentity } from "../../../../src/ingestion/virtual-trader-identity.js";
 import { getFreshExecutableQuoteCostPct } from "../../../../src/ingestion/executable-quote-eligibility.js";
+import { parseReviewedVolumeThresholds } from "../../../../src/strategy/reviewed-volume-thresholds.js";
 import {
   executePaperExit
 } from "../../../../src/paper/exit-lifecycle.js";
@@ -92,6 +93,7 @@ interface Env {
   PAPER_EVENT_INGEST_TOKEN?: string;
   FULL_WALLET_HISTORY_ENABLED?: string;
   FULL_WALLET_HISTORY_MAX_PAGES?: string;
+  REVIEWED_VOLUME_THRESHOLDS_JSON?: string;
 }
 
 interface WalletLinkEvidenceSnapshot {
@@ -1493,6 +1495,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         attributionConfidenceBps: confidence > 0 ? confidence : null,
         signalAgeSeconds: freshness.signalAgeSeconds, nextObservationConfirmed: freshness.nextObservationConfirmed,
         executableQuoteAvailable,
+        volumeThresholds: parseReviewedVolumeThresholds(this.env.REVIEWED_VOLUME_THRESHOLDS_JSON),
         roundTripCostPct
       });
       await this.appendAudit("FEATURE_SNAPSHOT", mint, { triggerSignature, profile, flow, solUsdPrice: report.solUsdPrice ?? null },

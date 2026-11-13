@@ -38,6 +38,10 @@ This document is the operational checklist for reaching the first verified simul
 
 ### 4. Strategy calibration and historical replay
 
+- The Worker accepts volume thresholds only through `REVIEWED_VOLUME_THRESHOLDS_JSON`, containing a versioned, explicitly approved replay candidate, reviewer, review timestamp, and source session.
+- The Worker rejects missing, malformed, unapproved, stale (older than 30 days), under-sampled, or holdout-failing calibration payloads; absent or rejected calibration leaves both mandatory volume rules UNKNOWN.
+- The production Worker does not currently have a reviewed threshold payload configured. Do not invent or promote values to make the strategy pass.
+
 - [ ] Build a reproducible historical dataset from verified launches, trades, wallet evidence, and holder snapshots.
 - [ ] Define and compute calibrated volume thresholds from that dataset.
 - [ ] Calibrate buyer activity, liquidity, price response, wallet freshness, concentration, and entry timing thresholds.
@@ -152,7 +156,7 @@ If any item fails, keep `tradingReady=false` and report the exact blocker. Do no
 ## Current known blockers
 
 - Historical buyer-set provenance and complete wallet transaction-history clearance are not yet proven end to end.
-- Worker does not yet supply empirically calibrated strategy volume thresholds.
+- No empirically validated and operator-reviewed volume calibration is configured in production; the Worker now accepts only an explicit approved payload and remains fail-closed without it.
 - Complete contiguous rolling event-stream coverage is not yet available; PumpSwap event decoding and multi-window exhaustion evidence remain outstanding.
 - The Worker now treats the paper portfolio as the simulated payer budget and previews stake, both exact fee legs, and refundable ATA/accumulator rent before an entry. Actual Worker-to-Vercel/Neon ingestion and production account-state/rent reconciliation remain unverified; quote-only unsigned plans continue to return `paperEntryAuthorized=false`.
 - Production Neon lifecycle, idempotent persistence, and Worker restart recovery remain unverified.
