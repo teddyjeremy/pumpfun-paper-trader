@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPaperPortfolio, type ExecutablePaperQuote } from "../src/paper/portfolio.js";
 import { PumpFunCoordinator } from "../infra/cloudflare/worker/src/index.js";
 
@@ -10,6 +10,7 @@ class MemoryDurableStorage {
   async put<T>(key: string, value: T): Promise<void> {
     this.values.set(key, structuredClone(value));
   }
+  async setAlarm(_scheduledTime: number): Promise<void> { return; }
   async delete(key: string): Promise<boolean> {
     return this.values.delete(key);
   }
@@ -116,5 +117,45 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
       positionId: "worker-lifecycle-position", status: "CLOSED", rentReserveUsd: 0.2
     });
     expect(recovered.reservedAccountRentUsd).toBe(0);
+  });
+
+  it("keeps the Neon outbox cursor behind on ingestion failure and advances only after acknowledgement", async () => {
+    const storage = new MemoryDurableStorage();
+    const sessionId = "worker-outbox-session";
+    const occurredAt = new Date().toISOString();
+    await storage.put(`audit_session:${sessionId}`, {
+      sessionId, startedAt: occurredAt, stoppedAt: null, strategyVersion: "strict-v1",
+      eventCount: 1, initialBankrollUsd: 2.7, topUpAmountUsd: 2.7,
+      topUpThresholdUsd: 1, topUpCount: 0, totalTopUpsUsd: 0
+    });
+    await storage.put(`audit_events:${sessionId}:00000000`, [{
+      sessionId, sequence: 1, eventId: "outbox-event-1", kind: "SESSION_STARTED",
+      occurredAt, mint: null, strategyVersion: "strict-v1", data: {}
+    }]);
+    const coordinator = new PumpFunCoordinator(context(storage) as never, {
+      PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+      PAPER_EVENT_INGEST_TOKEN: "t".repeat(40)
+    } as never);
+    const flush = (coordinator as unknown as {
+      flushAuditEventsToPostgres(id: string): Promise<void>;
+    }).flushAuditEventsToPostgres.bind(coordinator);
+    const status = (coordinator as unknown as { status: { lastError: string | null } }).status;
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
+    try {
+      await flush(sessionId);
+      expect(await storage.get(`postgres_sync_sequence:${sessionId}`)).toBeUndefined();
+      expect(status.lastError).toBe("Paper event ingestion failed; durable outbox will retry.");
+
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(
+        JSON.stringify({ ok: true, lastSequence: 1 }), { status: 200,
+          headers: { "content-type": "application/json" } }
+      )));
+      await flush(sessionId);
+      expect(await storage.get(`postgres_sync_sequence:${sessionId}`)).toBe(1);
+      expect(status.lastError).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
