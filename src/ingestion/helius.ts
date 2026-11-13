@@ -125,14 +125,21 @@ export async function fetchAndVerifyPumpTransaction(
     return { status: "DATA_INCOMPLETE", reason: "Helius transaction request failed before a response." };
   }
 
-  if (!response.ok) return { status: "DATA_INCOMPLETE", reason: `Helius HTTP status ${response.status}.` };
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).slice(0, 160);
+    return { status: "DATA_INCOMPLETE", reason: "Helius HTTP status " + response.status + (detail ? ": " + detail : "") + "." };
+  }
   let payload: unknown;
   try { payload = await response.json(); }
   catch { return { status: "DATA_INCOMPLETE", reason: "Helius returned invalid JSON." }; }
   if (!payload || typeof payload !== "object") return { status: "DATA_INCOMPLETE", reason: "Helius JSON-RPC response is malformed." };
 
   const envelope = payload as Record<string, unknown>;
-  if (envelope.error) return { status: "DATA_INCOMPLETE", reason: "Helius JSON-RPC returned an error." };
+  if (envelope.error) {
+    const rpcError = envelope.error as Record<string, unknown>;
+    const detail = String(rpcError.message ?? rpcError.code ?? "unknown JSON-RPC error").slice(0, 160);
+    return { status: "DATA_INCOMPLETE", reason: "Helius JSON-RPC returned an error: " + detail + "." };
+  }
   if (!Object.prototype.hasOwnProperty.call(envelope, "result")) {
     return { status: "DATA_INCOMPLETE", reason: "Helius response omitted result." };
   }
