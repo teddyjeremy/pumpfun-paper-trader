@@ -150,7 +150,9 @@ export async function collectCompleteWalletTransactionHistory(
           : accountKeys.length > 0
             ? keyAddress(accountKeys[0])
             : null;
-        const sharedAuthorities = new Set([...signers, ...(feePayer && feePayer !== wallet ? [feePayer] : [])]);
+        // A common fee payer alone can be a relayer/exchange service, not a shared wallet authority.
+        // Only non-fee-payer signers are treated as explicit shared-authority evidence.
+        const sharedAuthorities = new Set(signers.filter(authority => authority !== feePayer));
         for (const authority of sharedAuthorities) {
           const evidence = authorities.get(authority) ?? { signatures: new Set<string>(), timestamps: [] };
           evidence.signatures.add(signature);
