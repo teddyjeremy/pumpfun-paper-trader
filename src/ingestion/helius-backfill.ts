@@ -171,6 +171,11 @@ export function applyAddressSignaturesPage(
   if (current.before !== null && parsed.some(item => item.signature === current.before)) {
     return incomplete("Helius repeated a signature from the preceding pagination page.");
   }
+  if (current.pagesScanned > 0 &&
+      (!Number.isSafeInteger(current.lastPageSlot) ||
+        !Number.isSafeInteger(current.lastPageBlockTime))) {
+    return incomplete("Persisted pagination state is missing the preceding page boundary.");
+  }
   const firstOnPage = parsed[0]!;
   if ((current.lastPageSlot !== null && firstOnPage.slot > current.lastPageSlot) ||
       (current.lastPageBlockTime !== null && firstOnPage.blockTime !== null &&
