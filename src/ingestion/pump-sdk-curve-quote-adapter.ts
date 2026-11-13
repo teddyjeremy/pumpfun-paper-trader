@@ -219,6 +219,7 @@ export interface PumpSdkCurveQuote {
   baseDecimals: number;
   quoteDecimals: number;
   transferTaxVerifiedZero: true;
+  snapshot?: VerifiedPumpQuoteSnapshot;
   executionReady: false;
   blockers: string[];
 }
@@ -356,9 +357,10 @@ export async function fetchPumpCurveSdkQuote(input: {
     },
     config: input.config
   });
-  return input.side === "BUY"
+  const quote = input.side === "BUY"
     ? quotePumpCurveBuyFromSnapshot(snapshot, input.amountBaseUnits)
     : quotePumpCurveSellFromSnapshot(snapshot, input.amountBaseUnits);
+  return { ...quote, snapshot };
 }
 
 
