@@ -243,8 +243,8 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       commitment: "confirmed" as const,
       source: "HISTORICAL_BACKFILL" as const,
       receivedAt: "2026-11-12T10:00:03.000Z",
-      createEvents: [{ mint: backfillMint, bondingCurve: state.bondingCurve }],
-      tradeEvents: []
+      createEvents: [],
+      tradeEvents: [{ mint: backfillMint, trader: "11111111111111111111111111111111" }]
     };
     const pendingDecode = { complete: false, reason: "Historical signatures are still being checked.", verifiedTransactionCount: 0 };
     await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction, decodeCoverage: pendingDecode });
