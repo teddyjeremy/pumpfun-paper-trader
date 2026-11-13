@@ -96,13 +96,17 @@ describe("complete paginated wallet funding history", () => {
 
   it("does not claim the supplied wallet set is complete when it exceeds the bounded wallet count", async () => {
     const wallets = [walletA, walletB, ...Array.from({ length: 15 }, () => Keypair.generate().publicKey.toBase58())];
-    const fetcher: typeof fetch = async () => response({ data: [transfer("7".repeat(64), walletA, 1_794_484_800)] });
+    let calls = 0;
+    const fetcher: typeof fetch = async () => { calls += 1; return response({ data: [] }); };
     const result = await collectCompleteWalletFundingEvidence(mint, wallets, {
       apiKey: "test-key", fetcher
     });
     expect(result.status).toBe("DATA_INCOMPLETE");
     expect(result.walletSetComplete).toBe(false);
     expect(result.walletsRequested).toBe(17);
-    expect(result.walletsChecked).toBe(0);
+    expect(result.walletsChecked).toBe(16);
+    expect(result.pagesScanned).toBe(16);
+    expect(calls).toBe(16);
+    expect(result.walletsCovered).toHaveLength(16);
   });
 });
