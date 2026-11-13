@@ -66,6 +66,7 @@ export async function collectCompleteWalletFundingEvidence(
   let transfersChecked = 0;
   let pagesScanned = 0;
   let incomplete = !walletSetComplete;
+  const walletsCovered = new Set<string>();
 
   for (const wallet of selectedWallets) {
     const counts = new Map<string, { signatures: Set<string>; timestamps: number[] }>();
@@ -143,6 +144,7 @@ export async function collectCompleteWalletFundingEvidence(
     }
 
     if (!walletComplete) incomplete = true;
+    else walletsCovered.add(wallet);
     if (seenSignatures.size === 0) {
       warnings.push(`No incoming SOL transfers were found for wallet ${wallet}; the provider reported no remaining pages.`);
     }
@@ -185,7 +187,7 @@ export async function collectCompleteWalletFundingEvidence(
   if (links.length === 0) warnings.push("No repeated common SOL-funder relationship was observed in the completely collected transfer histories.");
   const complete = !incomplete && walletSetComplete;
   return result(mint, complete ? "OBSERVED" : "DATA_INCOMPLETE", complete, walletSetComplete,
-    uniqueWallets.length, selectedWallets.length, transfersChecked, pagesScanned, warnings, links, uniqueWallets, complete ? selectedWallets : selectedWallets);
+    uniqueWallets.length, selectedWallets.length, transfersChecked, pagesScanned, warnings, links, uniqueWallets, [...walletsCovered]);
 }
 
 async function rpc(
