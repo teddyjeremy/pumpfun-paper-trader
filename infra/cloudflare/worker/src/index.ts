@@ -74,6 +74,7 @@ import {
 import { deriveNonSigningVirtualTraderIdentity } from "../../../../src/ingestion/virtual-trader-identity.js";
 import { getFreshExecutableQuoteCostPct } from "../../../../src/ingestion/executable-quote-eligibility.js";
 import { parseReviewedVolumeThresholds } from "../../../../src/strategy/reviewed-volume-thresholds.js";
+import { evaluateTradingReadiness } from "../../../../src/paper/trading-readiness.js";
 import {
   executePaperExit
 } from "../../../../src/paper/exit-lifecycle.js";
@@ -123,7 +124,8 @@ interface CoordinatorStatus {
   connected: boolean;
   subscriptionsSent: boolean;
   enabled: boolean;
-  tradingReady: false;
+  tradingReady: boolean;
+  readinessBlockers: string[];
   quoteSdkModules: { curve: boolean; pumpSwap: boolean };
   blocker: string;
   connectedAt: string | null;
@@ -159,8 +161,9 @@ const INITIAL_STATUS: CoordinatorStatus = {
   subscriptionsSent: false,
   enabled: false,
   tradingReady: false,
+  readinessBlockers: ["Coordinator is stopped.", "No active paper session."],
   quoteSdkModules: officialPumpSdkModulesAvailable(),
-  blocker: "Live discovery, verified transaction decoding and strategy/risk audits are active. Exact unsigned round-trip quote validation, strictly gated simulated entry transitions and scheduled protective sell-quote/stop evaluation are implemented. Strategy evidence calibration, complete wallet-history clearance, verified 2/5/10/30-second dynamic-exhaustion windows and end-to-end Neon/dashboard verification remain outstanding; tradingReady stays false.",
+  blocker: "Coordinator is stopped; runtime paper-trading readiness has not been established.",
   connectedAt: null,
   lastMessageAt: null,
   lastSignature: null,
@@ -1005,7 +1008,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.syncCounts();
     this.status.monitoredCandidates = this.heliusState.subscriptions.length;
     this.status.queuedHeliusSignatures = this.heliusState.queue.length;
-    this.status.blocker = "Live discovery, verified transaction decoding and strategy/risk audits are active. Exact unsigned round-trip quote validation, strictly gated simulated entry transitions and scheduled protective sell-quote/stop evaluation are implemented. Strategy evidence calibration, complete wallet-history clearance, verified 2/5/10/30-second dynamic-exhaustion windows and end-to-end Neon/dashboard verification remain outstanding; tradingReady stays false.";
+    const readiness = evaluateTradingReadiness({
+      coordinatorEnabled: this.status.enabled,
+      activeSession: Boolean(this.activeSessionId),
+      discoveryConnected: this.status.connected,
+      discoverySubscribed: this.status.subscriptionsSent,
+      heliusConnected: this.status.heliusConnected,
+      heliusApiKeyConfigured: Boolean(this.env.HELIUS_API_KEY),
+      fullWalletHistoryEnabled: this.env.FULL_WALLET_HISTORY_ENABLED === "true",
+      reviewedVolumeThresholdsAvailable: parseReviewedVolumeThresholds(this.env.REVIEWED_VOLUME_THRESHOLDS_JSON) !== null,
+      eventIngestConfigured: this.postgresIngestConfigured,
+      persistenceLeaseHeld: this.postgresLeaseHeld,
+      controlTokenConfigured: Boolean(this.env.CONTROL_TOKEN),
+      pumpProgramConfigured: Boolean(this.env.PUMPFUN_PROGRAM_ID),
+      quoteSdkModulesAvailable: this.status.quoteSdkModules.curve && this.status.quoteSdkModules.pumpSwap
+    });
+    this.status.tradingReady = readiness.tradingReady;
+    this.status.readinessBlockers = readiness.blockers;
+    this.status.blocker = readiness.blockers[0] ??
+      "System prerequisites passed; a persistent simulated entry/exit lifecycle still needs verification.";
     return { ...this.status };
   }
 
