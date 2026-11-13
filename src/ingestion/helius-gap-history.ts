@@ -8,6 +8,8 @@ export type HeliusGapHistoryResult =
 
 const PAGE_SIZE = 1_000;
 const MAX_PAGES = 10;
+const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
 
 /**
  * Independently scan the bonding-curve address from newest to oldest until
@@ -24,10 +26,16 @@ export async function fetchHeliusGapAddressHistory(
   if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > PAGE_SIZE) {
     return { complete: false, signatures: [], pagesScanned: 0, reason: "Gap-history page size is outside the supported range." };
   }
-  if (!gap.startSignature || !gap.endSignature ||
+  const startedAtMs = Date.parse(gap.startedAt);
+  const endedAtMs = Date.parse(gap.endedAt ?? "");
+  if (!ADDRESS.test(bondingCurve) || !ADDRESS.test(gap.mint) ||
+      !gap.startSignature || !SIGNATURE.test(gap.startSignature) ||
+      !gap.endSignature || !SIGNATURE.test(gap.endSignature) ||
+      gap.startSignature === gap.endSignature ||
       !Number.isSafeInteger(gap.startSlot) || !Number.isSafeInteger(gap.endSlot) ||
-      !gap.endedAt) {
-    return { complete: false, signatures: [], pagesScanned: 0, reason: "Gap is missing closed interval anchors." };
+      gap.startSlot < 0 || gap.endSlot < gap.startSlot ||
+      !Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs) || endedAtMs < startedAtMs) {
+    return { complete: false, signatures: [], pagesScanned: 0, reason: "Gap is missing valid address, ordered time interval, or closed signature/slot anchors." };
   }
 
   const records: AddressSignatureInfo[] = [];
@@ -71,7 +79,8 @@ export async function fetchHeliusGapAddressHistory(
       if (typeof row.signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(row.signature) ||
           !Number.isSafeInteger(row.slot) || (row.slot as number) < 0 ||
           !(row.blockTime === null || (Number.isSafeInteger(row.blockTime) && (row.blockTime as number) >= 0)) ||
-          !Object.prototype.hasOwnProperty.call(row, "err")) {
+          !Object.prototype.hasOwnProperty.call(row, "err") ||
+          !(row.err === null || (typeof row.err === "object" && !Array.isArray(row.err)))) {
         return { complete: false, signatures: records, pagesScanned: pageNumber + 1, reason: "Gap-history record lacks a valid signature, slot, blockTime, or status." };
       }
       if (seen.has(row.signature)) {
