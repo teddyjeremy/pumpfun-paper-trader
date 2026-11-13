@@ -1,6 +1,6 @@
 import BN from "bn.js";
 import { Buffer } from "node:buffer";
-import { PublicKey, type AccountInfo } from "@solana/web3.js";
+import { PublicKey, SystemProgram, TransactionInstruction, type AccountInfo } from "@solana/web3.js";
 import {
   getAssociatedTokenAddressSync, getTransferFeeConfig, getTransferHook, unpackMint,
   type RawMint
@@ -358,4 +358,135 @@ export async function fetchPumpCurveSdkQuote(input: {
   return input.side === "BUY"
     ? quotePumpCurveBuyFromSnapshot(snapshot, input.amountBaseUnits)
     : quotePumpCurveSellFromSnapshot(snapshot, input.amountBaseUnits);
+}
+
+
+export interface PumpCurveV3UnsignedInstruction {
+  provider: "pump-sdk-4.3.1";
+  venue: "PUMP_CURVE";
+  side: "BUY" | "SELL";
+  mint: string;
+  user: string;
+  quoteMint: string;
+  buybackFeeRecipient: string;
+  instruction: TransactionInstruction;
+  requiredAccountAddressesToVerify: string[];
+  slot: number;
+  observedAt: string;
+  executionReady: false;
+  paperEntryAuthorized: false;
+  blockers: string[];
+}
+
+/**
+ * Build one exact-size, unsigned Pump Curve V3 instruction from the same
+ * verified account snapshot used by the quote adapter. The caller must still
+ * verify every returned ATA, rent reserve, payer balance and fresh fee message.
+ * This function never signs, simulates or submits.
+ */
+export async function buildPumpCurveV3UnsignedInstruction(input: {
+  snapshot: VerifiedPumpQuoteSnapshot;
+  user: string;
+  side: "BUY" | "SELL";
+  tokenAmountBaseUnits: string;
+  quoteAmountBaseUnits: string;
+  buybackFeeRecipient?: string;
+}): Promise<PumpCurveV3UnsignedInstruction> {
+  if (!isU64BaseUnits(input.tokenAmountBaseUnits) || BigInt(input.tokenAmountBaseUnits) <= 0n) {
+    throw new Error("Pump curve instruction token amount must be a positive u64 base-unit integer.");
+  }
+  if (!isU64BaseUnits(input.quoteAmountBaseUnits) || BigInt(input.quoteAmountBaseUnits) <= 0n) {
+    throw new Error("Pump curve instruction quote amount must be a positive u64 base-unit integer.");
+  }
+  let user: PublicKey;
+  try { user = new PublicKey(input.user); }
+  catch { throw new Error("Pump curve instruction user address is invalid."); }
+  if (!user || user.equals(SystemProgram.programId)) {
+    throw new Error("Pump curve instruction user must be a non-zero public key.");
+  }
+
+  const context = decodeContext(input.snapshot);
+  if (context.curve.complete || context.curve.isCashbackCoin) {
+    throw new Error("Curve V3 instructions are unavailable for completed or cashback curves.");
+  }
+  const tokenAmount = new BN(input.tokenAmountBaseUnits);
+  const quoteAmount = new BN(input.quoteAmountBaseUnits);
+  if (input.side === "BUY") {
+    if (tokenAmount.gt(context.curveBaseTokenBalance)) {
+      throw new Error("Pump curve instruction buy amount exceeds the remaining curve token supply.");
+    }
+    const minimumQuote = getBuyV3QuoteAmountFromTokenAmount({
+      global: context.global, feeConfig: context.feeConfig,
+      mintSupply: context.curve.tokenTotalSupply, bondingCurve: context.curve,
+      amount: tokenAmount, curveBaseTokenBalance: context.curveBaseTokenBalance
+    });
+    if (quoteAmount.lt(minimumQuote)) {
+      throw new Error("Pump curve buy quote limit is below the official SDK gross quote.");
+    }
+  } else {
+    if (tokenAmount.gt(context.curve.realTokenReserves)) {
+      throw new Error("Pump curve instruction sell amount exceeds the real token reserve.");
+    }
+    const minimumQuote = getSellSolAmountFromTokenAmount({
+      global: context.global, feeConfig: context.feeConfig,
+      mintSupply: context.curve.tokenTotalSupply, bondingCurve: context.curve,
+      amount: tokenAmount
+    });
+    if (minimumQuote.lten(0) || quoteAmount.gt(minimumQuote)) {
+      throw new Error("Pump curve sell minimum exceeds the official SDK net quote.");
+    }
+  }
+
+  const configuredRecipients = context.global.buybackFeeRecipients ?? [];
+  const recipient = input.buybackFeeRecipient
+    ? new PublicKey(input.buybackFeeRecipient)
+    : configuredRecipients[0];
+  if (!recipient || !configuredRecipients.some(candidate => candidate.equals(recipient))) {
+    throw new Error("Buyback fee recipient must be selected from the verified on-chain Global configuration.");
+  }
+
+  const tokenProgram = new PublicKey(requiredAccount(input.snapshot, "baseMint").owner);
+  const quoteTokenProgram = new PublicKey(SPL_TOKEN_PROGRAM_ID);
+  const params = {
+    user, mint: context.mint, amount: tokenAmount, quoteAmount,
+    tokenProgram, quoteMint: context.quoteMint, quoteTokenProgram,
+    buybackFeeRecipient: recipient
+  };
+  const method = input.side === "BUY" ? "getBuyV3InstructionRaw" : "getSellV3InstructionRaw";
+  const builder = (PUMP_SDK as unknown as Record<string, unknown>)[method];
+  if (typeof builder !== "function") {
+    throw new Error(`Pinned Pump SDK does not expose ${method}.`);
+  }
+  const instruction = await Promise.resolve(
+    (builder as (args: typeof params) => TransactionInstruction).call(PUMP_SDK, params)
+  );
+  if (!(instruction instanceof TransactionInstruction) ||
+      !instruction.programId.equals(new PublicKey(PUMP_PROGRAM_ID))) {
+    throw new Error("Pump SDK returned an invalid curve instruction.");
+  }
+
+  const requiredAccountAddressesToVerify = [
+    getAssociatedTokenAddressSync(context.mint, user, false, tokenProgram).toBase58()
+  ];
+  if (!context.quoteMint.equals(SystemProgram.programId)) {
+    requiredAccountAddressesToVerify.push(
+      getAssociatedTokenAddressSync(context.quoteMint, user, false, quoteTokenProgram).toBase58(),
+      getAssociatedTokenAddressSync(context.quoteMint, recipient, false, quoteTokenProgram).toBase58()
+    );
+  }
+  return {
+    provider: "pump-sdk-4.3.1", venue: "PUMP_CURVE", side: input.side,
+    mint: context.mint.toBase58(), user: user.toBase58(),
+    quoteMint: context.quoteMint.toBase58(), buybackFeeRecipient: recipient.toBase58(),
+    instruction, requiredAccountAddressesToVerify,
+    slot: input.snapshot.slot, observedAt: input.snapshot.observedAt,
+    executionReady: false, paperEntryAuthorized: false,
+    blockers: [
+      "USER_BASE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED",
+      "BUYBACK_QUOTE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED_WHEN_REQUIRED",
+      "ATA_RENT_AND_VIRTUAL_PAYER_BALANCE_NOT_VERIFIED",
+      "EXACT_UNSIGNED_TRANSACTION_FEE_MESSAGE_NOT_ATTACHED",
+      "PAPER_ENTRY_AUTHORIZATION_NOT_GRANTED"
+    ]
+  };
 }
