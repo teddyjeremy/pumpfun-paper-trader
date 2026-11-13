@@ -66,7 +66,84 @@ function quote(
   };
 }
 
+class FakeWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  readyState = FakeWebSocket.CONNECTING;
+  private listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+  constructor(readonly url: string) {}
+  addEventListener(type: string, listener: (...args: unknown[]) => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+  send(_data: string): void {}
+  close(): void { this.readyState = FakeWebSocket.CLOSED; }
+}
+
 describe("Cloudflare Worker paper lifecycle durability", () => {
+
+  it("creates the active session before acquiring its fenced persistence lease", async () => {
+    const storage = new MemoryDurableStorage();
+    const ctx = context(storage);
+    const leaseRequests: Array<{ activeSessionId: string | undefined; body: Record<string, unknown> }> = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket as never);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      if (url.pathname === "/internal/worker-lease") {
+        leaseRequests.push({
+          activeSessionId: await storage.get<string>("active_audit_session_id"),
+          body
+        });
+        return Response.json({ acquired: true });
+      }
+      if (url.pathname === "/internal/paper-events") {
+        return Response.json({ ok: true, inserted: 1, duplicates: 0, lastSequence: 1 });
+      }
+      return new Response("not found", { status: 404 });
+    }));
+    try {
+      const worker = new PumpFunCoordinator(ctx as never, {
+        PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+        PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64),
+        HELIUS_API_KEY: "test-helius-key"
+      } as never);
+      const status = await worker.start();
+      expect(status.enabled).toBe(true);
+      expect(leaseRequests).toHaveLength(1);
+      expect(leaseRequests[0]?.activeSessionId).toBeTruthy();
+      expect(leaseRequests[0]?.body.action).toBe("acquire");
+      expect(status.readinessBlockers).not.toContain("Fenced PostgreSQL Worker lease is not held.");
+      await Promise.all(ctx.pending);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not enable provider streams when the fenced persistence lease is rejected", async () => {
+    const storage = new MemoryDurableStorage();
+    const ctx = context(storage);
+    vi.stubGlobal("WebSocket", FakeWebSocket as never);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/internal/worker-lease") return Response.json({ acquired: false });
+      return new Response("not found", { status: 404 });
+    }));
+    try {
+      const worker = new PumpFunCoordinator(ctx as never, {
+        PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+        PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64),
+        HELIUS_API_KEY: "test-helius-key"
+      } as never);
+      const status = await worker.start();
+      expect(status.enabled).toBe(false);
+      expect(status.lastError).toContain("lease was not acquired");
+      expect(await storage.get("enabled")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("proves Worker-to-Neon persistence and idempotency without starting market streams", async () => {
     const storage = new MemoryDurableStorage();
