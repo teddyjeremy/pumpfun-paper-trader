@@ -263,34 +263,6 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       launch_block_time: "1762941600", decoded_complete: true,
       verified_transaction_count: 1, transactions: 1
     });
-    const expandedWindow = {
-      ...state,
-      pagesScanned: 2,
-      scannedCount: 2,
-      lastPageSlot: 122,
-      lastPageBlockTime: 1762941599,
-      signatures: [
-        ...state.signatures,
-        { signature: "7".repeat(64), slot: 122, blockTime: 1762941599, err: null }
-      ]
-    };
-    await ledgerPersistence!.persistHeliusBackfillArchive({
-      sessionId, mint: backfillMint, state: expandedWindow,
-      decodeCoverage: { complete: false, reason: "Expanded signature window requires decoding.", verifiedTransactionCount: 0 }
-    });
-    const revoked = await inspector!.query(
-      "SELECT decoded_complete,decoded_reason,window_end_block_time,last_page_slot,last_page_block_time,scan_provider,scan_commitment FROM helius_backfill_jobs WHERE session_id=$1 AND mint=$2",
-      [sessionId, backfillMint]
-    );
-    expect(revoked.rows[0]).toEqual({
-      decoded_complete: false,
-      decoded_reason: "Expanded signature window requires decoding.",
-      window_end_block_time: "1762942200",
-      last_page_slot: "122",
-      last_page_block_time: "1762941599",
-      scan_provider: "helius",
-      scan_commitment: "confirmed"
-    });
     await ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
       sequence: 4,
@@ -319,6 +291,35 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     expect(replayDataset[0]?.riskEvidence[0]).toMatchObject({
       occurredAt: "2026-11-12T10:00:04.000Z",
       payload: { evidenceType: "WALLET_CLUSTER" }
+    });
+
+    const expandedWindow = {
+      ...state,
+      pagesScanned: 2,
+      scannedCount: 2,
+      lastPageSlot: 122,
+      lastPageBlockTime: 1762941599,
+      signatures: [
+        ...state.signatures,
+        { signature: "7".repeat(64), slot: 122, blockTime: 1762941599, err: null }
+      ]
+    };
+    await ledgerPersistence!.persistHeliusBackfillArchive({
+      sessionId, mint: backfillMint, state: expandedWindow,
+      decodeCoverage: { complete: false, reason: "Expanded signature window requires decoding.", verifiedTransactionCount: 0 }
+    });
+    const revoked = await inspector!.query(
+      "SELECT decoded_complete,decoded_reason,window_end_block_time,last_page_slot,last_page_block_time,scan_provider,scan_commitment FROM helius_backfill_jobs WHERE session_id=$1 AND mint=$2",
+      [sessionId, backfillMint]
+    );
+    expect(revoked.rows[0]).toEqual({
+      decoded_complete: false,
+      decoded_reason: "Expanded signature window requires decoding.",
+      window_end_block_time: "1762942200",
+      last_page_slot: "122",
+      last_page_block_time: "1762941599",
+      scan_provider: "helius",
+      scan_commitment: "confirmed"
     });
 
     await expect(ledgerPersistence!.persistHeliusBackfillArchive({
