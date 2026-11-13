@@ -148,7 +148,7 @@ const INITIAL_STATUS: CoordinatorStatus = {
   enabled: false,
   tradingReady: false,
   quoteSdkModules: officialPumpSdkModulesAvailable(),
-  blocker: "Live discovery, verified transaction decoding and strategy/risk audits are active; executable quote authorization and scheduled paper entry/exit execution are not connected.",
+  blocker: "Live discovery, verified transaction decoding and strategy/risk audits are active. Exact unsigned round-trip quote validation and strictly gated simulated entry transitions are implemented, but strategy evidence calibration, complete wallet-history clearance, scheduled dynamic exits and end-to-end Neon/dashboard verification remain outstanding; tradingReady stays false.",
   connectedAt: null,
   lastMessageAt: null,
   lastSignature: null,
@@ -841,7 +841,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.syncCounts();
     this.status.monitoredCandidates = this.heliusState.subscriptions.length;
     this.status.queuedHeliusSignatures = this.heliusState.queue.length;
-    this.status.blocker = "Live discovery, verified transaction decoding and strategy/risk audits are active; executable quote authorization and scheduled paper entry/exit execution are not connected.";
+    this.status.blocker = "Live discovery, verified transaction decoding and strategy/risk audits are active. Exact unsigned round-trip quote validation and strictly gated simulated entry transitions are implemented, but strategy evidence calibration, complete wallet-history clearance, scheduled dynamic exits and end-to-end Neon/dashboard verification remain outstanding; tradingReady stays false.";
     return { ...this.status };
   }
 
