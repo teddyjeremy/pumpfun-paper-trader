@@ -2577,6 +2577,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         if (this.status.enabled) this.markHeliusCoverageGap();
         this.auditInBackground("ERROR", null, { subsystem: "HELIUS_WEBSOCKET", message: this.status.lastError });
         void this.persist().catch(() => undefined);
+        // Force the close path so the coordinator releases this socket and
+        // schedules a fresh connection instead of remaining half-open.
+        try { socket.close(1011, "Helius transport error"); } catch { /* close is best-effort */ }
       });
     } catch {
       this.heliusSocket = null;
