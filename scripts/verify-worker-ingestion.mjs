@@ -57,8 +57,9 @@ try {
   if (!healthResponse.ok || health.service !== "pumpfun-paper-worker") throw new Error("Cloudflare Worker health check failed.");
 
   const status = await request(workerUrl, "/status", process.env.PAPER_WORKER_CONTROL_TOKEN);
+  const blockers = Array.isArray(status.readinessBlockers) ? status.readinessBlockers : [];
   check("Worker authenticated control API", status.mode === "paper" && status.tradingReady === false,
-    `mode=${status.mode ?? "unknown"}; enabled=${Boolean(status.enabled)}; tradingReady=${String(status.tradingReady)}`);
+    `mode=${status.mode ?? "unknown"}; enabled=${Boolean(status.enabled)}; tradingReady=${String(status.tradingReady)}; blockers=${blockers.join(" | ") || "none reported"}`);
   if (status.mode !== "paper" || status.tradingReady !== false) {
     throw new Error("Worker status did not match the expected fail-closed paper-only state.");
   }
