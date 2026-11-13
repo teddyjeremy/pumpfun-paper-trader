@@ -15,7 +15,7 @@ export interface HeliusAccountSnapshot {
 }
 
 function decodeBase64(value: string, maximumBytes: number): Uint8Array {
-  if (!value || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     throw new Error("Helius account data is not valid base64.");
   }
   const estimatedBytes = Math.floor(value.length * 3 / 4);
