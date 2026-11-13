@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { applyDatabaseMigrations } from "../src/db/migrate.js";
@@ -15,6 +15,18 @@ afterEach(async () => {
 });
 
 describe("PostgreSQL migration runner safety", () => {
+  it("defines a separate durable Helius gap archive and permits its transaction source", async () => {
+    const migration = await readFile(
+      new URL("../db/migrations/0009_helius_gap_recovery_archive.sql", import.meta.url),
+      "utf8"
+    );
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS helius_gap_recovery_jobs");
+    expect(migration).toContain("PRIMARY KEY (session_id,mint,started_at)");
+    expect(migration).toContain("decode_cursor <= jsonb_array_length(signature_state)");
+    expect(migration).toContain("'GAP_RECOVERY'");
+    expect(migration).toContain("0009_helius_gap_recovery_archive");
+  });
+
   it("requires an explicit database URL", async () => {
     await expect(applyDatabaseMigrations("")).rejects.toThrow(/DATABASE_URL is required/);
   });
