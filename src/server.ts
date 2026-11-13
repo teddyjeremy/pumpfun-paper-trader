@@ -218,7 +218,7 @@ app.post("/api/worker/stop-monitor", async (_request, reply) => {
 app.get("/api/portfolio", async () => getTradingDashboardSnapshot());
 app.get("/api/historical-backtests", async request => {
   const query = request.query as Record<string, unknown>;
-  const date = typeof query.date === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(query.date) ? query.date : undefined;
+  const date = typeof query.date === "string" && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(query.date) ? query.date : undefined;
   return getHistoricalBacktestDashboardSnapshot(date);
 });
 app.get("/api/paper-ledger", async request => {
