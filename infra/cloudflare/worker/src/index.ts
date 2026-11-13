@@ -33,6 +33,7 @@ import {
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork, resetHeliusSubscriptionIds,
+  recordHeliusCoverageGap,
   retryHeliusSignatureWork,
   type HeliusMonitorState,
   type HeliusSignatureWork,
@@ -2942,16 +2943,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private markHeliusCoverageGap(): void {
+    const now = new Date().toISOString();
     const previouslyIncomplete = new Set(this.heliusState.incompleteMints);
-    const newlyIncomplete = [...new Set(this.heliusState.subscriptions.map(item => item.mint))]
-      .filter(mint => !previouslyIncomplete.has(mint));
-    if (newlyIncomplete.length === 0) return;
-    this.heliusState = {
-      ...this.heliusState,
-      incompleteMints: [...this.heliusState.incompleteMints, ...newlyIncomplete].slice(-10)
-    };
+    const affectedMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
+    for (const mint of affectedMints) {
+      this.heliusState = recordHeliusCoverageGap(this.heliusState, mint, now);
+    }
+    const newlyIncomplete = affectedMints.filter(mint => !previouslyIncomplete.has(mint));
+    if (affectedMints.length === 0) return;
     this.status.incompleteHeliusTransactions += newlyIncomplete.length;
-    this.auditInBackground("DATA_GAP", null, { reason: "HELIUS_COVERAGE_INTERRUPTED", affectedMints: newlyIncomplete });
+    this.auditInBackground("DATA_GAP", null, {
+      reason: "HELIUS_COVERAGE_INTERRUPTED",
+      affectedMints,
+      intervals: this.heliusState.coverageGaps.filter(gap =>
+        affectedMints.includes(gap.mint) && gap.endedAt === null
+      )
+    });
+    void this.ctx.storage.put("helius_monitor_state", this.heliusState).catch(() => undefined);
   }
 
   private markHeliusIncomplete(): void {
