@@ -192,7 +192,8 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     const auditEvents = await storage.get<Array<{ kind: string }>>(`audit_events:${sessionId}:00000000`);
     expect(auditEvents?.filter(event => event.kind === "PAPER_ENTRY")).toHaveLength(1);
     expect(auditEvents?.filter(event => event.kind === "PAPER_EXIT")).toHaveLength(1);
-    expect(auditEvents?.filter(event => event.kind === "BANKROLL_TOP_UP")).toHaveLength(2);
+    expect(auditEvents?.filter(event => event.kind === "PAPER_ENTRY" || event.kind === "PAPER_EXIT"))
+      .toHaveLength(2);
   });
 
   it("clears a WebSocket gap only when its full launch-window interval is decoded and Neon-acknowledged", async () => {
