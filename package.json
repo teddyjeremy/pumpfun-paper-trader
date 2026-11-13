@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "check": "npm run typecheck && npm test && npm run build",
     "db:migrate": "npm run build && node dist/src/db/migrate.js",
-    "smoke:ingestion": "node scripts/verify-worker-ingestion.mjs"
+    "smoke:ingestion": "node scripts/verify-worker-ingestion.mjs",
+    "backtest:discover": "tsx scripts/backtest-helius-day.ts"
   },
   "dependencies": {
     "fastify": "^5.2.1",
