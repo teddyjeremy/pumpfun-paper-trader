@@ -39,6 +39,16 @@ export function canContinueParsedLaunchBucket(input: {
     input.pagesScanned < input.maxPagesPerBucket;
 }
 
+/** A bucket is EMPTY only when the provider reached its end with no failed matches. */
+export function canMarkParsedLaunchBucketEmpty(input: {
+  stoppedOn: string;
+  paginationToken: string | null;
+  priorVerificationFailure: boolean;
+}): boolean {
+  return input.stoppedOn === "windowEnd" && input.paginationToken === null &&
+    input.priorVerificationFailure === false;
+}
+
 /** Find the earliest incomplete bucket whose saved cursor can still be resumed. */
 export function findFirstResumableParsedLaunchBucket(
   buckets: Array<{ status: string; paginationToken: string | null; pagesScanned: number }>,
