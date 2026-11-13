@@ -11,12 +11,13 @@ type Launch = {
   event: { mint: string; bondingCurve: string; timestamp: string };
 };
 type Discovery = {
-  requestedLocalDate: string; status: string; creditsUsed: number; launches: Launch[];
+  requestedLocalDate: string; status: string; creditsUsed: number;
+  legacyPriorCreditsUsed?: number; launches: Launch[];
 };
 type Screening = { date: string; status: string; creditsUsed: number; selectedLaunchIndexes: number[]; results: Array<{ index: number; result: HistoricalLaunchActivityScreenResult }> };
 type Checkpoint = {
   schemaVersion: 3; date: string; discoveryLaunchCount: number;
-  discoveryCredits: number; screeningCredits: number; totalCreditCeiling: number;
+  discoveryCredits: number; screeningCredits: number; legacyPriorCreditsUsed: number; totalCreditCeiling: number;
   selectedLaunchIndexes: number[]; nextCandidateIndex: number;
   completedMints: string[]; incompleteMints: string[];
   marketPatternMints: string[]; noSetupMints: string[];
@@ -86,10 +87,11 @@ try {
       checkpoint.discoveryLaunchCount !== discovery.launches.length ||
       checkpoint.discoveryCredits !== discovery.creditsUsed ||
       checkpoint.screeningCredits !== screening.creditsUsed ||
+      checkpoint.legacyPriorCreditsUsed !== (discovery.legacyPriorCreditsUsed ?? 0) ||
       checkpoint.totalCreditCeiling !== maxCredits ||
       JSON.stringify(checkpoint.selectedLaunchIndexes) !== JSON.stringify(selectedLaunchIndexes) ||
       checkpoint.nextCandidateIndex < 0 || checkpoint.nextCandidateIndex > selectedLaunchIndexes.length ||
-      checkpoint.cumulativeCreditsUsed < discovery.creditsUsed + screening.creditsUsed ||
+      checkpoint.cumulativeCreditsUsed < (discovery.legacyPriorCreditsUsed ?? 0) + discovery.creditsUsed + screening.creditsUsed ||
       checkpoint.cumulativeCreditsUsed > maxCredits) {
     throw new Error("Checkpoint does not match this discovery artifact/date/credit ceiling.");
   }
@@ -97,10 +99,11 @@ try {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   checkpoint = {
     schemaVersion: 3, date, discoveryLaunchCount: discovery.launches.length,
-    discoveryCredits: discovery.creditsUsed, screeningCredits: screening.creditsUsed, totalCreditCeiling: maxCredits,
+    discoveryCredits: discovery.creditsUsed, screeningCredits: screening.creditsUsed,
+    legacyPriorCreditsUsed: discovery.legacyPriorCreditsUsed ?? 0, totalCreditCeiling: maxCredits,
     selectedLaunchIndexes, nextCandidateIndex: 0, completedMints: [], incompleteMints: [],
     marketPatternMints: [], noSetupMints: [],
-    cumulativeCreditsUsed: discovery.creditsUsed + screening.creditsUsed, updatedAt: new Date().toISOString()
+    cumulativeCreditsUsed: (discovery.legacyPriorCreditsUsed ?? 0) + discovery.creditsUsed + screening.creditsUsed, updatedAt: new Date().toISOString()
   };
   await atomicJson(checkpointPath, checkpoint);
 }
