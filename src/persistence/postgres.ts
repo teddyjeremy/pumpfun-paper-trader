@@ -636,6 +636,8 @@ export interface HeliusBackfillArchiveInput {
     pagesScanned: number;
     scannedCount: number;
     before: string | null;
+    lastPageSlot: number | null;
+    lastPageBlockTime: number | null;
     status: "PENDING" | "PAGING" | "READY_TO_FETCH" | "COMPLETE" | "INCOMPLETE";
     reason: string | null;
   };
@@ -669,6 +671,9 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
       !Number.isSafeInteger(state.scannedCount) || state.scannedCount < 0 ||
       !Array.isArray(state.signatures) || state.signatures.length > state.maxSignatures ||
       (state.before !== null && !signaturePattern.test(state.before)) ||
+      (state.pagesScanned === 0 && (state.lastPageSlot !== null || state.lastPageBlockTime !== null)) ||
+      (state.pagesScanned > 0 && (!Number.isSafeInteger(state.lastPageSlot) ||
+        !Number.isSafeInteger(state.lastPageBlockTime))) ||
       (state.status === "COMPLETE" && !state.signatures.some(item => item.signature === state.createSignature)) ||
       !["PENDING","PAGING","READY_TO_FETCH","COMPLETE","INCOMPLETE"].includes(state.status)) {
     throw new Error("Historical backfill archive contains invalid identity or progress fields.");
@@ -714,19 +719,24 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
     const checkpoint = await client.query(
       `INSERT INTO helius_backfill_jobs
         (session_id,mint,bonding_curve,create_signature,launch_block_time,horizon_seconds,max_signatures,
-         pages_scanned,scanned_count,before_signature,status,reason,signature_count,signature_state,
+         pages_scanned,scanned_count,before_signature,last_page_slot,last_page_block_time,
+         window_end_block_time,scan_provider,scan_commitment,status,reason,signature_count,signature_state,
          decoded_complete,decoded_reason,verified_transaction_count,decoded_at,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,
-         CASE WHEN $15 THEN now() ELSE NULL END,now())
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'helius','confirmed',$14,$15,$16,$17::jsonb,$18,$19,$20,
+         CASE WHEN $18 THEN now() ELSE NULL END,now())
        ON CONFLICT (session_id,mint) DO UPDATE SET
          pages_scanned=EXCLUDED.pages_scanned,scanned_count=EXCLUDED.scanned_count,
-         before_signature=EXCLUDED.before_signature,status=EXCLUDED.status,reason=EXCLUDED.reason,
+         before_signature=EXCLUDED.before_signature,last_page_slot=EXCLUDED.last_page_slot,
+         last_page_block_time=EXCLUDED.last_page_block_time,window_end_block_time=EXCLUDED.window_end_block_time,
+         scan_provider=EXCLUDED.scan_provider,scan_commitment=EXCLUDED.scan_commitment,
+         status=EXCLUDED.status,reason=EXCLUDED.reason,
          signature_count=EXCLUDED.signature_count,signature_state=EXCLUDED.signature_state,
-         decoded_complete=helius_backfill_jobs.decoded_complete OR EXCLUDED.decoded_complete,
-         decoded_reason=CASE WHEN helius_backfill_jobs.decoded_complete OR EXCLUDED.decoded_complete THEN NULL
-           ELSE COALESCE(EXCLUDED.decoded_reason,helius_backfill_jobs.decoded_reason) END,
-         verified_transaction_count=GREATEST(helius_backfill_jobs.verified_transaction_count,EXCLUDED.verified_transaction_count),
-         decoded_at=CASE WHEN EXCLUDED.decoded_complete THEN COALESCE(helius_backfill_jobs.decoded_at,now()) ELSE helius_backfill_jobs.decoded_at END,
+         decoded_complete=(helius_backfill_jobs.signature_state=EXCLUDED.signature_state AND EXCLUDED.decoded_complete),
+         decoded_reason=CASE WHEN helius_backfill_jobs.signature_state=EXCLUDED.signature_state AND EXCLUDED.decoded_complete
+           THEN NULL ELSE EXCLUDED.decoded_reason END,
+         verified_transaction_count=EXCLUDED.verified_transaction_count,
+         decoded_at=CASE WHEN helius_backfill_jobs.signature_state=EXCLUDED.signature_state AND EXCLUDED.decoded_complete
+           THEN COALESCE(helius_backfill_jobs.decoded_at,now()) ELSE NULL END,
          updated_at=now()
        WHERE helius_backfill_jobs.bonding_curve=EXCLUDED.bonding_curve
          AND helius_backfill_jobs.create_signature=EXCLUDED.create_signature
@@ -743,9 +753,10 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
             AND EXCLUDED.signature_state=helius_backfill_jobs.signature_state))
        RETURNING mint`,
       [sessionId,mint,state.bondingCurve,state.createSignature,state.launchBlockTime,state.horizonSeconds,
-        state.maxSignatures,state.pagesScanned,state.scannedCount,state.before,state.status,state.reason,
-        state.signatures.length,JSON.stringify(state.signatures),input.decodeCoverage.complete,input.decodeCoverage.reason,
-        input.decodeCoverage.verifiedTransactionCount]
+        state.maxSignatures,state.pagesScanned,state.scannedCount,state.before,state.lastPageSlot,state.lastPageBlockTime,
+        state.launchBlockTime === null ? null : state.launchBlockTime + state.horizonSeconds,
+        state.status,state.reason,state.signatures.length,JSON.stringify(state.signatures),input.decodeCoverage.complete,
+        input.decodeCoverage.reason,input.decodeCoverage.verifiedTransactionCount]
     );
     if (checkpoint.rowCount !== 1) {
       throw new Error("Historical backfill checkpoint conflicts with immutable identity or previously persisted progress.");
