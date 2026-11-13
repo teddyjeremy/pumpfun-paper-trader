@@ -625,6 +625,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const exitWindows = buildPumpCurveExitWindowEvidence({
           marketState, flow, transactions: this.verifiedTransactions
         });
+        if (marketState.status === "MIGRATED_POOL_VERIFIED" && exitWindows.length === 0) {
+          // Do not relabel bonding-curve TradeEvents as PumpSwap observations.
+          // Until the deployed PumpSwap event layout is independently verified,
+          // dynamic exhaustion is unavailable after migration; the fresh
+          // full-position quote and hard/protective stops below remain active.
+          await this.appendAudit("ERROR", position.mint, {
+            stage: "MIGRATED_MARKET_DYNAMIC_EXIT_EVIDENCE",
+            reason: "PumpSwap dynamic-exhaustion evidence is unavailable; only executable hard/protective stops can trigger an exit.",
+            marketVenue: "PUMPSWAP",
+            marketUpdatedAt: marketState.updatedAt
+          }, `pumpswap-dynamic-exit-evidence-unavailable:${sessionId}:${position.positionId}`);
+        }
         if (marketState.status !== "LIVE_CURVE" &&
             marketState.status !== "MIGRATED_POOL_VERIFIED") {
           await this.appendAudit("ERROR", position.mint, {
