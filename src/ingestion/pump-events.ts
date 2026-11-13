@@ -347,7 +347,8 @@ export function decodeSuccessfulPumpTransaction(input: unknown): PumpTransaction
       createEvents: decodePumpCreateEvents(transaction.meta.logMessages),
       tradeEvents: decodePumpTradeEvents(transaction.meta.logMessages)
     };
-  } catch {
-    return { status: "DATA_INCOMPLETE", reason: "A Pump event log payload could not be decoded safely." };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 160) : "unknown decoder error";
+    return { status: "DATA_INCOMPLETE", reason: `Pump event payload decode failed: ${detail}` };
   }
 }
