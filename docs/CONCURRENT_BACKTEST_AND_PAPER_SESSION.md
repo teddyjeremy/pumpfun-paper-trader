@@ -25,7 +25,7 @@ Historical replay and forward live-market-data paper trading are separate worklo
 After migrations and the database-secret preflight are verified, manually dispatch **Historical paper replay (checkpointed)** with:
 
 - Date: `2026-11-12`
-- Previous run ID: `43442196641`
+- Previous run ID: `43488935615` (latest incomplete checkpoint artifact; do not resume from the older legacy run `43442196641`).
 
 Resume subsequent runs from the most recent artifact run ID containing the dated checkpoint. Keep each run's artifacts and checkpoints attached to that date. Do not reuse a checkpoint for another date.
 
