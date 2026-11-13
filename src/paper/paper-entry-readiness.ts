@@ -1,5 +1,6 @@
 export interface PaperEntryReadinessInput {
   sessionEnabled: boolean;
+  systemTradingReady: boolean;
   workerLeaseHeld: boolean;
   postgresIngestConfigured: boolean;
   strategyDecision: "BUY" | "WATCH" | "REJECT";
@@ -16,7 +17,8 @@ export interface PaperEntryReadinessInput {
  * 15-rule strategy audit or account/quote prerequisites.
  */
 export function canCommitPaperEntry(input: PaperEntryReadinessInput): boolean {
-  return input.sessionEnabled &&
+  return input.systemTradingReady &&
+    input.sessionEnabled &&
     input.workerLeaseHeld &&
     input.postgresIngestConfigured &&
     input.strategyDecision === "BUY" &&
