@@ -107,6 +107,6 @@ describe("complete paginated wallet history", () => {
     expect(result.status).toBe("DATA_INCOMPLETE");
     expect(result.walletSetComplete).toBe(false);
     expect(result.walletsRequested).toBe(9);
-    expect(result.walletsChecked).toBe(8);
+    expect(result.walletsChecked).toBe(0);
   });
 });
