@@ -842,11 +842,19 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.syncCounts();
     this.hydrated = true;
     if (this.activeSessionId && this.status.enabled) {
-      await this.appendAudit("WORKER_RESTARTED", null, {
-        discoveryCandidates: this.discovery.candidates.length,
-        verifiedTransactionsRetained: this.verifiedTransactions.length,
-        heliusCoverage: "GAP_UNTIL_RESUBSCRIBED"
-      }, `restart:${crypto.randomUUID()}`);
+      try {
+        await this.appendAudit("WORKER_RESTARTED", null, {
+          discoveryCandidates: this.discovery.candidates.length,
+          verifiedTransactionsRetained: this.verifiedTransactions.length,
+          heliusCoverage: "GAP_UNTIL_RESUBSCRIBED"
+        }, `restart:${crypto.randomUUID()}`);
+      } catch (error) {
+        // Hydration and read-only status must remain available when a storage
+        // quota blocks audit writes. The restart gap remains visible in memory.
+        this.status.lastError = error instanceof Error
+          ? `Restart audit persistence unavailable: ${error.message.slice(0, 120)}`
+          : "Restart audit persistence unavailable.";
+      }
     }
   }
 
