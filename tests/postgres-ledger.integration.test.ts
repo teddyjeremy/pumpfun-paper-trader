@@ -363,4 +363,69 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     });
   });
 
+  it("archives every independently recovered gap transaction before marking the gap complete", async () => {
+    await ledgerPersistence!.persistPaperAuditEvents(sessionId, [entryEvent]);
+    const gapMint = "So11111111111111111111111111111111111111112";
+    const olderSignature = "8".repeat(64);
+    const newerSignature = "9".repeat(64);
+    const baseGap = {
+      bondingCurve: "11111111111111111111111111111111",
+      startedAt: "2026-11-12T11:00:00.000Z",
+      endedAt: "2026-11-12T11:01:00.000Z",
+      startSignature: olderSignature,
+      startSlot: 200,
+      endSignature: newerSignature,
+      endSlot: 201,
+      pagesScanned: 1,
+      signatures: [
+        { signature: newerSignature, slot: 201, blockTime: 1794481260, err: null },
+        { signature: olderSignature, slot: 200, blockTime: 1794481200, err: null }
+      ],
+      decodeCursor: 2,
+      verifiedSignatures: [newerSignature, olderSignature],
+      failedSignatures: [],
+      status: "DECODED" as const
+    };
+    const transaction = {
+      signature: newerSignature,
+      slot: 201,
+      provider: "helius" as const,
+      commitment: "confirmed" as const,
+      receivedAt: "2026-11-12T11:01:01.000Z",
+      createEvents: [],
+      tradeEvents: [{ mint: gapMint, trader: "11111111111111111111111111111111" }]
+    };
+
+    await ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: baseGap
+    });
+    await ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: baseGap, transaction
+    });
+    await ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: baseGap, transaction
+    });
+    await ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: { ...baseGap, status: "ARCHIVED" }
+    });
+
+    const result = await inspector!.query(
+      `SELECT j.status,j.archived_complete,
+        (SELECT COUNT(*)::int FROM helius_transaction_observations t
+          WHERE t.session_id=j.session_id AND t.mint=j.mint
+            AND t.observation_source='GAP_RECOVERY') AS archived_transactions
+       FROM helius_gap_recovery_jobs j
+       WHERE j.session_id=$1 AND j.mint=$2 AND j.started_at=$3`,
+      [sessionId, gapMint, baseGap.startedAt]
+    );
+    expect(result.rows[0]).toEqual({
+      status: "ARCHIVED", archived_complete: true, archived_transactions: 1
+    });
+
+    await expect(ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint,
+      gap: { ...baseGap, endSlot: 202, status: "ARCHIVED" }
+    })).rejects.toThrow(/conflicts/);
+  });
+
 });
