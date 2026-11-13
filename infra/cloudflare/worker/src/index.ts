@@ -33,7 +33,7 @@ import {
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork, resetHeliusSubscriptionIds,
-  recordHeliusCoverageGap, recordHeliusNotificationBoundary,
+  recordHeliusCoverageGap, recordHeliusNotificationBoundary, markHeliusCoverageGapRecovered,
   retryHeliusSignatureWork,
   type HeliusMonitorState,
   type HeliusSignatureWork,
@@ -52,6 +52,7 @@ import {
   type HistoricalBackfillState
 } from "../../../../src/ingestion/helius-backfill.js";
 import { assessHistoricalDecodeCoverage } from "../../../../src/ingestion/helius-backfill-coverage.js";
+import { assessHeliusGapRecovery } from "../../../../src/ingestion/helius-gap-recovery.js";
 import { enqueueHistoricalBackfillSignatures } from "../../../../src/ingestion/helius-backfill-queue.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import { classifyWalletClusterRiskWithCoverage, evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
@@ -2913,6 +2914,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         });
         activeWork = null;
       }
+      await this.recoverCoveredHeliusGaps().catch(() => undefined);
     } catch {
       this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
       this.auditInBackground("ERROR", activeWork?.mint ?? null, { subsystem: "HELIUS_QUEUE", message: this.status.lastError });
@@ -2953,6 +2955,54 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Recover only interruptions wholly contained in an already completed,
+   * PostgreSQL-acknowledged launch-window backfill. Gaps outside that exact
+   * window remain incomplete; reconnects never clear them.
+   */
+  private async recoverCoveredHeliusGaps(): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId) return;
+    const gaps = this.heliusState.coverageGaps.filter(gap =>
+      gap.endedAt !== null && gap.recoveredAt == null
+    );
+    for (const gap of gaps) {
+      const backfill = await this.ctx.storage.get<HistoricalBackfillState>(
+        "helius_backfill:" + sessionId + ":" + gap.mint
+      );
+      if (!backfill || backfill.status !== "COMPLETE") continue;
+      const decodeCoverage = await this.getHistoricalDecodeCoverage(sessionId, gap.mint, backfill);
+      if (!decodeCoverage.complete) continue;
+      const [verifiedSignatures, failedSignatures, archivedSignatures] = await Promise.all([
+        this.ctx.storage.get<string[]>("helius_verified_historical_signatures:" + sessionId + ":" + gap.mint),
+        this.ctx.storage.get<string[]>("helius_failed_historical_signatures:" + sessionId + ":" + gap.mint),
+        this.ctx.storage.get<string[]>("helius_archived_transaction_signatures:" + sessionId + ":" + gap.mint)
+      ]);
+      const proof = assessHeliusGapRecovery({
+        gap,
+        signatures: backfill.signatures,
+        verifiedSignatures: verifiedSignatures ?? [],
+        failedSignatures: failedSignatures ?? [],
+        archivedSignatures: archivedSignatures ?? []
+      });
+      if (!proof.recovered) continue;
+      const recovered = markHeliusCoverageGapRecovered(
+        this.heliusState, gap.mint, gap.startedAt,
+        { recovered: true, recoveredSignatures: proof.recoveredSignatures }
+      );
+      if (recovered === this.heliusState) continue;
+      this.heliusState = recovered;
+      await this.ctx.storage.put("helius_monitor_state", this.heliusState);
+      await this.appendAudit("OBSERVATION", gap.mint, {
+        provider: "helius",
+        historicalGapRecovery: "RECOVERED",
+        startedAt: gap.startedAt,
+        endedAt: gap.endedAt,
+        recoveredSignatures: proof.recoveredSignatures,
+        evidenceSource: "COMPLETE_LAUNCH_WINDOW_BACKFILL_AND_POSTGRES_ACKNOWLEDGEMENTS"
+      }, "helius-gap-recovered:" + sessionId + ":" + gap.mint + ":" + gap.startedAt);
+    }
+  }
   private markHeliusCoverageGap(): void {
     const now = new Date().toISOString();
     const previouslyIncomplete = new Set(this.heliusState.incompleteMints);
