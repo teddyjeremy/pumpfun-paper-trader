@@ -3,6 +3,7 @@ import {
   emptyHeliusMonitorState, enqueueHeliusNotification, enqueueHeliusSignatureWork, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, selectHeliusCandidates, confirmHeliusSubscription,
   takeHeliusWork, retryHeliusSignatureWork, MAX_HELIUS_CANDIDATES, MAX_HELIUS_SIGNATURE_QUEUE, resetHeliusSubscriptionIds,
+  recordHeliusCoverageGap, closeHeliusCoverageGap,
   FRESH_LAUNCH_SLOT_RESERVE
 } from "../src/ingestion/helius-monitor.js";
 import type { DiscoveryCandidate } from "../src/ingestion/discovery-store.js";
@@ -87,6 +88,23 @@ describe("bounded Helius candidate monitor", () => {
     state = confirmHeliusSubscription(state, requestId, 78, "2026-11-12T00:01:00.000Z");
     expect(state.incompleteMints).toContain(candidate(0).mint);
     expect(state.subscriptions[0]!.subscriptionId).toBe(78);
+  });
+  it("persists exact Helius interruption intervals and closes them without clearing incompleteness", () => {
+    let state = reconcileHeliusSubscriptions(emptyHeliusMonitorState(), [candidate(0)]);
+    const requestId = state.subscriptions[0]!.requestId;
+    state = confirmHeliusSubscription(state, requestId, 77, "2026-11-13T10:00:00.000Z");
+    state = recordHeliusCoverageGap(state, candidate(0).mint, "2026-11-13T10:02:00.000Z");
+    expect(state.coverageGaps).toEqual([{
+      mint: candidate(0).mint,
+      startedAt: "2026-11-13T10:00:00.000Z",
+      endedAt: null
+    }]);
+    state = closeHeliusCoverageGap(state, candidate(0).mint, "2026-11-13T10:03:00.000Z");
+    expect(state.coverageGaps[0]?.endedAt).toBe("2026-11-13T10:03:00.000Z");
+    expect(state.incompleteMints).toContain(candidate(0).mint);
+    state = recordHeliusCoverageGap(state, candidate(0).mint, "2026-11-13T10:04:00.000Z");
+    expect(state.coverageGaps).toHaveLength(2);
+    expect(state.coverageGaps[1]?.endedAt).toBeNull();
   });
   it("queues provider-discovered create signatures without waiting for a logs subscription", () => {
     const state = emptyHeliusMonitorState();
