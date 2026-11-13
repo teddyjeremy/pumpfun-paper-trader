@@ -77,7 +77,7 @@ describe("selective Helius transaction fetch", () => {
     const httpError = await fetchAndVerifyPumpTransaction(signature, mint, {
       apiKey, fetcher: async () => new Response("unavailable", { status: 429 })
     });
-    expect(httpError).toMatchObject({ status: "DATA_INCOMPLETE", reason: "Helius HTTP status 429." });
+    expect(httpError).toMatchObject({ status: "DATA_INCOMPLETE", reason: "Helius HTTP status 429: unavailable." });
 
     const networkError = await fetchAndVerifyPumpTransaction(signature, mint, {
       apiKey, fetcher: async () => { throw new Error("network"); }

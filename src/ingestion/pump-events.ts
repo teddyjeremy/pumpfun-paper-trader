@@ -31,6 +31,8 @@ export interface PumpCreateEvent {
   creatorFeeBps: bigint;
   isHolderReward: boolean;
   depth: number;
+  /** Bytes appended by a newer on-chain event version after the verified IDL prefix. */
+  trailingBytes?: number;
 }
 
 
@@ -131,8 +133,10 @@ class BorshReader {
     return value;
   }
 
+  get remaining(): number { return this.bytes.length - this.offset; }
+
   finish(): void {
-    if (this.offset !== this.bytes.length) throw new Error("Unexpected trailing bytes in Pump CreateEvent.");
+    if (this.offset !== this.bytes.length) throw new Error("Unexpected trailing bytes in Pump event payload.");
   }
 
   private require(length: number): void {
@@ -181,7 +185,7 @@ export function decodePumpCreateEvents(logs: readonly string[]): PumpCreateEvent
     if (!matches) continue;
 
     const reader = new BorshReader(bytes.subarray(CREATE_EVENT_DISCRIMINATOR.length));
-    events.push({
+    const event: PumpCreateEvent = {
       name: reader.readString(),
       symbol: reader.readString(),
       uri: reader.readString(),
@@ -202,8 +206,14 @@ export function decodePumpCreateEvents(logs: readonly string[]): PumpCreateEvent
       creatorFeeBps: reader.readU64(),
       isHolderReward: reader.readBool(),
       depth: reader.readU8()
-    });
-    reader.finish();
+    };
+    // The public IDL is the verified prefix. Newer deployments may append
+    // fields; preserve their byte count while retaining the decoded launch
+    // identity, rather than discarding a valid mint/curve/timestamp tuple.
+    const trailingBytes = reader.remaining;
+    if (trailingBytes > 64) throw new Error("Pump CreateEvent has more than 64 unknown trailing bytes.");
+    if (trailingBytes > 0) event.trailingBytes = trailingBytes;
+    events.push(event);
   }
   return events;
 }
