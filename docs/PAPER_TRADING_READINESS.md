@@ -49,7 +49,7 @@ This document is the operational checklist for reaching the first verified simul
 - [x] Two-pass holder census implementation with pagination, stable supply/slot checks, owner aggregation, and fail-closed incomplete states.
 - [x] A full census now also requires the sum of all enumerated positive token-account balances to equal the verified mint supply exactly; partial enumerations cannot pass merely because no observed holder exceeds 20%.
 - [x] Wallet evidence distinguishes full SOL-transfer history from full wallet transaction history.
-- [ ] Production Cloudflare Worker does not yet have `FULL_WALLET_HISTORY_ENABLED`; PR #77 now sets it to `true` with `FULL_WALLET_HISTORY_MAX_PAGES=2` for the next deployment. Collection is bounded to at most 16 wallets and 2 pages per wallet; a candidate is refreshed at most once per minute, normally every 10 minutes or earlier when its observed wallet set changes. This will consume Helius credits after deployment, so the PR remains unmerged pending review of that bounded usage.
+- [ ] Keep `FULL_WALLET_HISTORY_ENABLED=false` by default. The collector is bounded to at most 16 wallets and 2 pages per wallet; a candidate is refreshed at most once per minute, normally every 10 minutes or earlier when its observed wallet set changes. Enabling it requires an explicit, documented Helius credit budget and operator approval before deployment; do not turn it on merely to make readiness pass.
 - [x] Historical risk evidence is replayed as a timestamped timeline; later evidence cannot clear an earlier candidate and incomplete refreshes revoke prior clearance.
 - [x] Worker derives each requested wallet's expected create/trade signatures from the fully decoded launch-window transaction set; full-history collection requires those signatures to appear in the wallet's own paginated history.
 - [x] Full wallet transaction-history pages reject duplicate/malformed records, invalid/repeated cursors, newest-to-oldest ordering violations, and page-cap truncation.
@@ -207,7 +207,7 @@ If any item fails, keep `tradingReady=false` and report the exact blocker. Do no
 ## Current known blockers
 
 - Historical buyer-set provenance and complete wallet transaction-history clearance are not yet proven end to end.
-- Production full wallet transaction-history collection is still disabled until PR #77 is reviewed and deployed; the branch config enables the bounded collector (16 wallets, 2 pages each) and its Helius credit usage needs approval.
+- Production full wallet transaction-history collection remains disabled by default, including on the PR branch. Enabling the bounded collector (16 wallets, 2 pages each) is a separate operator decision after Helius credit usage is estimated and approved.
 - No empirically validated and operator-reviewed volume calibration is configured in production; the Worker now accepts only an explicit approved payload and remains fail-closed without it.
 - Complete contiguous rolling event-stream coverage is not yet available; PumpSwap event decoding and multi-window exhaustion evidence remain outstanding.
 - The Worker now treats the paper portfolio as the simulated payer budget and previews stake, both exact fee legs, and refundable ATA/accumulator rent before an entry. Actual Worker-to-Vercel/Neon ingestion and production account-state/rent reconciliation remain unverified; quote-only unsigned plans continue to return `paperEntryAuthorized=false`.
