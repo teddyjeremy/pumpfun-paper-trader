@@ -16,6 +16,8 @@ export interface CompleteWalletFundingEvidenceResult {
   dataComplete: boolean;
   walletSetComplete: boolean;
   walletsRequested: number;
+  requestedWallets: string[];
+  walletsCovered: string[];
   walletsChecked: number;
   transfersChecked: number;
   pagesScanned: number;
@@ -55,7 +57,7 @@ export async function collectCompleteWalletFundingEvidence(
   }
   if (!walletSetComplete) {
     warnings.push("The supplied wallet set exceeds the bounded eight-wallet collection limit or contains invalid/duplicate wallet entries.");
-    return result(mint, "DATA_INCOMPLETE", false, false, uniqueWallets.length, 0, 0, 0, warnings);
+    return result(mint, "DATA_INCOMPLETE", false, false, uniqueWallets.length, 0, 0, 0, warnings, [], uniqueWallets);
   }
 
   const fetcher = config.fetcher ?? fetch;
@@ -184,7 +186,7 @@ export async function collectCompleteWalletFundingEvidence(
   if (links.length === 0) warnings.push("No repeated common SOL-funder relationship was observed in the completely collected transfer histories.");
   const complete = !incomplete && walletSetComplete;
   return result(mint, complete ? "OBSERVED" : "DATA_INCOMPLETE", complete, walletSetComplete,
-    uniqueWallets.length, uniqueWallets.length, transfersChecked, pagesScanned, warnings, links);
+    uniqueWallets.length, uniqueWallets.length, transfersChecked, pagesScanned, warnings, links, uniqueWallets, complete ? uniqueWallets : []);
 }
 
 async function rpc(
@@ -213,12 +215,12 @@ function result(
   mint: string, status: CompleteWalletFundingEvidenceResult["status"], dataComplete: boolean,
   walletSetComplete: boolean, walletsRequested: number, walletsChecked: number,
   transfersChecked: number, pagesScanned: number, warnings: string[],
-  links: WalletLinkEvidence[] = []
+  links: WalletLinkEvidence[] = [], requestedWallets: string[] = [], walletsCovered: string[] = []
 ): CompleteWalletFundingEvidenceResult {
   return {
     provider: "helius", mint, status,
     coverage: dataComplete ? "FULL_SOL_TRANSFER_HISTORY_WITHIN_CONFIGURED_CAP" : "INCOMPLETE_SOL_TRANSFER_HISTORY",
-    dataComplete, walletSetComplete, walletsRequested, walletsChecked,
+    dataComplete, walletSetComplete, walletsRequested, requestedWallets, walletsCovered, walletsChecked,
     transfersChecked, pagesScanned, links, warnings, observedAt: new Date().toISOString()
   };
 }
