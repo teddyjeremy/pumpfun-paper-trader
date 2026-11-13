@@ -66,7 +66,7 @@ jobs:
           while true; do
             npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=100000
             NEXT=$(node -e 'const c=require("./artifacts/checkpoint.json"); process.stdout.write(String(c.nextCandidateIndex))')
-            TOTAL=$(node -e 'const s=require("./artifacts/pump-launch-screen-$BACKTEST_DATE.json"); process.stdout.write(String(s.selectedLaunchIndexes.length))')
+            TOTAL=$(node -e 'const s=require("./artifacts/pump-launch-screen-"+process.env.BACKTEST_DATE+".json"); process.stdout.write(String(s.selectedLaunchIndexes.length))')
             if [ "$NEXT" -ge "$TOTAL" ]; then
               break
             fi
