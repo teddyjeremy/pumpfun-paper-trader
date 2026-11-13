@@ -21,7 +21,7 @@ on:
       previous_run_id:
         description: "Previous run ID containing pump-backtest-state for this date"
         required: false
-        default: "43503737277"
+        default: "43505595998"
         type: string
 
 permissions:
@@ -29,7 +29,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: historical-paper-replay-${{ github.event.inputs.date || '2026-11-12' }}
+  group: historical-paper-replay-shared-helius-key
   cancel-in-progress: false
 
 jobs:
