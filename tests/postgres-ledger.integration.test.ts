@@ -216,15 +216,19 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     await ledgerPersistence!.persistPaperAuditEvents(sessionId, [entryEvent]);
     const backfillMint = "So11111111111111111111111111111111111111112";
     const createSignature = "5".repeat(64);
+    const tradeSignature = "4".repeat(64);
     const state = {
       bondingCurve: "11111111111111111111111111111111",
       createSignature,
       launchBlockTime: 1762941600,
       horizonSeconds: 600,
       maxSignatures: 120,
-      signatures: [{ signature: createSignature, slot: 123, blockTime: 1762941600, err: null }],
+      signatures: [
+        { signature: tradeSignature, slot: 124, blockTime: 1762941601, err: null },
+        { signature: createSignature, slot: 123, blockTime: 1762941600, err: null }
+      ],
       pagesScanned: 1,
-      scannedCount: 1,
+      scannedCount: 2,
       before: null,
       lastPageSlot: 123,
       lastPageBlockTime: 1762941600,
@@ -233,8 +237,8 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     };
     const transaction = {
       mint: backfillMint,
-      signature: createSignature,
-      slot: 123,
+      signature: tradeSignature,
+      slot: 124,
       provider: "helius" as const,
       commitment: "confirmed" as const,
       source: "HISTORICAL_BACKFILL" as const,
@@ -259,7 +263,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       [sessionId, backfillMint]
     );
     expect(archived.rows[0]).toEqual({
-      status: "COMPLETE", pages_scanned: 1, signature_count: 1,
+      status: "COMPLETE", pages_scanned: 1, signature_count: 2,
       launch_block_time: "1762941600", decoded_complete: true,
       verified_transaction_count: 1, transactions: 1
     });
@@ -284,7 +288,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     expect(replayDataset).toHaveLength(1);
     expect(replayDataset[0]).toMatchObject({
       mint: backfillMint, launchBlockTime: 1762941600, decodedComplete: true,
-      signatureCount: 1, verifiedTransactionCount: 1
+      signatureCount: 2, verifiedTransactionCount: 1
     });
     expect(replayDataset[0]?.transactions).toHaveLength(1);
     expect(replayDataset[0]?.riskEvidence).toHaveLength(1);
@@ -296,7 +300,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     const expandedWindow = {
       ...state,
       pagesScanned: 2,
-      scannedCount: 2,
+      scannedCount: 3,
       lastPageSlot: 122,
       lastPageBlockTime: 1762941599,
       signatures: [
@@ -321,6 +325,11 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       scan_provider: "helius",
       scan_commitment: "confirmed"
     });
+    const refreshedReplay = await ledgerPersistence!.getHeliusBackfillReplayDataset(sessionId);
+    expect(refreshedReplay[0]).toMatchObject({
+      decodedComplete: false, signatureCount: 2, verifiedTransactionCount: 0
+    });
+    expect(refreshedReplay[0]?.transactions).toHaveLength(0);
 
     await expect(ledgerPersistence!.persistHeliusBackfillArchive({
       sessionId, mint: backfillMint, state,
