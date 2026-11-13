@@ -255,6 +255,29 @@ describe("historical strategy replay", () => {
     expect(result.recommended?.holdout.maxDrawdownPct).toBe(0);
   });
 
+  it("excludes labelled-looking rows whose full replay lifecycle is incomplete", () => {
+    const replays = Array.from({ length: 60 }, (_, index) => ({
+      mint, launchBlockTime: index, horizonSeconds: 600, decodeComplete: true,
+      decodeReason: null, verifiedTransactionCount: 10, verifiedTradeCount: 10,
+      snapshots: [], firstSetup: {
+        pullbackVolumeVsImpulsePct: 10,
+        reclaimVolumeVsPullbackPct: 200
+      },
+      outcome: {
+        entryAt: index + 10, entryPriceQuotePerToken: 1,
+        maxFavorableExcursionPct: 30, maxAdverseExcursionPct: 5,
+        grossFinalReturnPct: 20, netFinalReturnPct: 15,
+        roundTripCostPct: 5, label: "SUCCESS" as const,
+        labelReason: "Intentionally incomplete synthetic fixture"
+      },
+      status: "EXIT_EVIDENCE_INCOMPLETE" as const
+    })) as unknown as import("../src/strategy/historical-replay.js").HistoricalCoinReplay[];
+    const result = calibrateVolumeThresholds(replays);
+    expect(result.status).toBe("INSUFFICIENT_SAMPLE");
+    expect(result.labeledCoins).toBe(0);
+    expect(result.recommended).toBeNull();
+  });
+
   it("rejects a volume threshold that does not generalize to positive net holdout returns", () => {
     const replays = Array.from({ length: 60 }, (_, index) => {
       const positive = index % 2 === 0;
