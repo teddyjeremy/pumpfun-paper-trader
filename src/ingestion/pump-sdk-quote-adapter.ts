@@ -69,6 +69,7 @@ export interface PumpSdkSwapQuote {
   baseDecimals: number;
   quoteDecimals: number;
   transferTaxVerifiedZero: true;
+  snapshot?: VerifiedPumpQuoteSnapshot;
   executionReady: false;
   blockers: string[];
 }
