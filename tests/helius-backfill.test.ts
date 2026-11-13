@@ -71,10 +71,13 @@ describe("bounded Helius historical backfill", () => {
     });
     const result = applyAddressSignaturesPage(initial, [
       { signature: newer, slot: 12, blockTime: 1060, err: null },
-      { signature: create, slot: 10, blockTime: 1000, err: null }
+      { signature: create, slot: 10, blockTime: 1000, err: null },
+      { signature: older, slot: 9, blockTime: null, err: null }
     ]);
     expect(result.status).toBe("COMPLETE");
     expect(result.state.status).toBe("COMPLETE");
+    expect(result.state.lastPageSlot).toBe(10);
+    expect(result.state.lastPageBlockTime).toBe(1000);
     expect(result.signaturesToFetch.map(item => item.signature)).toEqual([newer, create]);
   });
 
