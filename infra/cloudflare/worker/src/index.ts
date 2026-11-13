@@ -2969,64 +2969,67 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private async scanIndependentHeliusGapHistory(): Promise<void> {
     const sessionId = this.activeSessionId;
     if (!sessionId || !this.status.enabled) return;
-    const gap = this.heliusState.coverageGaps.find(item =>
+    const gaps = this.heliusState.coverageGaps.filter(item =>
       item.endedAt !== null && item.recoveredAt == null
     );
-    if (!gap) return;
-    const subscription = this.heliusState.subscriptions.find(item => item.mint === gap.mint);
-    if (!subscription?.bondingCurve) return;
-    const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
-    const saved = await this.ctx.storage.get<{
-      status: "SCANNING" | "SCANNED" | "INCOMPLETE";
-      resume?: HeliusGapHistoryResume;
-      signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
-      pagesScanned: number;
-      reason: string | null;
-      updatedAt: string;
-    }>(key);
-    if (saved?.status === "SCANNED") return;
+    for (const gap of gaps) {
+      const subscription = this.heliusState.subscriptions.find(item => item.mint === gap.mint);
+      if (!subscription?.bondingCurve) continue;
+      const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+      const saved = await this.ctx.storage.get<{
+        status: "SCANNING" | "SCANNED" | "INCOMPLETE";
+        resume?: HeliusGapHistoryResume;
+        signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
+        pagesScanned: number;
+        reason: string | null;
+        updatedAt: string;
+      }>(key);
+      // Skip this already-scanned interval and continue to the next one; a
+      // completed scan must not starve later interruption intervals.
+      if (saved?.status === "SCANNED") continue;
 
-    const throttledFetcher: typeof fetch = async (input, init) => {
-      while (!this.heliusBucket.tryTake()) {
-        await new Promise(resolve => setTimeout(resolve, this.heliusBucket.retryAfterMs));
-        if (!this.status.enabled || this.activeSessionId !== sessionId) {
-          throw new Error("Helius gap scan paused because the paper session stopped.");
+      const throttledFetcher: typeof fetch = async (input, init) => {
+        while (!this.heliusBucket.tryTake()) {
+          await new Promise(resolve => setTimeout(resolve, this.heliusBucket.retryAfterMs));
+          if (!this.status.enabled || this.activeSessionId !== sessionId) {
+            throw new Error("Helius gap scan paused because the paper session stopped.");
+          }
         }
-      }
-      return fetch(input, init);
-    };
-    const result = await fetchHeliusGapAddressHistory(
-      subscription.bondingCurve,
-      gap,
-      { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed", fetcher: throttledFetcher },
-      throttledFetcher,
-      1_000,
-      saved?.resume
-    );
-    const retryFromSavedBoundary = !result.complete && !result.resume && saved?.resume;
-    const next = {
-      status: result.complete ? "SCANNED" as const : "SCANNING" as const,
-      ...(result.resume ? { resume: result.resume } :
-        retryFromSavedBoundary ? { resume: saved.resume } : {}),
-      signatures: result.complete ? result.signatures :
-        result.resume ? result.signatures :
-        retryFromSavedBoundary ? saved.signatures : result.signatures,
-      pagesScanned: result.pagesScanned,
-      reason: result.complete ? null : result.reason,
-      updatedAt: new Date().toISOString()
-    };
-    await this.ctx.storage.put(key, next);
-    await this.appendAudit(result.complete ? "OBSERVATION" : "DATA_GAP", gap.mint, {
-      provider: "helius",
-      independentGapHistory: next.status,
-      startedAt: gap.startedAt,
-      endedAt: gap.endedAt,
-      pagesScanned: result.pagesScanned,
-      signaturesScanned: result.signatures.length,
-      resumable: Boolean(result.resume),
-      reason: next.reason,
-      storageKey: key
-    }, `helius-gap-history:${sessionId}:${gap.mint}:${gap.startedAt}:${result.pagesScanned}`);
+        return fetch(input, init);
+      };
+      const result = await fetchHeliusGapAddressHistory(
+        subscription.bondingCurve,
+        gap,
+        { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed", fetcher: throttledFetcher },
+        throttledFetcher,
+        1_000,
+        saved?.resume
+      );
+      const retryFromSavedBoundary = !result.complete && !result.resume && saved?.resume;
+      const next = {
+        status: result.complete ? "SCANNED" as const : "SCANNING" as const,
+        ...(result.resume ? { resume: result.resume } :
+          retryFromSavedBoundary ? { resume: saved.resume } : {}),
+        signatures: result.complete || result.resume ? result.signatures :
+          retryFromSavedBoundary ? saved.signatures : result.signatures,
+        pagesScanned: result.pagesScanned,
+        reason: result.complete ? null : result.reason,
+        updatedAt: new Date().toISOString()
+      };
+      await this.ctx.storage.put(key, next);
+      await this.appendAudit(result.complete ? "OBSERVATION" : "DATA_GAP", gap.mint, {
+        provider: "helius",
+        independentGapHistory: next.status,
+        startedAt: gap.startedAt,
+        endedAt: gap.endedAt,
+        pagesScanned: result.pagesScanned,
+        signaturesScanned: next.signatures.length,
+        resumable: Boolean(next.resume),
+        reason: next.reason,
+        storageKey: key
+      }, `helius-gap-history:${sessionId}:${gap.mint}:${gap.startedAt}:${result.pagesScanned}`);
+      return; // Bound work to one gap batch per queue cycle.
+    }
   }
 
   /**
