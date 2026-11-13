@@ -17,7 +17,8 @@
     "db:migrate": "npm run build && node dist/src/db/migrate.js",
     "smoke:ingestion": "node scripts/verify-worker-ingestion.mjs",
     "backtest:discover": "tsx scripts/backtest-helius-day.ts",
-    "backtest:replay": "tsx scripts/backtest-helius-day-replay.ts"
+    "backtest:replay": "tsx scripts/backtest-helius-day-replay.ts",
+    "backtest:batch": "tsx scripts/backtest-helius-batch.ts"
   },
   "dependencies": {
     "fastify": "^5.2.1",
