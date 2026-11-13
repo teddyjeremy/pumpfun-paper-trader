@@ -45,6 +45,7 @@ export interface HeliusCoverageGap {
   startSlot: number | null;
   endSignature: string | null;
   endSlot: number | null;
+  recoveredAt?: string | null;
 }
 
 export interface HeliusMonitorState {
@@ -188,7 +189,7 @@ export function recordHeliusCoverageGap(
       mint, startedAt, endedAt: null,
       startSignature: subscription?.lastSignature ?? null,
       startSlot: subscription?.lastSlot ?? null,
-      endSignature: null, endSlot: null
+      endSignature: null, endSlot: null, recoveredAt: null
     }].slice(-100)
   };
 }
@@ -269,6 +270,40 @@ export function confirmHeliusSubscription(
       : item)
   };
   return closeHeliusCoverageGap(withSubscription, mint, now);
+}
+
+/**
+ * Clear a mint's incomplete flag only after the anchored interval proof succeeds.
+ * A reconnect acknowledgement is deliberately not sufficient.
+ */
+export function markHeliusCoverageGapRecovered(
+  state: HeliusMonitorState,
+  mint: string,
+  startedAt: string,
+  proof: { recovered: true; recoveredSignatures: number },
+  now = new Date().toISOString()
+): HeliusMonitorState {
+  if (!ADDRESS.test(mint) || !Number.isFinite(Date.parse(startedAt)) ||
+      !Number.isFinite(Date.parse(now)) || !proof.recovered ||
+      !Number.isSafeInteger(proof.recoveredSignatures) || proof.recoveredSignatures < 2) return state;
+  let matched = false;
+  const coverageGaps = state.coverageGaps.map(gap => {
+    if (gap.mint !== mint || gap.startedAt !== startedAt || !gap.endedAt ||
+        gap.recoveredAt || matched) return gap;
+    matched = true;
+    return { ...gap, recoveredAt: now };
+  });
+  if (!matched) return state;
+  const hasUnrecoveredGap = coverageGaps.some(gap =>
+    gap.mint === mint && (!gap.endedAt || !gap.recoveredAt)
+  );
+  return {
+    ...state,
+    coverageGaps,
+    incompleteMints: hasUnrecoveredGap
+      ? state.incompleteMints
+      : state.incompleteMints.filter(value => value !== mint)
+  };
 }
 
 /** Queue a provider-supplied create signature even if the logs subscription starts too late to observe it. */
