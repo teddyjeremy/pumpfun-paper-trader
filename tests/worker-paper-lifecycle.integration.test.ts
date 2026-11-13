@@ -66,7 +66,151 @@ function quote(
   };
 }
 
+class FakeWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  readyState = FakeWebSocket.CONNECTING;
+  private listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+  constructor(readonly url: string) {}
+  addEventListener(type: string, listener: (...args: unknown[]) => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+  send(_data: string): void {}
+  close(): void { this.readyState = FakeWebSocket.CLOSED; }
+}
+
 describe("Cloudflare Worker paper lifecycle durability", () => {
+
+  it("keeps provider streams closed when the Durable Object quota pause is enabled", async () => {
+    const storage = new MemoryDurableStorage();
+    const ctx = context(storage);
+    const socketConstructor = vi.fn();
+    class CountingWebSocket extends FakeWebSocket {
+      constructor(url: string) {
+        super(url);
+        socketConstructor();
+      }
+    }
+    vi.stubGlobal("WebSocket", CountingWebSocket as never);
+    try {
+      const worker = new PumpFunCoordinator(ctx as never, {
+        PAPER_OBSERVATION_PAUSED: "true",
+        PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+        PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64),
+        HELIUS_API_KEY: "test-helius-key"
+      } as never);
+      const status = await worker.start();
+      expect(status.observationPaused).toBe(true);
+      expect(status.tradingReady).toBe(false);
+      expect(status.readinessBlockers[0]).toContain("paused");
+      expect(socketConstructor).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("creates the active session before acquiring its fenced persistence lease", async () => {
+    const storage = new MemoryDurableStorage();
+    const ctx = context(storage);
+    const leaseRequests: Array<{ activeSessionId: string | undefined; body: Record<string, unknown> }> = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket as never);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      if (url.pathname === "/internal/worker-lease") {
+        leaseRequests.push({
+          activeSessionId: await storage.get<string>("active_audit_session_id"),
+          body
+        });
+        return Response.json({ acquired: true });
+      }
+      if (url.pathname === "/internal/paper-events") {
+        return Response.json({ ok: true, inserted: 1, duplicates: 0, lastSequence: 1 });
+      }
+      return new Response("not found", { status: 404 });
+    }));
+    try {
+      const worker = new PumpFunCoordinator(ctx as never, {
+        PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+        PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64),
+        HELIUS_API_KEY: "test-helius-key"
+      } as never);
+      const status = await worker.start();
+      expect(status.enabled).toBe(true);
+      expect(leaseRequests).toHaveLength(1);
+      expect(leaseRequests[0]?.activeSessionId).toBeTruthy();
+      expect(leaseRequests[0]?.body.action).toBe("acquire");
+      expect(status.readinessBlockers).not.toContain("Fenced PostgreSQL Worker lease is not held.");
+      await Promise.all(ctx.pending);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("reacquires the fenced lease after a Durable Object restart before reconnecting", async () => {
+    const storage = new MemoryDurableStorage();
+    const sessionId = "worker-restart-lease-session";
+    const startedAt = new Date().toISOString();
+    await storage.put("active_audit_session_id", sessionId);
+    await storage.put("enabled", true);
+    await storage.put("audit_session_ids", [sessionId]);
+    await storage.put(`audit_session:${sessionId}`, {
+      sessionId, startedAt, stoppedAt: null, strategyVersion: "strict-v1",
+      eventCount: 1, initialBankrollUsd: 2.7, topUpAmountUsd: 2.7,
+      topUpThresholdUsd: 1, topUpCount: 0, totalTopUpsUsd: 0
+    });
+    await storage.put(`audit_events:${sessionId}:00000000`, []);
+    const ctx = context(storage);
+    let leaseCalls = 0;
+    vi.stubGlobal("WebSocket", FakeWebSocket as never);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/internal/worker-lease") {
+        leaseCalls += 1;
+        return Response.json({ acquired: true });
+      }
+      return Response.json({ ok: true, inserted: 0, duplicates: 0, lastSequence: 1 });
+    }));
+    try {
+      const worker = new PumpFunCoordinator(ctx as never, {
+        PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+        PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64),
+        HELIUS_API_KEY: "test-helius-key"
+      } as never);
+      const status = await worker.ensureRunning();
+      expect(leaseCalls).toBe(1);
+      expect(status.enabled).toBe(true);
+      expect(status.readinessBlockers).not.toContain("Fenced PostgreSQL Worker lease is not held.");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not enable provider streams when the fenced persistence lease is rejected", async () => {
+    const storage = new MemoryDurableStorage();
+    const ctx = context(storage);
+    vi.stubGlobal("WebSocket", FakeWebSocket as never);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/internal/worker-lease") return Response.json({ acquired: false });
+      return new Response("not found", { status: 404 });
+    }));
+    try {
+      const worker = new PumpFunCoordinator(ctx as never, {
+        PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+        PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64),
+        HELIUS_API_KEY: "test-helius-key"
+      } as never);
+      const status = await worker.start();
+      expect(status.enabled).toBe(false);
+      expect(status.lastError).toContain("lease was not acquired");
+      expect(await storage.get("enabled")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("proves Worker-to-Neon persistence and idempotency without starting market streams", async () => {
     const storage = new MemoryDurableStorage();
