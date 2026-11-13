@@ -160,10 +160,9 @@ export function confirmHeliusSubscription(
   if (!confirmed) return state;
   return {
     ...state,
-    // A new acknowledged subscription establishes a fresh coverage boundary.
-    // Old windows remain excluded by subscribedAt; new complete windows may
-    // become usable without permanently poisoning this mint after a reconnect.
-    incompleteMints: state.incompleteMints.filter(mint => mint !== confirmed.mint),
+    // Acknowledging a new subscription restores future delivery only.
+    // It cannot recover notifications missed before the reconnect. Keep the
+    // historical gap until an independent backfill proves that interval.
     subscriptions: state.subscriptions.map(item => item.requestId === requestId
       ? { ...item, subscriptionId, subscribedAt: now }
       : item)
