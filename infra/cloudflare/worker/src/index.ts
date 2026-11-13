@@ -2916,6 +2916,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         activeWork = null;
       }
       await this.scanIndependentHeliusGapHistory().catch(() => undefined);
+      await this.decodeIndependentHeliusGapHistory().catch(() => undefined);
       await this.recoverCoveredHeliusGaps().catch(() => undefined);
     } catch {
       this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
@@ -3029,6 +3030,108 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         storageKey: key
       }, `helius-gap-history:${sessionId}:${gap.mint}:${gap.startedAt}:${result.pagesScanned}`);
       return; // Bound work to one gap batch per queue cycle.
+    }
+  }
+
+  /**
+   * Decode the signature history for one independently scanned interruption.
+   * Each cursor advance is durable and bounded to one transaction per queue
+   * cycle. Only explicit failed transactions are terminal failures; unavailable
+   * or non-matching transactions remain incomplete and are retried.
+   *
+   * Successful decoded transactions are retained in Durable Object storage.
+   * Neon archival is a separate acknowledgement gate before recovery.
+   */
+  private async decodeIndependentHeliusGapHistory(): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId || !this.status.enabled) return;
+    for (const gap of this.heliusState.coverageGaps) {
+      if (gap.endedAt === null || gap.recoveredAt != null) continue;
+      const subscription = this.heliusState.subscriptions.find(item => item.mint === gap.mint);
+      if (!subscription?.bondingCurve) continue;
+      const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+      const scan = await this.ctx.storage.get<{
+        status: "SCANNING" | "SCANNED" | "INCOMPLETE";
+        signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
+      }>(key);
+      if (scan?.status !== "SCANNED") continue;
+      const cursorKey = `${key}:decode_cursor`;
+      const cursor = await this.ctx.storage.get<number>(cursorKey) ?? 0;
+      if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor > scan.signatures.length) {
+        await this.ctx.storage.put(`${key}:decode_error`, {
+          reason: "Persisted independent gap decode cursor is invalid.",
+          updatedAt: new Date().toISOString()
+        });
+        return;
+      }
+      if (cursor >= scan.signatures.length) {
+        await this.ctx.storage.put(`${key}:decode_status`, {
+          status: "DECODED_PENDING_ARCHIVE",
+          decodedAt: new Date().toISOString(),
+          signatureCount: scan.signatures.length
+        });
+        continue;
+      }
+      const item = scan.signatures[cursor]!;
+      while (!this.heliusBucket.tryTake()) {
+        await new Promise(resolve => setTimeout(resolve, this.heliusBucket.retryAfterMs));
+        if (!this.status.enabled || this.activeSessionId !== sessionId) return;
+      }
+      const result = await fetchAndVerifyPumpTransaction(item.signature, gap.mint, {
+        apiKey: this.env.HELIUS_API_KEY,
+        commitment: "confirmed"
+      });
+      if (result.status === "DATA_INCOMPLETE" || result.status === "NOT_RELEVANT") {
+        await this.ctx.storage.put(`${key}:decode_error`, {
+          signature: item.signature,
+          reason: result.reason,
+          cursor,
+          updatedAt: new Date().toISOString()
+        });
+        await this.appendAudit("DATA_GAP", gap.mint, {
+          provider: "helius",
+          independentGapDecode: "WAITING",
+          signature: item.signature,
+          cursor,
+          reason: result.reason
+        }, `helius-gap-decode-wait:${sessionId}:${gap.mint}:${gap.startedAt}:${item.signature}`);
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+      if (result.status === "VERIFIED") {
+        if (result.transaction.slot !== item.slot) {
+          await this.ctx.storage.put(`${key}:decode_error`, {
+            signature: item.signature,
+            reason: "Decoded transaction slot does not match independently scanned signature history.",
+            cursor,
+            updatedAt: new Date().toISOString()
+          });
+          return;
+        }
+        const verifiedKey = `${key}:verified_transactions`;
+        const verified = await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(verifiedKey) ?? {};
+        verified[item.signature] = result.transaction;
+        await this.ctx.storage.put(verifiedKey, verified);
+        const signaturesKey = `${key}:verified_signatures`;
+        const signatures = new Set(await this.ctx.storage.get<string[]>(signaturesKey) ?? []);
+        signatures.add(item.signature);
+        await this.ctx.storage.put(signaturesKey, [...signatures]);
+      } else {
+        const failedKey = `${key}:failed_signatures`;
+        const failed = new Set(await this.ctx.storage.get<string[]>(failedKey) ?? []);
+        failed.add(item.signature);
+        await this.ctx.storage.put(failedKey, [...failed]);
+      }
+      await this.ctx.storage.put(cursorKey, cursor + 1);
+      await this.appendAudit("OBSERVATION", gap.mint, {
+        provider: "helius",
+        independentGapDecode: result.status,
+        signature: item.signature,
+        slot: item.slot,
+        cursor: cursor + 1,
+        totalSignatures: scan.signatures.length
+      }, `helius-gap-decode:${sessionId}:${gap.mint}:${gap.startedAt}:${item.signature}`);
+      return; // One getTransaction request per queue cycle.
     }
   }
 
