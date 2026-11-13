@@ -41,6 +41,7 @@ This document is the operational checklist for reaching the first verified simul
 ### 3. Buyer, wallet-cluster, and holder risk
 
 - [x] Two-pass holder census implementation with pagination, stable supply/slot checks, owner aggregation, and fail-closed incomplete states.
+- [x] A full census now also requires the sum of all enumerated positive token-account balances to equal the verified mint supply exactly; partial enumerations cannot pass merely because no observed holder exceeds 20%.
 - [x] Wallet evidence distinguishes full SOL-transfer history from full wallet transaction history.
 - [ ] Production Cloudflare Worker does not yet have `FULL_WALLET_HISTORY_ENABLED`; PR #77 now sets it to `true` with `FULL_WALLET_HISTORY_MAX_PAGES=2` for the next deployment. Collection is bounded to at most 16 wallets and 2 pages per wallet; a candidate is refreshed at most once per minute, normally every 10 minutes or earlier when its observed wallet set changes. This will consume Helius credits after deployment, so the PR remains unmerged pending review of that bounded usage.
 - [x] Historical risk evidence is replayed as a timestamped timeline; later evidence cannot clear an earlier candidate and incomplete refreshes revoke prior clearance.
