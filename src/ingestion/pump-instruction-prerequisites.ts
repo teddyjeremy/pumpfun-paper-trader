@@ -96,9 +96,12 @@ async function verifyPumpCurveBuybackFeeRecipient(input: {
   const account = snapshot.accounts[0] ?? null;
   if (!account || account.address !== recipient ||
       account.slot !== snapshot.slot || account.observedAt !== snapshot.observedAt ||
-      account.executable !== false || account.lamports === undefined) {
-    throw new Error("Pump curve buyback fee recipient account is missing or its executable/balance state is unverified.");
+      account.executable !== false || account.lamports === undefined || account.lamports <= 0) {
+    throw new Error("Pump curve buyback fee recipient account is missing, executable, empty or its balance state is unverified.");
   }
+  // The account owner is part of the provider response and must be a valid
+  // public key even though recipient ownership is intentionally unrestricted.
+  new PublicKey(account.owner);
 }
 
 function removeBlocker(blockers: string[], blocker: string): void {
