@@ -72,6 +72,8 @@ export interface PumpTradeEvent {
   holderRewardsBps: bigint;
   holderRewards: bigint;
   creatorFeeUnclaimed: bigint;
+  /** Bytes appended by a newer on-chain TradeEvent version after the verified IDL prefix. */
+  trailingBytes?: number;
 }
 
 class BorshReader {
@@ -280,7 +282,10 @@ export function decodePumpTradeEvents(logs: readonly string[]): PumpTradeEvent[]
     const holderRewardsBps = reader.readU64();
     const holderRewards = reader.readU64();
     const creatorFeeUnclaimed = reader.readU64();
-    reader.finish();
+    // Preserve the verified trade prefix when newer deployments append fields.
+    // Unknown suffix bytes are recorded but never interpreted as strategy evidence.
+    const trailingBytes = reader.remaining;
+    if (trailingBytes > 64) throw new Error("Pump TradeEvent has more than 64 unknown trailing bytes.");
 
     events.push({
       mint, solAmount, tokenAmount, isBuy, user, timestamp,
@@ -290,7 +295,8 @@ export function decodePumpTradeEvents(logs: readonly string[]): PumpTradeEvent[]
       lastUpdateTimestamp, ixName, mayhemMode, cashbackFeeBasisPoints, cashback,
       buybackFeeBasisPoints, buybackFee, shareholders, quoteMint, quoteAmount,
       virtualQuoteReserves, realQuoteReserves, holderRewardsBps, holderRewards,
-      creatorFeeUnclaimed
+      creatorFeeUnclaimed,
+      ...(trailingBytes > 0 ? { trailingBytes } : {})
     });
   }
   return events;
