@@ -63,6 +63,14 @@ From the repository root, set the secrets using Wrangler. Never paste these valu
 - PUMPFUN_PROGRAM_ID is a public configuration value already set in wrangler.jsonc to the official Pump bonding-curve program address. It is not a secret.
 - CONTROL_TOKEN: a long random bearer token used to protect start, stop, and status endpoints.
 
+## Configure the Worker-to-Neon ingestion token
+
+Set the same random token in both environments:
+- Cloudflare Worker secret: `PAPER_EVENT_INGEST_TOKEN_V2`
+- Vercel production environment variable: `PAPER_EVENT_INGEST_TOKEN_V2` (encrypted)
+
+The Worker and Vercel API prefer the V2 name. The legacy `PAPER_EVENT_INGEST_TOKEN` remains a fallback during rotation. After changing either value, redeploy the Worker and Vercel app, then rerun the production ingestion smoke test. Never expose or commit the token.
+
 ## Deploy manually
 
     npx wrangler@4 deploy --config infra/cloudflare/worker/wrangler.jsonc
