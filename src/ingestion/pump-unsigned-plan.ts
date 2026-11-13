@@ -85,6 +85,7 @@ function finishPlan(input: {
   requiredAccountAddressesToVerify: string[];
   accountPrerequisites: PumpInstructionAccountPrerequisites;
   feeEvidence: UnsignedInstructionFeeEvidence;
+  volumeAccumulatorInitIncluded?: boolean;
 }): PumpUnsignedExecutionPlan {
   const prerequisiteCreates = dedupePrerequisiteAtaCreates(
     input.accountPrerequisites.ataSnapshot.createInstructions,
@@ -92,6 +93,9 @@ function finishPlan(input: {
   );
   const instructions = [...prerequisiteCreates, ...input.venueInstructions];
   const blockers = [...input.accountPrerequisites.blockers];
+  if (input.volumeAccumulatorInitIncluded) {
+    removeBlocker(blockers, "USER_VOLUME_ACCUMULATOR_INIT_INSTRUCTION_NOT_INCLUDED");
+  }
   if (input.accountPrerequisites.rentEstimate.allNewAtaRentKnown) {
     removeBlocker(blockers, "USER_BASE_ATA_CREATION_INSTRUCTIONS_AND_RENT_RESERVE_REQUIRED");
     removeBlocker(blockers, "MISSING_ATAS_REQUIRE_IDEMPOTENT_CREATE_INSTRUCTIONS");
@@ -176,7 +180,8 @@ export async function buildPumpCurveV3UnsignedPlan(input: {
     venue: "PUMP_CURVE", side: input.side, mint: built.mint, user: built.user,
     venueInstructions,
     requiredAccountAddressesToVerify: built.requiredAccountAddressesToVerify,
-    accountPrerequisites, feeEvidence
+    accountPrerequisites, feeEvidence,
+    volumeAccumulatorInitIncluded: accumulatorInit !== null
   });
   return { ...plan, instructions };
 }
