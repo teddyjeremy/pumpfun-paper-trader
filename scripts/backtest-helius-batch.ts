@@ -4,6 +4,7 @@ import { collectHistoricalLaunchWindow } from "../src/ingestion/helius-launch-wi
 import { replayHistoricalCoin } from "../src/strategy/historical-replay.js";
 import { fetchSolUsdPrice } from "../src/ingestion/sol-usd-price.js";
 import type { HistoricalLaunchActivityScreenResult } from "../src/ingestion/helius-launch-screen.js";
+import { isSolQuoteMint } from "../src/ingestion/trade-flow.js";
 
 type Launch = {
   signature: string; slot: number; blockTime: number;
@@ -18,6 +19,7 @@ type Checkpoint = {
   discoveryCredits: number; screeningCredits: number; totalCreditCeiling: number;
   selectedLaunchIndexes: number[]; nextCandidateIndex: number;
   completedMints: string[]; incompleteMints: string[];
+  marketPatternMints: string[]; noSetupMints: string[];
   cumulativeCreditsUsed: number; updatedAt: string;
 };
 
@@ -96,6 +98,7 @@ try {
     schemaVersion: 2, date, discoveryLaunchCount: discovery.launches.length,
     discoveryCredits: discovery.creditsUsed, screeningCredits: screening.creditsUsed, totalCreditCeiling: maxCredits,
     selectedLaunchIndexes, nextCandidateIndex: 0, completedMints: [], incompleteMints: [],
+    marketPatternMints: [], noSetupMints: [],
     cumulativeCreditsUsed: discovery.creditsUsed + screening.creditsUsed, updatedAt: new Date().toISOString()
   };
   await atomicJson(checkpointPath, checkpoint);
@@ -124,8 +127,33 @@ for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex 
       }, { solUsdPriceUsd: solUsd.observation.priceUsd, minimumTradeUsd: 0.01, horizonSeconds: 600 })
     : null;
 
+  const trades = collected.transactions.flatMap(transaction => transaction.tradeEvents)
+    .filter(event => event.mint === launch.event.mint && isSolQuoteMint(event.quoteMint))
+    .sort((a, b) => Number(a.timestamp - b.timestamp));
+  const buyTrades = trades.filter(event => event.isBuy);
+  const sellTrades = trades.filter(event => !event.isBuy);
+  const uniqueBuyers = new Set(buyTrades.map(event => event.user)).size;
+  const buyQuoteVolumeLamports = buyTrades.reduce((sum, event) => sum + event.quoteAmount, 0n);
+  const reservePrices = trades.map(event =>
+    Number(event.virtualSolReserves) / Number(event.virtualTokenReserves)
+  ).filter(value => Number.isFinite(value) && value > 0);
+  const reservePriceMovePct = reservePrices.length > 1
+    ? (reservePrices[reservePrices.length - 1]! / reservePrices[0]! - 1) * 100 : null;
+  const maximumReserveUpsidePct = reservePrices.length > 1
+    ? (Math.max(...reservePrices) / reservePrices[0]! - 1) * 100 : null;
+
   const record = {
-    index, mint: launch.event.mint, launch, collection: {
+    index, candidateIndex, mint: launch.event.mint, launch,
+    activityScreen: screening.results.find(item => item.index === index)?.result ?? null,
+    decodedActivity: {
+      verifiedTradeCount: trades.length, buyTradeCount: buyTrades.length,
+      sellTradeCount: sellTrades.length, uniqueBuyers,
+      buyQuoteVolumeLamports: buyQuoteVolumeLamports.toString(),
+      reservePriceMovePct, maximumReserveUpsidePct
+    },
+    marketPatternShortlist: replay?.firstSetup?.setupEligible === true,
+    riskClearedShortlist: replay?.firstSetup?.riskClearedSetupEligible === true,
+    collection: {
       status: collected.status, signaturesScanned: collected.state.scannedCount,
       signatureCount: collected.state.signatures.length, pagesScanned: collected.state.pagesScanned,
       verifiedTransactions: collected.transactions.length,
@@ -148,6 +176,8 @@ for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex 
   }
   if (collected.status !== "COMPLETE") checkpoint.incompleteMints.push(launch.event.mint);
   checkpoint.completedMints.push(launch.event.mint);
+  if (replay?.firstSetup?.setupEligible === true) checkpoint.marketPatternMints.push(launch.event.mint);
+  else checkpoint.noSetupMints.push(launch.event.mint);
   checkpoint.nextCandidateIndex = candidateIndex + 1;
   checkpoint.updatedAt = new Date().toISOString();
   await atomicJson(checkpointPath, checkpoint);
@@ -161,6 +191,8 @@ const summary = {
   selectedLaunchIndexes,
   completedMints: checkpoint.completedMints.length,
   incompleteMints: checkpoint.incompleteMints,
+  marketPatternMints: checkpoint.marketPatternMints,
+  noSetupMints: checkpoint.noSetupMints,
   cumulativeCreditsUsed: checkpoint.cumulativeCreditsUsed,
   remainingCredits: maxCredits - checkpoint.cumulativeCreditsUsed,
   nextCandidateIndex: checkpoint.nextCandidateIndex, budgetStopped,
