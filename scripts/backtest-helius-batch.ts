@@ -14,7 +14,7 @@ type Discovery = {
   requestedLocalDate: string; status: string; creditsUsed: number;
   legacyPriorCreditsUsed?: number; launches: Launch[];
 };
-type Screening = { date: string; status: string; creditsUsed: number; selectedLaunchIndexes: number[]; results: Array<{ index: number; result: HistoricalLaunchActivityScreenResult }> };
+type Screening = { date: string; status: string; creditsUsed: number; nextIndex: number; selectedLaunchIndexes: number[]; results: Array<{ index: number; result: HistoricalLaunchActivityScreenResult }> };
 type Checkpoint = {
   schemaVersion: 3; date: string; discoveryLaunchCount: number;
   discoveryCredits: number; screeningCredits: number; legacyPriorCreditsUsed: number; totalCreditCeiling: number;
