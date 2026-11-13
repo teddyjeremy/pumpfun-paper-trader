@@ -83,13 +83,14 @@ export async function discoverPumpLaunchesInTimeRange(
     if (creditsUsed >= config.maxCredits) throw new Error("CREDIT_BUDGET_EXHAUSTED");
     const wait = interval - (Date.now() - lastRequestAt);
     if (lastRequestAt > 0 && wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    // Count attempted requests before I/O so transport failures cannot understate spend.
+    creditsUsed += 1;
+    lastRequestAt = Date.now();
     const response = await fetcher(buildHeliusRpcUrl(config.apiKey), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: "pumpfun-nov12-discovery", method, params })
     });
-    lastRequestAt = Date.now();
-    creditsUsed += 1;
     if (!response.ok) throw new Error(`HELIUS_HTTP_${response.status}`);
     const payload: unknown = await response.json();
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Malformed Helius JSON-RPC envelope.");
