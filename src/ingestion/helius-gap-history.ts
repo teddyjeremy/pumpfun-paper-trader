@@ -55,6 +55,7 @@ export async function fetchHeliusGapAddressHistory(
     const item = records[index]!;
     if (!SIGNATURE.test(item.signature) || seen.has(item.signature) ||
         !Number.isSafeInteger(item.slot) || item.slot < 0 ||
+        !(item.blockTime === null || (Number.isSafeInteger(item.blockTime) && item.blockTime >= 0)) ||
         !(item.err === null || (typeof item.err === "object" && !Array.isArray(item.err)))) {
       return { complete: false, signatures: [], pagesScanned: 0, reason: "Persisted gap-history resume contains malformed or duplicate records." };
     }
@@ -72,6 +73,11 @@ export async function fetchHeliusGapAddressHistory(
       resume.before !== lastRecord.signature ||
       resume.previousPageOldest.signature !== lastRecord.signature ||
       resume.previousPageOldest.slot !== lastRecord.slot ||
+      resume.previousPageOldest.blockTime !== lastRecord.blockTime ||
+      !(resume.previousPageOldest.blockTime === null ||
+        (Number.isSafeInteger(resume.previousPageOldest.blockTime) && resume.previousPageOldest.blockTime >= 0)) ||
+      !(resume.previousPageOldest.err === null ||
+        (typeof resume.previousPageOldest.err === "object" && !Array.isArray(resume.previousPageOldest.err))) ||
       !Number.isSafeInteger(resume.pagesScanned) || resume.pagesScanned < 1)) {
     return { complete: false, signatures: [], pagesScanned: 0, reason: "Persisted gap-history resume cursor does not match its page boundary." };
   }
