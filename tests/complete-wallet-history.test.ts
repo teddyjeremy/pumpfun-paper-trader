@@ -1,37 +1,35 @@
 import { describe, expect, it } from "vitest";
 import { collectCompleteWalletFundingEvidence } from "../src/ingestion/complete-wallet-history.js";
+import { SOL_QUOTE_MINT } from "../src/ingestion/trade-flow.js";
 
 const mint = "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi";
 const walletA = "11111111111111111111111111111111";
 const walletB = "Vote111111111111111111111111111111111111111";
 const funder = "SysvarRent111111111111111111111111111111111";
-
+const signatureChar = (index: number) => "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"[index % 58]!;
 function response(result: unknown): Response {
   return Response.json({ jsonrpc: "2.0", id: "test", result });
 }
-function tx(signature: string, destination: string, time: number) {
+function transfer(signature: string, destination: string, time: number) {
   return {
-    signature, slot: time, blockTime: time,
-    transaction: { message: { instructions: [{
-      program: "system",
-      parsed: { type: "transfer", info: { source: funder, destination, lamports: 1_000_000 } }
-    }] } },
-    meta: { err: null, innerInstructions: [] }
+    signature, slot: time, blockTime: time, type: "transfer",
+    fromUserAccount: funder, toUserAccount: destination,
+    mint: SOL_QUOTE_MINT, amount: "100000000", decimals: 9
   };
 }
 
-describe("complete paginated wallet history", () => {
+describe("complete paginated wallet funding history", () => {
   it("requires full cursor exhaustion for every supplied wallet and detects repeated common funding", async () => {
     const calls: string[] = [];
     const fetcher: typeof fetch = async (_input, init) => {
       const body = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
-      expect(body.method).toBe("getTransactionsForAddress");
+      expect(body.method).toBe("getTransfersByAddress");
       const wallet = String(body.params[0]);
       calls.push(wallet);
       return response({
         data: wallet === walletA
-          ? [tx("3".repeat(64), walletA, 1_794_484_800), tx("4".repeat(64), walletA, 1_794_484_820)]
-          : [tx("5".repeat(64), walletB, 1_794_484_810), tx("6".repeat(64), walletB, 1_794_484_830)]
+          ? [transfer("3".repeat(64), walletA, 1_794_484_800), transfer("4".repeat(64), walletA, 1_794_484_820)]
+          : [transfer("5".repeat(64), walletB, 1_794_484_810), transfer("6".repeat(64), walletB, 1_794_484_830)]
       });
     };
     const result = await collectCompleteWalletFundingEvidence(mint, [walletA, walletB], {
@@ -39,12 +37,12 @@ describe("complete paginated wallet history", () => {
     });
     expect(result).toMatchObject({
       status: "OBSERVED",
-      coverage: "FULL_HISTORY_WITHIN_CONFIGURED_CAP",
+      coverage: "FULL_SOL_TRANSFER_HISTORY_WITHIN_CONFIGURED_CAP",
       dataComplete: true,
       walletSetComplete: true,
       walletsRequested: 2,
       walletsChecked: 2,
-      transactionsChecked: 4,
+      transfersChecked: 4,
       pagesScanned: 2
     });
     expect(result.links).toHaveLength(1);
@@ -59,7 +57,7 @@ describe("complete paginated wallet history", () => {
       const [wallet, options] = body.params;
       calls.push({ wallet, cursor: options.paginationToken ?? null });
       return response({
-        data: [tx(String(3 + calls.length).repeat(64), wallet, 1_794_484_800 + calls.length)],
+        data: [transfer(signatureChar(calls.length) + "3".repeat(63), wallet, 1_794_484_800 + calls.length)],
         ...(wallet === walletA && !options.paginationToken ? { paginationToken: "cursor-a" } : {})
       });
     };
@@ -82,7 +80,7 @@ describe("complete paginated wallet history", () => {
       const wallet = body.params[0];
       call += 1;
       return response({
-        data: [tx(String(3 + call).repeat(64), wallet, 1_794_484_800 + call)],
+        data: [transfer(signatureChar(call) + "3".repeat(63), wallet, 1_794_484_800 + call)],
         paginationToken: `cursor-${call}`
       });
     };
@@ -91,7 +89,7 @@ describe("complete paginated wallet history", () => {
     });
     expect(result.status).toBe("DATA_INCOMPLETE");
     expect(result.dataComplete).toBe(false);
-    expect(result.coverage).toBe("INCOMPLETE_HISTORY");
+    expect(result.coverage).toBe("INCOMPLETE_SOL_TRANSFER_HISTORY");
     expect(result.warnings.some(warning => warning.includes("exceeded the configured"))).toBe(true);
   });
 
@@ -100,7 +98,7 @@ describe("complete paginated wallet history", () => {
       "SysvarRent111111111111111111111111111111111", "SysvarC1ock11111111111111111111111111111111",
       "SysvarS1otHashes111111111111111111111111111", "SysvarRecentB1ockHashes11111111111111111111",
       "ComputeBudget111111111111111111111111111111", "Sysvar1nstructions1111111111111111111111111"];
-    const fetcher: typeof fetch = async () => response({ data: [tx("7".repeat(64), walletA, 1_794_484_800)] });
+    const fetcher: typeof fetch = async () => response({ data: [transfer("7".repeat(64), walletA, 1_794_484_800)] });
     const result = await collectCompleteWalletFundingEvidence(mint, wallets, {
       apiKey: "test-key", fetcher
     });
