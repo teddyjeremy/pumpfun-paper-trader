@@ -14,7 +14,7 @@ Last reviewed: 2026-11-13
 - [x] The Nov 12 historical Parsed Events Scan replay is running in [workflow run 43488935615](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43488935615); candidate quality, completeness, artifacts and credit ledger have not yet been reviewed.
 - [ ] Reviewed strategy calibration is not configured; do not invent or promote thresholds.
 - [ ] Production Worker-to-Neon event ingestion, fenced lease, simulated entry/exit, restart recovery and dashboard reconciliation have not passed end-to-end acceptance. Keep `tradingReady=false`.
-- [ ] PR #79 contains documentation corrections and remains open pending review/merge; its preview deployment checks are rate-limited, which does not affect the existing production deployment.
+- [ ] PR #81 is the single consolidated release containing the documentation, historical resume and Worker ingestion smoke changes. Its exact-head GitHub CI must pass before merge; preview deployment rate limits do not affect the existing production deployment.
 
 ## Current decision
 
@@ -29,8 +29,8 @@ This document is the operational checklist for reaching the first verified simul
 - [x] PR #77 (Worker readiness) and PR #78 (historical dashboard integration) are merged.
 - [x] Vercel production deployment for PR #78 merge commit `5a24c70cb29695c24e9fd0a6fd94c5b481af4907` is READY at [pumpfun-paper-trader-six.vercel.app](https://pumpfun-paper-trader-six.vercel.app).
 - [x] Cloudflare Worker deployment succeeded; current deployed Worker version is `98165354-3d72-46c3-82f2-435f27130fea` (100% traffic). The deployed configuration includes the approved full-wallet-history caps (16 wallets, 2 pages per wallet), ingestion URL, and the required secret bindings.
-- [x] PR #79 documentation corrections passed [CI run 43490724586](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43489914513).
-- [x] PR #80 historical discovery resume fix passed [CI run 43490426078](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43490426078); it remains open for review/merge.
+- [x] Readiness documentation changes passed [CI run 43490724586](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43490724586) before consolidation into PR #81.
+- [x] Historical discovery resume fix passed [CI run 43490426078](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43490426078) before consolidation into PR #81.
 - [ ] Production Worker health, authenticated event-ingestion acknowledgement and production lease heartbeat remain unverified end to end. The public health endpoints could not be independently reached from this check, and secret values are intentionally not exposed.
 - [ ] Complete deployed simulated entry/exit lifecycle and dashboard reconciliation remain unverified.
 - [ ] Keep production `tradingReady=false`; no paper session has passed the production acceptance gate.
@@ -175,8 +175,8 @@ Do not rotate the shared ingestion token without coordinated authorization to up
 
 - [x] PR #77 and PR #78 were merged after required checks passed; their production releases are already complete.
 - [x] Keep changes batched and avoid repeated Vercel production deployments during preparation.
-- [ ] Review and merge PR #79 (documentation corrections) and PR #80 (bounded historical discovery resume fix) only after their exact heads and CI results are reviewed.
-- [ ] After PR #80 is merged, rerun the Nov 12 historical workflow from its latest artifact checkpoint; do not spend beyond the existing 5,000-credit discovery allocation or the shared 30,000-credit ceiling.
+- [ ] Review and merge the single consolidated PR #81 only after its exact head and GitHub CI result are reviewed; do not merge superseded PRs #79 or #80 separately.
+- [ ] After PR #81 is merged, rerun the Nov 12 historical workflow from its latest artifact checkpoint; do not spend beyond the existing 5,000-credit discovery allocation or the shared 30,000-credit ceiling.
 - [ ] Perform the deployed paper-only Worker/Neon acceptance test before starting a forward session.
 - [ ] Keep live signing and transaction submission disabled.
 
