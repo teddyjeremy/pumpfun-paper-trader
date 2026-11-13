@@ -103,8 +103,8 @@ Until these items pass, dynamic exhaustion remains disabled. Protective exits st
 - [ ] Verify `PAPER_EVENT_INGEST_TOKEN` satisfies the API's minimum length and matches the Worker configuration without exposing it in logs or chat.
 - [ ] Verify authenticated Worker-to-Vercel event ingestion returns success and persists the event.
 - [ ] Resolve any 503 response before considering the ingestion path ready.
-- [ ] Connect dashboard open positions, closed trades, candidates, event history, portfolio, and health to persisted API/Neon data.
-- [ ] Verify dashboard data reflects a real persisted simulated entry and exit.
+- [x] Add a dashboard read path for persisted Neon paper-session positions and simulated fills.\n- [ ] Verify dashboard open positions, closed trades, candidates, event history, portfolio, and health against a real persisted entry/exit.
+- [ ] Verify dashboard data reflects a real persisted simulated entry and exit in the deployed environment.
 - [ ] Verify dashboard state after Worker restart and page reload.
 
 Do not rotate the shared ingestion token without coordinated authorization to update both environments. Never put the token value in repository documentation, commits, logs, or chat.
