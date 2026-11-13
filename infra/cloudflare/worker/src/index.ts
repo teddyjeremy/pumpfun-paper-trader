@@ -1384,8 +1384,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       if (transaction.mint === mint) transactionsBySignature.set(transaction.signature, transaction);
     }
     const candidateTransactions = [...transactionsBySignature.values()];
-    const tradeCoverageComplete = backfill?.status === "COMPLETE" && decodeCoverage?.complete === true;
+    const expectedBackfillSignatures = new Set(backfill?.signatures.map(item => item.signature) ?? []);
+    const verifiedBackfillTransactionCount = candidateTransactions.filter(tx =>
+      expectedBackfillSignatures.has(tx.signature)).length;
     const launch = candidateTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
+    const tradeCoverageComplete = backfill?.status === "COMPLETE" &&
+      decodeCoverage?.complete === true && launch !== undefined &&
+      verifiedBackfillTransactionCount === decodeCoverage.verifiedTransactionCount;
     const volumes = new Map<string, bigint>();
     for (const transaction of candidateTransactions) for (const trade of transaction.tradeEvents) {
       if (trade.mint !== mint || trade.quoteAmount <= 0n) continue;
