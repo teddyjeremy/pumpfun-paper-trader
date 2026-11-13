@@ -34,11 +34,18 @@ export interface HeliusSignatureWork {
   retryAfterAt?: string;
 }
 
+export interface HeliusCoverageGap {
+  mint: string;
+  startedAt: string;
+  endedAt: string | null;
+}
+
 export interface HeliusMonitorState {
   subscriptions: HeliusCandidateSubscription[];
   queue: HeliusSignatureWork[];
   seenSignatures: string[];
   incompleteMints: string[];
+  coverageGaps: HeliusCoverageGap[];
   failedTransactions: number;
   droppedSignatures: number;
   duplicateSignatures: number;
@@ -50,7 +57,7 @@ const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
 
 export function emptyHeliusMonitorState(): HeliusMonitorState {
   return {
-    subscriptions: [], queue: [], seenSignatures: [], incompleteMints: [],
+    subscriptions: [], queue: [], seenSignatures: [], incompleteMints: [], coverageGaps: [],
     failedTransactions: 0, droppedSignatures: 0, duplicateSignatures: 0,
     nextRequestId: 1
   };
@@ -65,7 +72,8 @@ export function normalizeHeliusMonitorState(value?: Partial<HeliusMonitorState> 
     subscriptions: Array.isArray(value.subscriptions) ? value.subscriptions.slice(0, MAX_HELIUS_CANDIDATES) : [],
     queue: Array.isArray(value.queue) ? value.queue.slice(0, MAX_HELIUS_SIGNATURE_QUEUE) : [],
     seenSignatures: Array.isArray(value.seenSignatures) ? value.seenSignatures.slice(-MAX_HELIUS_SEEN_SIGNATURES) : [],
-    incompleteMints: Array.isArray(value.incompleteMints) ? [...new Set(value.incompleteMints)].slice(-MAX_HELIUS_CANDIDATES) : []
+    incompleteMints: Array.isArray(value.incompleteMints) ? [...new Set(value.incompleteMints)].slice(-MAX_HELIUS_CANDIDATES) : [],
+    coverageGaps: Array.isArray(value.coverageGaps) ? value.coverageGaps.slice(-100) : []
   };
 }
 
@@ -149,6 +157,46 @@ export function reconcileHeliusSubscriptions(
   return { ...state, subscriptions };
 }
 
+
+/**
+ * Record a durable per-mint interruption interval. The beginning is
+ * conservative: use the last known subscription start when available, so a
+ * silent half-open socket cannot make the uncovered interval look shorter.
+ */
+export function recordHeliusCoverageGap(
+  state: HeliusMonitorState,
+  mint: string,
+  now = new Date().toISOString()
+): HeliusMonitorState {
+  if (!ADDRESS.test(mint) || !Number.isFinite(Date.parse(now))) return state;
+  if (state.coverageGaps.some(gap => gap.mint === mint && gap.endedAt === null)) return state;
+  const subscription = state.subscriptions.find(item => item.mint === mint);
+  const subscribedAt = subscription?.subscribedAt;
+  const startedAt = subscribedAt && Number.isFinite(Date.parse(subscribedAt)) &&
+    Date.parse(subscribedAt) <= Date.parse(now) ? subscribedAt : now;
+  return {
+    ...state,
+    incompleteMints: [...new Set([...state.incompleteMints, mint])].slice(-MAX_HELIUS_CANDIDATES),
+    coverageGaps: [...state.coverageGaps, { mint, startedAt, endedAt: null }].slice(-100)
+  };
+}
+
+/** Close an interruption interval when a new subscription is acknowledged. */
+export function closeHeliusCoverageGap(
+  state: HeliusMonitorState,
+  mint: string,
+  now = new Date().toISOString()
+): HeliusMonitorState {
+  if (!ADDRESS.test(mint) || !Number.isFinite(Date.parse(now))) return state;
+  let closed = false;
+  const coverageGaps = state.coverageGaps.map(gap => {
+    if (gap.mint !== mint || gap.endedAt !== null || closed) return gap;
+    closed = true;
+    return { ...gap, endedAt: now };
+  });
+  return { ...state, coverageGaps };
+}
+
 export function confirmHeliusSubscription(
   state: HeliusMonitorState,
   requestId: number,
@@ -158,15 +206,16 @@ export function confirmHeliusSubscription(
   if (!Number.isSafeInteger(subscriptionId) || subscriptionId < 0) return state;
   const confirmed = state.subscriptions.find(item => item.requestId === requestId);
   if (!confirmed) return state;
-  return {
+  const mint = confirmed.mint;
+  const withSubscription = {
     ...state,
     // Acknowledging a new subscription restores future delivery only.
-    // It cannot recover notifications missed before the reconnect. Keep the
-    // historical gap until an independent backfill proves that interval.
+    // The closed interval remains incomplete until independent backfill proves it.
     subscriptions: state.subscriptions.map(item => item.requestId === requestId
       ? { ...item, subscriptionId, subscribedAt: now }
       : item)
   };
+  return closeHeliusCoverageGap(withSubscription, mint, now);
 }
 
 /** Queue a provider-supplied create signature even if the logs subscription starts too late to observe it. */
