@@ -80,15 +80,24 @@ export function canMarkParsedLaunchBucketEmpty(input: {
 
 /** Find the earliest incomplete bucket whose saved cursor can still be resumed. */
 export function findFirstResumableParsedLaunchBucket(
-  buckets: Array<{ status: string; paginationToken: string | null; pagesScanned: number }>,
+  buckets: Array<{
+    status: string; paginationToken: string | null; pagesScanned: number;
+    hasUnverifiedMatch?: boolean; rescanAttempts?: number;
+  }>,
   maxPagesPerBucket: number
 ): number | null {
-  const index = buckets.findIndex(bucket => (bucket.status === "INCOMPLETE" || bucket.status === "RUNNING") &&
-    canContinueParsedLaunchBucket({
-      paginationToken: bucket.paginationToken,
-      pagesScanned: bucket.pagesScanned,
-      maxPagesPerBucket
-    }));
+  const index = buckets.findIndex(bucket => {
+    const cursorCanContinue = (bucket.status === "INCOMPLETE" || bucket.status === "RUNNING") &&
+      canContinueParsedLaunchBucket({
+        paginationToken: bucket.paginationToken,
+        pagesScanned: bucket.pagesScanned,
+        maxPagesPerBucket
+      });
+    const failedMatchCanBeRetried = bucket.status === "INCOMPLETE" &&
+      bucket.hasUnverifiedMatch === true && !bucket.paginationToken &&
+      (bucket.rescanAttempts ?? 0) < 1;
+    return cursorCanContinue || failedMatchCanBeRetried;
+  });
   return index < 0 ? null : index;
 }
 
