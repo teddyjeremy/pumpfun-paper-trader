@@ -29,7 +29,7 @@ This document is the operational checklist for reaching the first verified simul
 - [x] PR #77 (Worker readiness) and PR #78 (historical dashboard integration) are merged.
 - [x] Vercel production deployment for PR #78 merge commit `5a24c70cb29695c24e9fd0a6fd94c5b481af4907` is READY at [pumpfun-paper-trader-six.vercel.app](https://pumpfun-paper-trader-six.vercel.app).
 - [x] Cloudflare Worker deployment succeeded; current deployed Worker version is `98165354-3d72-46c3-82f2-435f27130fea` (100% traffic). The deployed configuration includes the approved full-wallet-history caps (16 wallets, 2 pages per wallet), ingestion URL, and the required secret bindings.
-- [x] PR #79 documentation corrections passed [CI run 43489914513](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43489914513).
+- [x] PR #79 documentation corrections passed [CI run 43490724586](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43489914513).
 - [x] PR #80 historical discovery resume fix passed [CI run 43490426078](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43490426078); it remains open for review/merge.
 - [ ] Production Worker health, authenticated event-ingestion acknowledgement and production lease heartbeat remain unverified end to end. The public health endpoints could not be independently reached from this check, and secret values are intentionally not exposed.
 - [ ] Complete deployed simulated entry/exit lifecycle and dashboard reconciliation remain unverified.
