@@ -93,8 +93,9 @@ describe("complete paginated wallet transaction history", () => {
   });
 
   it("scans sixteen wallets for positive risk evidence but never claims an oversized set is complete", async () => {
+    const base58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
     const wallets = [walletA, walletB, ...Array.from({ length: 15 }, (_, index) =>
-      "Stake11111111111111111111111111111111111111".slice(0, 32) + String(index).padStart(2, "1"))];
+      "1111111111111111111111111111111" + base58[index + 1])];
     let calls = 0;
     const fetcher: typeof fetch = async (_input, init) => {
       const body = JSON.parse(String(init?.body)) as { params: [string] };
