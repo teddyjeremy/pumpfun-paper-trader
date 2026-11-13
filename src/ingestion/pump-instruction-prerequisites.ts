@@ -94,6 +94,20 @@ async function inspectPumpUserVolumeAccumulator(input: {
   };
 }
 
+async function verifyPumpCurveBuybackFeeRecipient(input: {
+  address: string;
+  config: HeliusAccountReadConfig;
+}): Promise<void> {
+  const recipient = new PublicKey(input.address).toBase58();
+  const snapshot = await fetchHeliusMultipleAccounts([recipient], input.config);
+  const account = snapshot.accounts[0] ?? null;
+  if (!account || account.address !== recipient ||
+      account.slot !== snapshot.slot || account.observedAt !== snapshot.observedAt ||
+      account.executable !== false || account.lamports === undefined) {
+    throw new Error("Pump curve buyback fee recipient account is missing or its executable/balance state is unverified.");
+  }
+}
+
 function removeBlocker(blockers: string[], blocker: string): void {
   const index = blockers.indexOf(blocker);
   if (index >= 0) blockers.splice(index, 1);
@@ -129,6 +143,9 @@ export async function inspectPumpCurveV3InstructionPrerequisites(input: {
     address: input.instruction.userVolumeAccumulatorAddress,
     config: input.config
   });
+  await verifyPumpCurveBuybackFeeRecipient({
+    address: input.instruction.buybackFeeRecipient, config: input.config
+  });
   const volumeRent = volumeAccumulator.state === "MISSING_INIT_IF_NEEDED"
     ? volumeAccumulator.minimumRentLamports : 0;
   const totalNewRentReserveLamports = rentEstimate.newAtaRentReserveLamports === null || volumeRent === null
@@ -141,9 +158,7 @@ export async function inspectPumpCurveV3InstructionPrerequisites(input: {
   }
   if (rentEstimate.allNewAtaRentKnown) removeBlocker(blockers, "ATA_RENT_AND_VIRTUAL_PAYER_BALANCE_NOT_VERIFIED");
   else blockers.push("ATA_RENT_LAYOUT_OR_AMOUNT_UNSUPPORTED");
-  // The curve builder's buyback recipient is a wallet account for native-SOL
-  // curves, not an ATA. This inspector has not fetched or validated that wallet
-  // account, so retain the blocker until a dedicated account-state check exists.
+  removeBlocker(blockers, "BUYBACK_FEE_RECIPIENT_ACCOUNT_EXISTENCE_AND_STATE_NOT_VERIFIED");
   if (volumeAccumulator.state === "PRESENT_AND_VERIFIED") {
     removeBlocker(blockers, "USER_VOLUME_ACCUMULATOR_STATE_AND_RENT_NOT_VERIFIED");
   } else if (volumeAccumulator.minimumRentLamports !== null) {
