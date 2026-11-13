@@ -9,7 +9,8 @@ import {
   applyAddressSignaturesPage,
   buildAddressSignaturesRequest,
   createHistoricalBackfillState,
-  fetchHeliusAddressSignaturesPage
+  fetchHeliusAddressSignaturesPage,
+  type HistoricalBackfillState
 } from "../src/ingestion/helius-backfill.js";
 
 const address = "So11111111111111111111111111111111111111112";
