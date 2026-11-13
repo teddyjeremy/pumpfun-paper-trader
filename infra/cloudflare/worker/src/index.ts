@@ -1162,7 +1162,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         (typeof input.poolAddress !== "string" || !input.poolAddress.trim())) {
       throw new Error("A canonical PumpSwap pool address is required.");
     }
-    if (!/^\\d+$/.test(input.buyAmountBaseUnits) ||
+    if (!/^\d+$/.test(input.buyAmountBaseUnits) ||
         input.buyAmountBaseUnits.length > 20 ||
         BigInt(input.buyAmountBaseUnits) <= 0n ||
         BigInt(input.buyAmountBaseUnits) > 18_446_744_073_709_551_615n) {
@@ -2759,7 +2759,7 @@ export default {
       const { mint, venue, buyAmountBaseUnits, poolAddress } = value;
       if (typeof mint !== "string" || !mint.trim() ||
           (venue !== "PUMP_CURVE" && venue !== "PUMPSWAP") ||
-          typeof buyAmountBaseUnits !== "string" || !/^\\d+$/.test(buyAmountBaseUnits) ||
+          typeof buyAmountBaseUnits !== "string" || !/^\d+$/.test(buyAmountBaseUnits) ||
           buyAmountBaseUnits.length > 20 || BigInt(buyAmountBaseUnits || "0") <= 0n ||
           BigInt(buyAmountBaseUnits || "0") > 18_446_744_073_709_551_615n ||
           (venue === "PUMPSWAP" && (typeof poolAddress !== "string" || !poolAddress.trim()))) {
