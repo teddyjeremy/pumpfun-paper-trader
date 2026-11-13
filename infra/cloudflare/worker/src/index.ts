@@ -1418,13 +1418,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const holder = this.holderRiskSnapshots[mint];
       const walletLinks = this.walletLinkSnapshots[mint];
       const holderObservedAt = holder?.status === "OBSERVED" ? Date.parse(holder.snapshot.observedAt) : Number.NaN;
-      const walletLinksObservedAt = walletLinks?.status === "OBSERVED" ? Date.parse(walletLinks.observedAt) : Number.NaN;
+      const walletLinksObservedAt = walletLinks?.observedAt ? Date.parse(walletLinks.observedAt) : Number.NaN;
+      const launch = this.verifiedTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
+      const currentWalletSet = [...new Set([
+        ...(launch?.creator ? [launch.creator] : []),
+        ...this.verifiedTransactions.flatMap(tx => tx.tradeEvents)
+          .filter(trade => trade.mint === mint && trade.quoteAmount > 0n)
+          .map(trade => trade.user)
+      ])].sort();
+      const previouslyRequestedWallets = [...(walletLinks?.requestedWallets ?? [])].sort();
+      const walletSetChanged = currentWalletSet.length !== previouslyRequestedWallets.length ||
+        currentWalletSet.some((wallet, index) => wallet !== previouslyRequestedWallets[index]);
       const holderNeedsRefresh = !holder || !Number.isFinite(holderObservedAt) ||
         holderObservedAt > now || now - holderObservedAt >= 120_000 ||
         (holder.status !== "OBSERVED" && now - lastAttempt >= 60_000);
+      // Parsed full SOL-transfer history costs more than ordinary RPC. Refresh
+      // it every ten minutes or when the observed wallet set changes, not every
+      // two-minute holder refresh. Incomplete results remain WATCH in between.
       const walletLinksNeedRefresh = !walletLinks || !Number.isFinite(walletLinksObservedAt) ||
-        walletLinksObservedAt > now || now - walletLinksObservedAt >= 120_000 ||
-        (walletLinks.status !== "OBSERVED" && now - lastAttempt >= 60_000);
+        walletLinksObservedAt > now || now - walletLinksObservedAt >= 600_000 || walletSetChanged;
 
       let evidenceType: "HOLDER_CONCENTRATION" | "WALLET_CLUSTER";
       if (holderNeedsRefresh) {
