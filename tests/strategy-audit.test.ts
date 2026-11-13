@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateReclaimConfirmation, evaluateStrictStrategyAudit, type StrictStrategyAuditInput } from "../src/paper/strategy-audit.js";
+import { calculateReclaimConfirmation, canRequestExecutableQuote, evaluateStrictStrategyAudit, type StrictStrategyAuditInput } from "../src/paper/strategy-audit.js";
 
 const base: StrictStrategyAuditInput = {
   candidateAgeSeconds: 61,
@@ -217,4 +217,73 @@ describe("strict strategy audit timing", () => {
     expect(result.nextObservationConfirmed).toBe(false);
   });
 
+});
+
+describe("automatic quote preflight", () => {
+  const readyInput: StrictStrategyAuditInput = {
+    ...base,
+    candidateAgeSeconds: 120,
+    profile: {
+      impulsePriceChangePct: 25, pullbackPct: 16, reclaimDetected: true,
+      reclaimAbovePreviousFiveSecondHighPct: 1.2, pullbackVolumeVsImpulsePct: 45,
+      reclaimVolumeVsPullbackPct: 160, dataComplete: true, microTradeFilterStatus: "APPLIED"
+    },
+    flow: {
+      dataComplete: true, latestThreeWindowFlowPass: true, sampleIntervalSeconds: 1,
+      windows: [0, 1, 2].map(startTime => ({
+        startTime, buySellRatio: 4, flowWindowPass: true, uniqueBuyers: 3, uniqueSellers: 1
+      })),
+      distinctBuyersAcrossLatestThree: 5, largestBuyerShareAcrossLatestThreeBps: 7_000,
+      microTradeFilterStatus: "APPLIED"
+    },
+    creatorRiskStatus: "PASS_COMPLETE",
+    walletClusterRiskStatus: "PASS_COMPLETE",
+    attributionConfidenceBps: 8_000,
+    signalAgeSeconds: 1,
+    nextObservationConfirmed: true,
+    executableQuoteAvailable: false,
+    volumeThresholds: {
+      maxPullbackVolumeVsImpulsePct: 50,
+      minReclaimVolumeVsPullbackPct: 150
+    },
+    roundTripCostPct: null
+  };
+
+  it("requests a quote only after all thirteen pre-quote rules pass", () => {
+    const audit = evaluateStrictStrategyAudit(readyInput);
+    expect(audit.decision).toBe("WATCH");
+    expect(canRequestExecutableQuote(audit)).toBe(true);
+  });
+
+  it("does not request a quote while calibration, wallet evidence, or freshness is unknown", () => {
+    expect(canRequestExecutableQuote(evaluateStrictStrategyAudit({
+      ...readyInput, volumeThresholds: null
+    }))).toBe(false);
+    expect(canRequestExecutableQuote(evaluateStrictStrategyAudit({
+      ...readyInput, walletClusterRiskStatus: "WATCH"
+    }))).toBe(false);
+    expect(canRequestExecutableQuote(evaluateStrictStrategyAudit({
+      ...readyInput, signalAgeSeconds: 3
+    }))).toBe(false);
+  });
+
+  it("does not re-request a quote after quote evidence exists or its economics fail", () => {
+    expect(canRequestExecutableQuote(evaluateStrictStrategyAudit({
+      ...readyInput, executableQuoteAvailable: true, roundTripCostPct: 3.5
+    }))).toBe(false);
+    expect(canRequestExecutableQuote(evaluateStrictStrategyAudit({
+      ...readyInput, executableQuoteAvailable: true, roundTripCostPct: 4.1
+    }))).toBe(false);
+  });
+
+  it("rejects incomplete, duplicate, and unrecognized mandatory rule sets", () => {
+    const audit = evaluateStrictStrategyAudit(readyInput);
+    expect(canRequestExecutableQuote({ rules: audit.rules.slice(1) })).toBe(false);
+    expect(canRequestExecutableQuote({
+      rules: [...audit.rules.slice(1), audit.rules[0]!, audit.rules[0]!]
+    })).toBe(false);
+    expect(canRequestExecutableQuote({
+      rules: [...audit.rules.slice(0, -1), { ...audit.rules[0]!, rule: "EXTRA" }]
+    })).toBe(false);
+  });
 });

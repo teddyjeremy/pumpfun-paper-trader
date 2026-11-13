@@ -1,9 +1,10 @@
 import BN from "bn.js";
 import { Buffer } from "node:buffer";
-import { PublicKey, type AccountInfo } from "@solana/web3.js";
-import { getTransferFeeConfig, getTransferHook, unpackMint, type RawMint } from "@solana/spl-token";
+import { PublicKey, SystemProgram, TransactionInstruction, type AccountInfo } from "@solana/web3.js";
+import { getAssociatedTokenAddressSync, getTransferFeeConfig, getTransferHook, unpackMint, type RawMint } from "@solana/spl-token";
 import {
   PUMP_AMM_SDK,
+  supportsTradeV2,
   buyQuoteInput,
   computeFeesBps,
   sellBaseInput
@@ -36,6 +37,7 @@ import {
   fetchVerifiedPumpQuoteAccountSnapshot,
   type VerifiedPumpQuoteSnapshot
 } from "./pump-quote-snapshot.js";
+import { estimateFeesForUnsignedInstructions, type UnsignedInstructionFeeEvidence } from "./solana-fee-estimator.js";
 
 const PUMP_FEE_PROGRAM_ID = "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ";
 const BPS = new BN(10_000);
@@ -67,6 +69,7 @@ export interface PumpSdkSwapQuote {
   baseDecimals: number;
   quoteDecimals: number;
   transferTaxVerifiedZero: true;
+  snapshot?: VerifiedPumpQuoteSnapshot;
   executionReady: false;
   blockers: string[];
 }
@@ -398,7 +401,170 @@ export async function fetchPumpSwapSdkQuote(input: {
     },
     config: input.config
   });
-  return input.side === "BUY"
+  const quote = input.side === "BUY"
     ? quotePumpSwapBuyFromSnapshot(snapshot, input.amountBaseUnits)
     : quotePumpSwapSellFromSnapshot(snapshot, input.amountBaseUnits);
+  return { ...quote, snapshot };
+}
+
+
+export interface PumpSwapV2UnsignedInstruction {
+  provider: "pump-sdk-4.3.1";
+  venue: "PUMPSWAP";
+  side: "BUY" | "SELL";
+  mint: string;
+  user: string;
+  quoteMint: string;
+  baseTokenProgram: string;
+  quoteTokenProgram: string;
+  buybackFeeRecipients: string[];
+  instructions: TransactionInstruction[];
+  requiredAccountAddressesToVerify: string[];
+  slot: number;
+  observedAt: string;
+  executionReady: false;
+  paperEntryAuthorized: false;
+  blockers: string[];
+}
+
+/**
+ * Build exact-size unsigned PumpSwap V2 instructions from the verified pool
+ * snapshot used by the offline quote adapter. ATA addresses are returned for
+ * separate state/rent verification; no signer or submitter is present here.
+ */
+export async function buildPumpSwapV2UnsignedInstructions(input: {
+  snapshot: VerifiedPumpQuoteSnapshot;
+  user: string;
+  side: "BUY" | "SELL";
+  tokenAmountBaseUnits: string;
+  quoteAmountBaseUnits: string;
+}): Promise<PumpSwapV2UnsignedInstruction> {
+  if (!isU64BaseUnits(input.tokenAmountBaseUnits) || BigInt(input.tokenAmountBaseUnits) <= 0n) {
+    throw new Error("PumpSwap instruction token amount must be a positive u64 base-unit integer.");
+  }
+  if (!isU64BaseUnits(input.quoteAmountBaseUnits) || BigInt(input.quoteAmountBaseUnits) <= 0n) {
+    throw new Error("PumpSwap instruction quote amount must be a positive u64 base-unit integer.");
+  }
+  let user: PublicKey;
+  try { user = new PublicKey(input.user); }
+  catch { throw new Error("PumpSwap instruction user address is invalid."); }
+  if (user.equals(SystemProgram.programId)) {
+    throw new Error("PumpSwap instruction user must be a non-zero public key.");
+  }
+
+  const context = decodeContext(input.snapshot);
+  if (context.pool.isCashbackCoin) {
+    throw new Error("PumpSwap V2 instructions are unavailable for cashback pools.");
+  }
+  const tokenAmount = new BN(input.tokenAmountBaseUnits);
+  const quoteAmount = new BN(input.quoteAmountBaseUnits);
+  if (input.side === "BUY") {
+    const quote = quotePumpSwapBuyFromSnapshot(input.snapshot, quoteAmount.toString());
+    if (tokenAmount.gt(new BN(quote.outputAmountBaseUnits))) {
+      throw new Error("PumpSwap buy output exceeds the official SDK quote for the supplied quote budget.");
+    }
+  } else {
+    const quote = quotePumpSwapSellFromSnapshot(input.snapshot, tokenAmount.toString());
+    if (quoteAmount.gt(new BN(quote.outputAmountBaseUnits))) {
+      throw new Error("PumpSwap sell minimum exceeds the official SDK net quote.");
+    }
+  }
+
+  if (!supportsTradeV2(context.pool)) {
+    throw new Error("The verified PumpSwap pool does not support the v2 instruction layout.");
+  }
+  const configuredRecipients = context.globalConfig.buybackFeeRecipients ?? [];
+  if (configuredRecipients.length < 1 ||
+      configuredRecipients.some(candidate => !(candidate instanceof PublicKey))) {
+    throw new Error("PumpSwap Global config has no valid buyback fee recipients.");
+  }
+
+  const baseTokenProgram = new PublicKey(requiredAccount(input.snapshot, "baseMint").owner);
+  const quoteTokenProgram = new PublicKey(requiredAccount(input.snapshot, "quoteMint").owner);
+  const marketAccount = requiredAccount(input.snapshot, "market");
+  const swapSolanaState = {
+    globalConfig: context.globalConfig,
+    feeConfig: context.feeConfig,
+    poolKey: new PublicKey(marketAccount.address),
+    poolAccountInfo: accountInfo(marketAccount),
+    pool: context.pool,
+    poolBaseAmount: context.baseReserve,
+    poolQuoteAmount: context.quoteVaultReserve,
+    baseTokenProgram,
+    quoteTokenProgram,
+    baseMint: context.mint,
+    baseMintAccount: context.baseMintAccount,
+    user,
+    userBaseTokenAccount: getAssociatedTokenAddressSync(context.mint, user, false, baseTokenProgram),
+    userQuoteTokenAccount: getAssociatedTokenAddressSync(context.quoteMint, user, false, quoteTokenProgram),
+    userBaseAccountInfo: null,
+    userQuoteAccountInfo: null
+  } satisfies Parameters<typeof PUMP_AMM_SDK.buyV2Instructions>[0];
+  const rawInstructions = input.side === "BUY"
+    ? await PUMP_AMM_SDK.buyV2Instructions(swapSolanaState, tokenAmount, quoteAmount)
+    : await PUMP_AMM_SDK.sellV2Instructions(swapSolanaState, tokenAmount, quoteAmount);
+  if (!Array.isArray(rawInstructions) || rawInstructions.length < 1 ||
+      rawInstructions.length > 16 ||
+      rawInstructions.some(ix => !(ix instanceof TransactionInstruction))) {
+    throw new Error("PumpSwap SDK returned an invalid or unbounded instruction list.");
+  }
+  const requiredAccountAddressesToVerify = [
+    getAssociatedTokenAddressSync(context.mint, user, false, baseTokenProgram).toBase58(),
+    getAssociatedTokenAddressSync(context.quoteMint, user, false, quoteTokenProgram).toBase58(),
+    ...configuredRecipients.map(recipient =>
+      getAssociatedTokenAddressSync(context.quoteMint, recipient, false, quoteTokenProgram).toBase58())
+  ];
+  return {
+    provider: "pump-sdk-4.3.1", venue: "PUMPSWAP", side: input.side,
+    mint: context.mint.toBase58(), user: user.toBase58(),
+    quoteMint: context.quoteMint.toBase58(),
+    baseTokenProgram: baseTokenProgram.toBase58(), quoteTokenProgram: quoteTokenProgram.toBase58(),
+    buybackFeeRecipients: configuredRecipients.map(recipient => recipient.toBase58()),
+    instructions: rawInstructions, requiredAccountAddressesToVerify,
+    slot: input.snapshot.slot, observedAt: input.snapshot.observedAt,
+    executionReady: false, paperEntryAuthorized: false,
+    blockers: [
+      "USER_BASE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED",
+      "USER_QUOTE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED",
+      "BUYBACK_QUOTE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED",
+      "ATA_RENT_AND_VIRTUAL_PAYER_BALANCE_NOT_VERIFIED",
+      "EXACT_UNSIGNED_TRANSACTION_FEE_MESSAGE_NOT_ATTACHED",
+      "PAPER_ENTRY_AUTHORIZATION_NOT_GRANTED"
+    ]
+  };
+}
+
+export interface PumpSwapV2UnsignedInstructionWithFees extends PumpSwapV2UnsignedInstruction {
+  feeEvidence: UnsignedInstructionFeeEvidence;
+}
+
+/** Compose exact PumpSwap instructions with account-lock-specific fee estimation. */
+export async function buildPumpSwapV2UnsignedInstructionsWithFees(input: {
+  snapshot: VerifiedPumpQuoteSnapshot;
+  user: string;
+  side: "BUY" | "SELL";
+  tokenAmountBaseUnits: string;
+  quoteAmountBaseUnits: string;
+  apiKey: string;
+  recentBlockhash: string;
+  computeUnitLimit: number;
+  fetcher?: typeof fetch;
+  nowMs?: number;
+}): Promise<PumpSwapV2UnsignedInstructionWithFees> {
+  const built = await buildPumpSwapV2UnsignedInstructions(input);
+  const feeEvidence = await estimateFeesForUnsignedInstructions({
+    apiKey: input.apiKey,
+    payer: new PublicKey(built.user),
+    recentBlockhash: input.recentBlockhash,
+    instructions: built.instructions,
+    computeUnitLimit: input.computeUnitLimit,
+    ...(input.fetcher ? { fetcher: input.fetcher } : {}),
+    ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs })
+  });
+  const blockers = built.blockers.filter(blocker =>
+    blocker !== "EXACT_UNSIGNED_TRANSACTION_FEE_MESSAGE_NOT_ATTACHED");
+  if (feeEvidence.status !== "AVAILABLE") {
+    blockers.push("EXACT_UNSIGNED_TRANSACTION_FEE_EVIDENCE_UNAVAILABLE");
+  }
+  return { ...built, blockers, feeEvidence, executionReady: false, paperEntryAuthorized: false };
 }

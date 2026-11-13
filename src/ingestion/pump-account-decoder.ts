@@ -22,6 +22,9 @@ export interface RawProgramAccount {
   data: Uint8Array;
   slot: number;
   observedAt: string;
+  /** RPC account metadata used by recipient and rent-state checks. */
+  lamports?: number;
+  executable?: boolean;
 }
 
 export interface DecodedPumpCurveAccount {

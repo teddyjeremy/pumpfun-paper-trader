@@ -38,6 +38,10 @@ export interface PaperPosition {
   buyQuoteId: string;
   entryPriceUsdPerToken: number;
   buyCostsUsd: number;
+  /** Sell-side execution costs reserved from cash until this position exits. */
+  expectedSellCostsUsd: number;
+  /** Refundable simulated SOL rent held while this position's required ATAs exist. */
+  rentReserveUsd: number;
   highWaterPriceUsdPerToken: number;
   latestPriceUsdPerToken: number;
   /** Net liquidation value from the latest exact-size executable sell quote. */
@@ -51,6 +55,8 @@ export interface PaperPosition {
 export interface PaperPortfolioState {
   bankroll: BankrollState;
   availableCashUsd: number;
+  /** Refundable account-rent reserves are locked, not spent or available for new stakes. */
+  reservedAccountRentUsd: number;
   highWaterEquityUsd: number;
   positionSizeUsd: number;
   maxConcurrentPositions: number;
@@ -142,14 +148,16 @@ function applyEquityAndTopUp(state: PaperPortfolioState, equity: number, occurre
     growthEquity({ ...state, bankroll: topped.state }));
   const limits = capacityForEquity(highWaterEquityUsd);
   return {
-    bankroll: topped.state, availableCashUsd: cash, highWaterEquityUsd,
+    bankroll: topped.state, availableCashUsd: cash,
+    reservedAccountRentUsd: state.reservedAccountRentUsd ?? 0,
+    highWaterEquityUsd,
     positionSizeUsd: limits.stake, maxConcurrentPositions: limits.slots
   };
 }
 export function createPaperPortfolio(initialBankrollUsd = PAPER_PORTFOLIO_POLICY.initialBankrollUsd): PaperPortfolioState {
   const bankroll = createBankrollState(initialBankrollUsd);
   return {
-    bankroll, availableCashUsd: round(initialBankrollUsd),
+    bankroll, availableCashUsd: round(initialBankrollUsd), reservedAccountRentUsd: 0,
     highWaterEquityUsd: round(initialBankrollUsd),
     positionSizeUsd: PAPER_PORTFOLIO_POLICY.initialStakeUsd,
     maxConcurrentPositions: 1, positions: [], enteredMints: [], lastMarkedAt: null
@@ -160,14 +168,17 @@ function capacityForEquity(equity: number): { stake: number; slots: number } {
     ? 0
     : 1 + Math.floor(Math.log2(equity / PAPER_PORTFOLIO_POLICY.firstGrowthThresholdUsd));
   return {
-    // Each doubling adds 50% of the original stake: $1 -> $1.50 at $5 -> $2.00 at $10.
-    stake: Math.min(PAPER_PORTFOLIO_POLICY.maxStakeUsd, round(PAPER_PORTFOLIO_POLICY.initialStakeUsd * (1 + 0.5 * levels))),
+    // Compound a 50% stake increase at every equity doubling: $1 -> $1.50 -> $2.25 -> $3.375, capped at $100.
+    stake: Math.min(PAPER_PORTFOLIO_POLICY.maxStakeUsd, round(PAPER_PORTFOLIO_POLICY.initialStakeUsd * Math.pow(1.5, levels))),
     slots: Math.min(100, 1 + levels)
   };
 }
 export function openPaperPosition(state: PaperPortfolioState, input: {
   mint: string; positionId: string; occurredAt: string;
-  buyQuote: ExecutablePaperQuote; sellQuote: ExecutablePaperQuote; nowMs?: number;
+  buyQuote: ExecutablePaperQuote; sellQuote: ExecutablePaperQuote;
+  /** USD value of newly created ATA/volume-accumulator rent, converted from verified lamports. */
+  rentReserveUsd?: number;
+  nowMs?: number;
 }): { state: PaperPortfolioState; position: PaperPosition } {
   const now = input.nowMs ?? Date.now();
   if (!input.mint || !input.positionId || !Number.isFinite(Date.parse(input.occurredAt))) throw new Error("Position identity or timestamp is invalid.");
@@ -176,10 +187,18 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   const existingOpen = currentOpen(state);
   if (existingOpen.length >= state.maxConcurrentPositions) throw new Error("Maximum concurrent paper positions reached.");
   const stake = state.positionSizeUsd;
-  if (state.availableCashUsd < stake) throw new Error("Insufficient available paper cash.");
+  const rentReserveUsd = input.rentReserveUsd ?? 0;
+  if (!Number.isFinite(rentReserveUsd) || rentReserveUsd < 0) {
+    throw new Error("Account rent reserve must be finite and non-negative.");
+  }
+  if (state.availableCashUsd < stake + rentReserveUsd) {
+    throw new Error("Insufficient available paper cash for stake and refundable account rent reserve.");
+  }
   assertQuote(input.buyQuote, now, "BUY", input.mint);
   assertQuote(input.sellQuote, now, "SELL", input.mint);
-  if (Math.abs(input.buyQuote.requestedUsd - stake) > 0.00000001 ||
+  // SOL lamport sizing is discrete: allow at most $0.000001 of rounding
+  // around the configured USD stake while retaining the exact SDK base-unit quote.
+  if (Math.abs(input.buyQuote.requestedUsd - stake) > 0.000001 ||
       input.buyQuote.tokenDecimals !== input.sellQuote.tokenDecimals ||
       BigInt(input.sellQuote.inputAmountBaseUnits) !== BigInt(input.buyQuote.outputAmountBaseUnits)) {
     throw new Error("Quotes must be size-specific for the exact planned stake and resulting token balance.");
@@ -195,6 +214,14 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
     throw new Error("Round-trip execution cost exceeds the paper entry limits.");
   }
   const buyCosts = quoteFeesUsd(input.buyQuote);
+  const expectedSellCosts = quoteFeesUsd(input.sellQuote);
+  // Require the starting paper cash to cover the complete round trip before
+  // opening: stake, both sides' transaction/venue fees, and refundable rent.
+  // Sell fees are later deducted from sell proceeds, not charged twice here.
+  const requiredEntryBudget = stake + buyCosts + expectedSellCosts + rentReserveUsd;
+  if (state.availableCashUsd + 1e-8 < requiredEntryBudget) {
+    throw new Error("Insufficient available paper cash for stake, buy and sell fees, and refundable account rent reserve.");
+  }
   const tokens = BigInt(input.buyQuote.outputAmountBaseUnits);
   const tokenDecimals = input.buyQuote.tokenDecimals;
   const humanTokens = humanTokenAmount(tokens.toString(), tokenDecimals);
@@ -207,28 +234,30 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
     positionId: input.positionId, mint: input.mint, openedAt: input.occurredAt,
     stakeUsd: stake, tokenAmountBaseUnits: tokens.toString(), tokenDecimals, buyQuoteId: input.buyQuote.quoteId,
     entryPriceUsdPerToken: entryPrice, buyCostsUsd: round(buyCosts),
+    expectedSellCostsUsd: round(expectedSellCosts), rentReserveUsd: round(rentReserveUsd),
     highWaterPriceUsdPerToken: initialLiquidationPrice, latestPriceUsdPerToken: initialLiquidationPrice,
     latestLiquidationValueUsd: initialLiquidationValue,
     latestSellQuoteId: input.sellQuote.quoteId, latestSellQuoteAt: input.sellQuote.observedAt,
     realizedPnlUsd: null, status: "OPEN", exitReason: null
   };
-  const availableCashUsd = round(state.availableCashUsd - stake - buyCosts);
-  if (availableCashUsd < 0) throw new Error("Buy fees exceed available paper cash.");
+  const availableCashUsd = round(state.availableCashUsd - stake - buyCosts - expectedSellCosts - rentReserveUsd);
+  if (availableCashUsd < 0) throw new Error("Buy fees and refundable rent reserve exceed available paper cash.");
+  const reservedAccountRentUsd = round((state.reservedAccountRentUsd ?? 0) + rentReserveUsd);
   const positions = [...state.positions, position];
 
   // Existing positions may have stale sell quotes. Do not use a partial
   // portfolio valuation to trigger top-ups or growth-based scaling.
   if (existingOpen.length > 0) {
     return {
-      state: { ...state, availableCashUsd, positions, enteredMints: [...state.enteredMints, input.mint] },
+      state: { ...state, availableCashUsd, reservedAccountRentUsd, positions, enteredMints: [...state.enteredMints, input.mint] },
       position
     };
   }
 
-  const equity = round(availableCashUsd + initialLiquidationValue);
-  const adjusted = applyEquityAndTopUp({ ...state, availableCashUsd }, equity, input.occurredAt);
+  const equity = round(availableCashUsd + reservedAccountRentUsd + expectedSellCosts + initialLiquidationValue);
+  const adjusted = applyEquityAndTopUp({ ...state, availableCashUsd, reservedAccountRentUsd }, equity, input.occurredAt);
   return {
-    state: { ...state, ...adjusted, positions, enteredMints: [...state.enteredMints, input.mint] },
+    state: { ...state, ...adjusted, reservedAccountRentUsd, positions, enteredMints: [...state.enteredMints, input.mint] },
     position
   };
 }
@@ -287,8 +316,8 @@ export function markPaperPosition(state: PaperPortfolioState, input: {
   if (quotesByMint.size !== openByMint.size || [...quotesByMint.keys()].some(mint => !openByMint.has(mint))) {
     throw new Error("Sell quotes include a mint that is not an open position.");
   }
-  const equity = round(state.availableCashUsd + positions.reduce((sum, position) =>
-    sum + (position.status === "CLOSED" ? 0 : position.latestLiquidationValueUsd), 0));
+  const equity = round(state.availableCashUsd + (state.reservedAccountRentUsd ?? 0) + positions.reduce((sum, position) =>
+    sum + (position.status === "CLOSED" ? 0 : position.latestLiquidationValueUsd + (position.expectedSellCostsUsd ?? 0)), 0));
   const adjusted = applyEquityAndTopUp({ ...state, positions }, equity, input.markedAt);
   return { ...state, ...adjusted, positions, lastMarkedAt: input.markedAt };
 }
@@ -321,15 +350,19 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
   };
   const positions = [...state.positions];
   positions[index] = position;
-  const availableCashUsd = round(state.availableCashUsd + netProceeds);
+  const releasedRentReserveUsd = previous.rentReserveUsd ?? 0;
+  const reservedAccountRentUsd = round(Math.max(0, (state.reservedAccountRentUsd ?? 0) - releasedRentReserveUsd));
+  const releasedSellFeeReserveUsd = previous.expectedSellCostsUsd ?? 0;
+  const availableCashUsd = round(state.availableCashUsd + netProceeds + releasedRentReserveUsd + releasedSellFeeReserveUsd);
   const remainingOpen = positions.some(item => item.status !== "CLOSED");
 
   // If other positions remain open, their last quotes may be stale. Defer
   // equity, top-up and scaling changes until the next complete portfolio mark.
   if (remainingOpen) {
-    return { state: { ...state, availableCashUsd, positions }, position };
+    return { state: { ...state, availableCashUsd, reservedAccountRentUsd, positions }, position };
   }
 
-  const adjusted = applyEquityAndTopUp({ ...state, availableCashUsd }, availableCashUsd, input.closedAt);
-  return { state: { ...state, ...adjusted, positions }, position };
+  const equity = round(availableCashUsd + reservedAccountRentUsd);
+  const adjusted = applyEquityAndTopUp({ ...state, availableCashUsd, reservedAccountRentUsd }, equity, input.closedAt);
+  return { state: { ...state, ...adjusted, reservedAccountRentUsd, positions }, position };
 }

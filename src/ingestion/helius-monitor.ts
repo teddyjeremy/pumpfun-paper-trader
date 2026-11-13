@@ -22,6 +22,9 @@ export interface HeliusCandidateSubscription {
   mint: string;
   bondingCurve: string;
   subscribedAt: string | null;
+  lastNotificationAt?: string | null;
+  lastSignature?: string | null;
+  lastSlot?: number | null;
 }
 
 export interface HeliusSignatureWork {
@@ -34,11 +37,23 @@ export interface HeliusSignatureWork {
   retryAfterAt?: string;
 }
 
+export interface HeliusCoverageGap {
+  mint: string;
+  startedAt: string;
+  endedAt: string | null;
+  startSignature: string | null;
+  startSlot: number | null;
+  endSignature: string | null;
+  endSlot: number | null;
+  recoveredAt?: string | null;
+}
+
 export interface HeliusMonitorState {
   subscriptions: HeliusCandidateSubscription[];
   queue: HeliusSignatureWork[];
   seenSignatures: string[];
   incompleteMints: string[];
+  coverageGaps: HeliusCoverageGap[];
   failedTransactions: number;
   droppedSignatures: number;
   duplicateSignatures: number;
@@ -50,7 +65,7 @@ const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
 
 export function emptyHeliusMonitorState(): HeliusMonitorState {
   return {
-    subscriptions: [], queue: [], seenSignatures: [], incompleteMints: [],
+    subscriptions: [], queue: [], seenSignatures: [], incompleteMints: [], coverageGaps: [],
     failedTransactions: 0, droppedSignatures: 0, duplicateSignatures: 0,
     nextRequestId: 1
   };
@@ -65,7 +80,8 @@ export function normalizeHeliusMonitorState(value?: Partial<HeliusMonitorState> 
     subscriptions: Array.isArray(value.subscriptions) ? value.subscriptions.slice(0, MAX_HELIUS_CANDIDATES) : [],
     queue: Array.isArray(value.queue) ? value.queue.slice(0, MAX_HELIUS_SIGNATURE_QUEUE) : [],
     seenSignatures: Array.isArray(value.seenSignatures) ? value.seenSignatures.slice(-MAX_HELIUS_SEEN_SIGNATURES) : [],
-    incompleteMints: Array.isArray(value.incompleteMints) ? [...new Set(value.incompleteMints)].slice(-MAX_HELIUS_CANDIDATES) : []
+    incompleteMints: Array.isArray(value.incompleteMints) ? [...new Set(value.incompleteMints)].slice(-MAX_HELIUS_CANDIDATES) : [],
+    coverageGaps: Array.isArray(value.coverageGaps) ? value.coverageGaps.slice(-100) : []
   };
 }
 
@@ -149,6 +165,92 @@ export function reconcileHeliusSubscriptions(
   return { ...state, subscriptions };
 }
 
+
+/**
+ * Record a durable per-mint interruption interval. The beginning is
+ * conservative: use the last known subscription start when available, so a
+ * silent half-open socket cannot make the uncovered interval look shorter.
+ */
+export function recordHeliusCoverageGap(
+  state: HeliusMonitorState,
+  mint: string,
+  now = new Date().toISOString()
+): HeliusMonitorState {
+  if (!ADDRESS.test(mint) || !Number.isFinite(Date.parse(now))) return state;
+  if (state.coverageGaps.some(gap => gap.mint === mint && gap.endedAt === null)) return state;
+  const subscription = state.subscriptions.find(item => item.mint === mint);
+  const subscribedAt = subscription?.subscribedAt;
+  const startedAt = subscribedAt && Number.isFinite(Date.parse(subscribedAt)) &&
+    Date.parse(subscribedAt) <= Date.parse(now) ? subscribedAt : now;
+  return {
+    ...state,
+    incompleteMints: [...new Set([...state.incompleteMints, mint])].slice(-MAX_HELIUS_CANDIDATES),
+    coverageGaps: [...state.coverageGaps, {
+      mint, startedAt, endedAt: null,
+      startSignature: subscription?.lastSignature ?? null,
+      startSlot: subscription?.lastSlot ?? null,
+      endSignature: null, endSlot: null, recoveredAt: null
+    }].slice(-100)
+  };
+}
+
+/** Close an interruption interval when a new subscription is acknowledged. */
+export function closeHeliusCoverageGap(
+  state: HeliusMonitorState,
+  mint: string,
+  now = new Date().toISOString()
+): HeliusMonitorState {
+  if (!ADDRESS.test(mint) || !Number.isFinite(Date.parse(now))) return state;
+  let closed = false;
+  const coverageGaps = state.coverageGaps.map(gap => {
+    if (gap.mint !== mint || gap.endedAt !== null || closed) return gap;
+    closed = true;
+    return { ...gap, endedAt: now };
+  });
+  return { ...state, coverageGaps };
+}
+
+
+/**
+ * Preserve the signature immediately before and after an interruption. These
+ * anchors let a later address-history scan prove that it traversed the entire
+ * interval; timestamps alone are not sufficient pagination boundaries.
+ */
+export function recordHeliusNotificationBoundary(
+  state: HeliusMonitorState,
+  subscriptionId: number,
+  signature: string,
+  slot: number,
+  now = new Date().toISOString()
+): HeliusMonitorState {
+  if (!Number.isSafeInteger(subscriptionId) || !SIGNATURE.test(signature) ||
+      !Number.isSafeInteger(slot) || slot < 0 || !Number.isFinite(Date.parse(now))) return state;
+  const subscription = state.subscriptions.find(item => item.subscriptionId === subscriptionId);
+  if (!subscription) return state;
+  // Anchor only the gap closed by this subscription acknowledgement. If a
+  // reconnect ended without any notification before another interruption,
+  // the earlier gap must remain unanchored rather than borrowing a later event.
+  let targetGapIndex = -1;
+  for (let index = state.coverageGaps.length - 1; index >= 0; index -= 1) {
+    const gap = state.coverageGaps[index]!;
+    if (gap.mint === subscription.mint && gap.endedAt !== null &&
+        gap.endedAt === subscription.subscribedAt && gap.endSignature === null) {
+      targetGapIndex = index;
+      break;
+    }
+  }
+  const coverageGaps = state.coverageGaps.map((gap, index) =>
+    index === targetGapIndex ? { ...gap, endSignature: signature, endSlot: slot } : gap
+  );
+  return {
+    ...state,
+    coverageGaps,
+    subscriptions: state.subscriptions.map(item => item.subscriptionId === subscriptionId
+      ? { ...item, lastNotificationAt: now, lastSignature: signature, lastSlot: slot }
+      : item)
+  };
+}
+
 export function confirmHeliusSubscription(
   state: HeliusMonitorState,
   requestId: number,
@@ -158,15 +260,49 @@ export function confirmHeliusSubscription(
   if (!Number.isSafeInteger(subscriptionId) || subscriptionId < 0) return state;
   const confirmed = state.subscriptions.find(item => item.requestId === requestId);
   if (!confirmed) return state;
-  return {
+  const mint = confirmed.mint;
+  const withSubscription = {
     ...state,
-    // A new acknowledged subscription establishes a fresh coverage boundary.
-    // Old windows remain excluded by subscribedAt; new complete windows may
-    // become usable without permanently poisoning this mint after a reconnect.
-    incompleteMints: state.incompleteMints.filter(mint => mint !== confirmed.mint),
+    // Acknowledging a new subscription restores future delivery only.
+    // The closed interval remains incomplete until independent backfill proves it.
     subscriptions: state.subscriptions.map(item => item.requestId === requestId
       ? { ...item, subscriptionId, subscribedAt: now }
       : item)
+  };
+  return closeHeliusCoverageGap(withSubscription, mint, now);
+}
+
+/**
+ * Clear a mint's incomplete flag only after the anchored interval proof succeeds.
+ * A reconnect acknowledgement is deliberately not sufficient.
+ */
+export function markHeliusCoverageGapRecovered(
+  state: HeliusMonitorState,
+  mint: string,
+  startedAt: string,
+  proof: { recovered: true; recoveredSignatures: number },
+  now = new Date().toISOString()
+): HeliusMonitorState {
+  if (!ADDRESS.test(mint) || !Number.isFinite(Date.parse(startedAt)) ||
+      !Number.isFinite(Date.parse(now)) || !proof.recovered ||
+      !Number.isSafeInteger(proof.recoveredSignatures) || proof.recoveredSignatures < 2) return state;
+  let matched = false;
+  const coverageGaps = state.coverageGaps.map(gap => {
+    if (gap.mint !== mint || gap.startedAt !== startedAt || !gap.endedAt ||
+        gap.recoveredAt || matched) return gap;
+    matched = true;
+    return { ...gap, recoveredAt: now };
+  });
+  if (!matched) return state;
+  const hasUnrecoveredGap = coverageGaps.some(gap =>
+    gap.mint === mint && (!gap.endedAt || !gap.recoveredAt)
+  );
+  return {
+    ...state,
+    coverageGaps,
+    incompleteMints: hasUnrecoveredGap
+      ? state.incompleteMints
+      : state.incompleteMints.filter(value => value !== mint)
   };
 }
 

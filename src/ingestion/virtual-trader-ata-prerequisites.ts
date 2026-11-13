@@ -12,7 +12,7 @@ import type { NonSigningVirtualTraderIdentity } from "./virtual-trader-identity.
 const MAX_SNAPSHOT_AGE_MS = 2_000;
 
 export interface VirtualTraderAtaRequirement {
-  role: "base" | "quote";
+  role: "base" | "quote" | "buyback";
   address: string;
   mint: string;
   tokenProgram: string;
@@ -32,7 +32,8 @@ export interface VirtualTraderAtaPrerequisites {
 }
 
 interface AtaSpec {
-  role: "base" | "quote";
+  role: "base" | "quote" | "buyback";
+  owner: PublicKey;
   mint: PublicKey;
   tokenProgram: PublicKey;
 }
@@ -93,12 +94,14 @@ export async function inspectVirtualTraderAtaPrerequisites(input: {
   baseTokenProgram: string;
   quoteMint?: string | null;
   quoteTokenProgram?: string;
+  additionalRequirements?: readonly { role: "buyback"; owner: string; mint: string; tokenProgram: string }[];
   config: HeliusAccountReadConfig;
 }): Promise<VirtualTraderAtaPrerequisites> {
   const owner = assertIdentity(input.identity);
   const payer = input.payer ? new PublicKey(input.payer) : owner;
   const specs: AtaSpec[] = [{
     role: "base",
+    owner,
     mint: new PublicKey(input.baseMint),
     tokenProgram: new PublicKey(input.baseTokenProgram)
   }];
@@ -107,16 +110,28 @@ export async function inspectVirtualTraderAtaPrerequisites(input: {
     if (!input.quoteTokenProgram) throw new Error("A quote token program is required when quoteMint is supplied.");
     const quoteSpec: AtaSpec = {
       role: "quote",
+      owner,
       mint: new PublicKey(input.quoteMint),
       tokenProgram: new PublicKey(input.quoteTokenProgram)
     };
     assertTokenProgram(quoteSpec.tokenProgram);
     specs.push(quoteSpec);
   }
+  for (const requirement of input.additionalRequirements ?? []) {
+    const additional: AtaSpec = {
+      role: "buyback", owner: new PublicKey(requirement.owner),
+      mint: new PublicKey(requirement.mint), tokenProgram: new PublicKey(requirement.tokenProgram)
+    };
+    assertTokenProgram(additional.tokenProgram);
+    if (!PublicKey.isOnCurve(additional.owner.toBytes())) {
+      throw new Error("Buyback ATA owner must be an on-curve public key.");
+    }
+    specs.push(additional);
+  }
 
   const derived = specs.map(spec => ({
     ...spec,
-    address: getAssociatedTokenAddressSync(spec.mint, owner, false, spec.tokenProgram)
+    address: getAssociatedTokenAddressSync(spec.mint, spec.owner, false, spec.tokenProgram)
   }));
   if (new Set(derived.map(item => item.address.toBase58())).size !== derived.length) {
     throw new Error("Virtual trader ATA requirements must resolve to unique addresses.");
@@ -144,7 +159,7 @@ export async function inspectVirtualTraderAtaPrerequisites(input: {
         account,
         expectedAddress: requirement.address,
         expectedMint: requirement.mint,
-        expectedOwner: owner,
+        expectedOwner: requirement.owner,
         expectedTokenProgram: requirement.tokenProgram,
         slot: snapshot.slot,
         observedAt: snapshot.observedAt
@@ -158,7 +173,7 @@ export async function inspectVirtualTraderAtaPrerequisites(input: {
       });
     } else {
       createInstructions.push(createAssociatedTokenAccountIdempotentInstruction(
-        payer, requirement.address, owner, requirement.mint, requirement.tokenProgram
+        payer, requirement.address, requirement.owner, requirement.mint, requirement.tokenProgram
       ));
       verifiedRequirements.push({
         role: requirement.role,

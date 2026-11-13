@@ -15,9 +15,12 @@ export interface HistoricalReplayCoinInput {
   /** Historical second at which complete relevant-wallet history/linkage coverage was independently verified. Recent-20 signature samples do not qualify. */
   walletClusterEvidenceCompleteAt?: number;
   /** Coverage class for wallet-link evidence; RECENT_SIGNATURE_SAMPLE_ONLY is reject-only, never a clearance. */
-  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
+  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "FULL_SOL_TRANSFER_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
   /** Historical second at which a genuinely complete holder census was independently verified. Top-20 snapshots do not qualify. */
   holderCensusCompleteAt?: number;
+  /** Timestamped completeness transitions; latest evidence at or before evaluation wins. */
+  walletClusterEvidenceTimeline?: readonly { observedAt: number; complete: boolean }[];
+  holderCensusEvidenceTimeline?: readonly { observedAt: number; complete: boolean }[];
   /** Historical second when every non-risk entry gate (signal freshness, liquidity/MC, executable quote/cost and capacity) was verified. */
   entryEvidenceCompleteAt?: number;
   /** Historical second when the dynamic exit lifecycle completed with a fresh full-size sell quote and zero-balance confirmation. */
@@ -92,11 +95,23 @@ export interface HistoricalCoinReplay {
   status: "COMPLETE" | "INCOMPLETE" | "NO_SETUP" | "NO_FORWARD_ENTRY" | "RISK_NOT_CLEARED" | "ENTRY_EVIDENCE_INCOMPLETE" | "EXIT_EVIDENCE_INCOMPLETE";
 }
 
+export interface CalibrationPartitionMetrics {
+  samples: number;
+  precision: number | null;
+  recall: number | null;
+  f1: number | null;
+  accepted: number;
+  winRate: number | null;
+  expectancyNetPct: number | null;
+  profitFactor: number | null;
+  maxDrawdownPct: number | null;
+}
+
 export interface VolumeThresholdCandidate {
   maxPullbackVolumeVsImpulsePct: number;
   minReclaimVolumeVsPullbackPct: number;
-  training: { samples: number; precision: number | null; recall: number | null; f1: number | null; accepted: number };
-  holdout: { samples: number; precision: number | null; recall: number | null; f1: number | null; accepted: number };
+  training: CalibrationPartitionMetrics;
+  holdout: CalibrationPartitionMetrics;
 }
 
 export interface VolumeThresholdCalibration {
@@ -170,18 +185,32 @@ export function hasCompleteHistoricalEntryEvidence(input: {
 export function classifyHistoricalWalletClusterRisk(input: {
   walletRisk: ReturnType<typeof evaluateWalletClusterRisk> | null;
   walletClusterEvidenceCompleteAt?: number;
-  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
+  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "FULL_SOL_TRANSFER_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
   holderCensusCompleteAt?: number;
+  walletClusterEvidenceTimeline?: readonly { observedAt: number; complete: boolean }[];
+  holderCensusEvidenceTimeline?: readonly { observedAt: number; complete: boolean }[];
   evaluatedAt: number;
 }): "PASS_COMPLETE" | "REJECT_OBSERVED" | "UNKNOWN" {
   if (input.walletRisk?.status === "REJECT_OBSERVED") return "REJECT_OBSERVED";
-  const walletCoverageComplete = input.walletClusterEvidenceCoverage === "FULL_WALLET_HISTORY" &&
-    Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) &&
-    input.walletClusterEvidenceCompleteAt! >= 0 &&
-    input.walletClusterEvidenceCompleteAt! <= input.evaluatedAt;
-  const holderCoverageComplete = Number.isSafeInteger(input.holderCensusCompleteAt) &&
-    input.holderCensusCompleteAt! >= 0 &&
-    input.holderCensusCompleteAt! <= input.evaluatedAt;
+  const latestAt = (timeline: readonly { observedAt: number; complete: boolean }[] | undefined) =>
+    [...(timeline ?? [])]
+      .filter(item => Number.isSafeInteger(item.observedAt) && item.observedAt >= 0 &&
+        item.observedAt <= input.evaluatedAt)
+      .sort((a, b) => a.observedAt - b.observedAt)
+      .at(-1);
+  const latestWalletEvidence = latestAt(input.walletClusterEvidenceTimeline);
+  const latestHolderEvidence = latestAt(input.holderCensusEvidenceTimeline);
+  const walletCoverageComplete = latestWalletEvidence
+    ? latestWalletEvidence.complete
+    : input.walletClusterEvidenceCoverage === "FULL_WALLET_HISTORY" &&
+      Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) &&
+      input.walletClusterEvidenceCompleteAt! >= 0 &&
+      input.walletClusterEvidenceCompleteAt! <= input.evaluatedAt;
+  const holderCoverageComplete = latestHolderEvidence
+    ? latestHolderEvidence.complete
+    : Number.isSafeInteger(input.holderCensusCompleteAt) &&
+      input.holderCensusCompleteAt! >= 0 &&
+      input.holderCensusCompleteAt! <= input.evaluatedAt;
   if (walletCoverageComplete && holderCoverageComplete && input.walletRisk !== null &&
       input.walletRisk.attributionStatus !== "INVALID_EVIDENCE") return "PASS_COMPLETE";
   return "UNKNOWN";
@@ -344,6 +373,12 @@ export function replayHistoricalCoin(
         ...(input.holderCensusCompleteAt === undefined ? {} : {
           holderCensusCompleteAt: input.holderCensusCompleteAt
         }),
+        ...(input.walletClusterEvidenceTimeline === undefined ? {} : {
+          walletClusterEvidenceTimeline: input.walletClusterEvidenceTimeline
+        }),
+        ...(input.holderCensusEvidenceTimeline === undefined ? {} : {
+          holderCensusEvidenceTimeline: input.holderCensusEvidenceTimeline
+        }),
         evaluatedAt
       });
       const setupEligible = input.decodeComplete && profile.dataComplete &&
@@ -476,7 +511,7 @@ function scoreThreshold(
   coins: readonly HistoricalCoinReplay[],
   maxPullback: number,
   minReclaim: number
-): VolumeThresholdCandidate["training"] {
+): CalibrationPartitionMetrics {
   const accepted = coins.filter(coin => coin.firstSetup &&
     coin.firstSetup.pullbackVolumeVsImpulsePct !== null &&
     coin.firstSetup.reclaimVolumeVsPullbackPct !== null &&
@@ -489,7 +524,30 @@ function scoreThreshold(
   const recall = tp + fn > 0 ? tp / (tp + fn) : null;
   const f1 = precision !== null && recall !== null && precision + recall > 0
     ? 2 * precision * recall / (precision + recall) : null;
-  return { samples: coins.length, precision, recall, f1, accepted: accepted.length };
+  const returns = accepted
+    .map(coin => coin.outcome?.netFinalReturnPct)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const grossWins = returns.filter(value => value > 0).reduce((sum, value) => sum + value, 0);
+  const grossLosses = Math.abs(returns.filter(value => value < 0).reduce((sum, value) => sum + value, 0));
+  const orderedReturns = accepted
+    .filter(coin => typeof coin.outcome?.netFinalReturnPct === "number")
+    .sort((a, b) => a.launchBlockTime - b.launchBlockTime)
+    .map(coin => coin.outcome!.netFinalReturnPct!);
+  let equity = 1;
+  let peak = 1;
+  let maxDrawdownPct = 0;
+  for (const value of orderedReturns) {
+    equity *= Math.max(0, 1 + value / 100);
+    peak = Math.max(peak, equity);
+    if (peak > 0) maxDrawdownPct = Math.max(maxDrawdownPct, (1 - equity / peak) * 100);
+  }
+  return {
+    samples: coins.length, precision, recall, f1, accepted: accepted.length,
+    winRate: returns.length > 0 ? returns.filter(value => value > 0).length / returns.length : null,
+    expectancyNetPct: returns.length > 0 ? returns.reduce((sum, value) => sum + value, 0) / returns.length : null,
+    profitFactor: grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? null : 0,
+    maxDrawdownPct: returns.length > 0 ? maxDrawdownPct : null
+  };
 }
 
 /**
@@ -541,7 +599,8 @@ export function splitChronologicalCalibrationCoins<T extends { launchBlockTime: 
 export function calibrateVolumeThresholds(
   replays: readonly HistoricalCoinReplay[]
 ): VolumeThresholdCalibration {
-  const labeled = replays.filter(coin => coin.outcome !== null && coin.outcome.label !== "UNKNOWN" &&
+  const labeled = replays.filter(coin => coin.status === "COMPLETE" &&
+    coin.decodeComplete === true && coin.outcome !== null && coin.outcome.label !== "UNKNOWN" &&
     coin.firstSetup !== null &&
     coin.firstSetup.pullbackVolumeVsImpulsePct !== null &&
     coin.firstSetup.reclaimVolumeVsPullbackPct !== null);
@@ -582,13 +641,15 @@ export function calibrateVolumeThresholds(
   );
   const best = candidates[0] ?? null;
   const generalizes = Boolean(best && best.training.accepted >= 5 && best.holdout.accepted >= 2 &&
-    (best.holdout.f1 ?? 0) >= 0.5 && (best.holdout.precision ?? 0) >= 0.5);
+    (best.holdout.f1 ?? 0) >= 0.5 && (best.holdout.precision ?? 0) >= 0.5 &&
+    (best.holdout.expectancyNetPct ?? Number.NEGATIVE_INFINITY) > 0 &&
+    (best.holdout.profitFactor === null ? best.holdout.winRate === 1 : best.holdout.profitFactor > 1));
   return {
     status: generalizes ? "CALIBRATION_CANDIDATE" : "NO_GENERALIZATION",
     labeledCoins: labeled.length, trainingCoins: training.length, holdoutCoins: holdout.length,
     positiveCoins, negativeCoins, recommended: generalizes ? best : null, candidates,
     note: generalizes
-      ? "Candidate thresholds are selected on earlier launches and must be reviewed against holdout performance; they remain paper-only."
+      ? "Candidate thresholds are selected on earlier launches and pass chronological holdout precision/F1, positive net expectancy, and profit-factor checks. Review sample size and drawdown before any paper-only promotion."
       : "The best training thresholds did not meet minimum holdout performance. Do not promote them into the entry rules."
   };
 }

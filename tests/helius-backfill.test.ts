@@ -9,7 +9,8 @@ import {
   applyAddressSignaturesPage,
   buildAddressSignaturesRequest,
   createHistoricalBackfillState,
-  fetchHeliusAddressSignaturesPage
+  fetchHeliusAddressSignaturesPage,
+  type HistoricalBackfillState
 } from "../src/ingestion/helius-backfill.js";
 
 const address = "So11111111111111111111111111111111111111112";
@@ -70,11 +71,75 @@ describe("bounded Helius historical backfill", () => {
     });
     const result = applyAddressSignaturesPage(initial, [
       { signature: newer, slot: 12, blockTime: 1060, err: null },
-      { signature: create, slot: 10, blockTime: 1000, err: null }
+      { signature: create, slot: 10, blockTime: 1000, err: null },
+      { signature: older, slot: 9, blockTime: null, err: null }
     ]);
     expect(result.status).toBe("COMPLETE");
     expect(result.state.status).toBe("COMPLETE");
+    expect(result.state.lastPageSlot).toBe(10);
+    expect(result.state.lastPageBlockTime).toBe(1000);
     expect(result.signaturesToFetch.map(item => item.signature)).toEqual([newer, create]);
+  });
+
+  it("rejects pagination pages that repeat or move newer than the prior cursor", () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const first = applyAddressSignaturesPage(initial, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null }
+    ]);
+    expect(first.status).toBe("CONTINUE");
+    if (first.status !== "CONTINUE") return;
+    const repeated = applyAddressSignaturesPage(first.state, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null },
+      { signature: older, slot: 11, blockTime: 1050, err: null }
+    ]);
+    const outOfOrder = applyAddressSignaturesPage(first.state, [
+      { signature: "8".repeat(64), slot: 13, blockTime: 1070, err: null }
+    ]);
+    expect(repeated.status).toBe("INCOMPLETE");
+    expect(repeated.state.reason).toMatch(/preceding pagination page/i);
+    expect(outOfOrder.status).toBe("INCOMPLETE");
+    expect(outOfOrder.state.reason).toMatch(/pagination moved backwards/i);
+  });
+
+  it("fails closed when a resumed legacy scan lacks its prior-page boundary", () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const first = applyAddressSignaturesPage(initial, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null }
+    ]);
+    expect(first.status).toBe("CONTINUE");
+    if (first.status !== "CONTINUE") return;
+    const legacyState = {
+      ...first.state,
+      lastPageSlot: undefined,
+      lastPageBlockTime: undefined
+    } as unknown as HistoricalBackfillState;
+    const resumed = applyAddressSignaturesPage(legacyState, [
+      { signature: older, slot: 11, blockTime: 1050, err: null }
+    ]);
+    expect(resumed.status).toBe("INCOMPLETE");
+    expect(resumed.state.reason).toMatch(/missing the preceding page boundary/i);
+  });
+
+  it("rejects duplicate or out-of-order address-history records", () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const duplicate = applyAddressSignaturesPage(initial, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null },
+      { signature: newer, slot: 12, blockTime: 1060, err: null }
+    ]);
+    const outOfOrder = applyAddressSignaturesPage(initial, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null },
+      { signature: older, slot: 13, blockTime: 1061, err: null }
+    ]);
+    expect(duplicate.status).toBe("INCOMPLETE");
+    expect(duplicate.state.reason).toMatch(/duplicate/i);
+    expect(outOfOrder.status).toBe("INCOMPLETE");
+    expect(outOfOrder.state.reason).toMatch(/ordered newest-to-oldest/i);
   });
 
   it("continues pagination when the create signature is not in the page", () => {

@@ -25,6 +25,8 @@ export interface HistoricalBackfillState {
   pagesScanned: number;
   scannedCount: number;
   before: string | null;
+  lastPageSlot: number | null;
+  lastPageBlockTime: number | null;
   status: BackfillStatus;
   reason: string | null;
 }
@@ -69,6 +71,8 @@ export function createHistoricalBackfillState(input: {
     pagesScanned: 0,
     scannedCount: 0,
     before: null,
+    lastPageSlot: null,
+    lastPageBlockTime: null,
     status: input.launchBlockTime === null ? "INCOMPLETE" : "PENDING",
     reason: input.launchBlockTime === null ? "Verified launch block time is unavailable." : null
   };
@@ -152,6 +156,33 @@ export function applyAddressSignaturesPage(
     return incomplete("The create signature was not found before the address history ended.");
   }
 
+  if (new Set(parsed.map(item => item.signature)).size !== parsed.length) {
+    return incomplete("Helius returned duplicate signatures within an address-history page.");
+  }
+  for (let index = 1; index < parsed.length; index += 1) {
+    const newer = parsed[index - 1]!;
+    const older = parsed[index]!;
+    if (older.slot > newer.slot ||
+        (newer.blockTime !== null && older.blockTime !== null && older.blockTime > newer.blockTime)) {
+      return incomplete("Helius address-history page is not ordered newest-to-oldest.");
+    }
+  }
+
+  if (current.before !== null && parsed.some(item => item.signature === current.before)) {
+    return incomplete("Helius repeated a signature from the preceding pagination page.");
+  }
+  if (current.pagesScanned > 0 &&
+      (!Number.isSafeInteger(current.lastPageSlot) ||
+        !Number.isSafeInteger(current.lastPageBlockTime))) {
+    return incomplete("Persisted pagination state is missing the preceding page boundary.");
+  }
+  const firstOnPage = parsed[0]!;
+  if ((current.lastPageSlot !== null && firstOnPage.slot > current.lastPageSlot) ||
+      (current.lastPageBlockTime !== null && firstOnPage.blockTime !== null &&
+        firstOnPage.blockTime > current.lastPageBlockTime)) {
+    return incomplete("Helius address-history pagination moved backwards in page order.");
+  }
+
   const launchTime = current.launchBlockTime;
   if (launchTime === null) return incomplete("Verified launch block time is unavailable.");
   const endTime = launchTime + current.horizonSeconds;
@@ -201,6 +232,8 @@ export function applyAddressSignaturesPage(
       pagesScanned: current.pagesScanned + 1,
       scannedCount,
       before: null,
+      lastPageSlot: parsed[processedCount - 1]!.slot,
+      lastPageBlockTime: parsed[processedCount - 1]!.blockTime,
       status: "READY_TO_FETCH",
       reason: null
     };
@@ -217,6 +250,8 @@ export function applyAddressSignaturesPage(
     pagesScanned: current.pagesScanned + 1,
     scannedCount,
     before: last.signature,
+    lastPageSlot: last.slot,
+    lastPageBlockTime: last.blockTime,
     status: "PAGING",
     reason: null
   };

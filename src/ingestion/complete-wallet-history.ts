@@ -28,6 +28,8 @@ export interface CompleteWalletFundingEvidenceResult {
 
 export interface CompleteWalletFundingEvidenceConfig {
   apiKey: string;
+  /** Caller must prove the supplied buyer set came from complete verified trade coverage. */
+  walletSetVerifiedComplete: boolean;
   fetcher?: typeof fetch;
 }
 
@@ -49,25 +51,26 @@ export async function collectCompleteWalletFundingEvidence(
 ): Promise<CompleteWalletFundingEvidenceResult> {
   const warnings: string[] = [];
   const uniqueWallets = [...new Set(wallets.filter(wallet => ADDRESS.test(wallet)))];
-  const walletSetComplete = uniqueWallets.length <= WALLET_HISTORY_MAX_WALLETS &&
-    uniqueWallets.length === wallets.length;
+  const walletSetComplete = config.walletSetVerifiedComplete === true &&
+    uniqueWallets.length <= WALLET_HISTORY_MAX_WALLETS && uniqueWallets.length === wallets.length;
   if (!ADDRESS.test(mint) || uniqueWallets.length < 2) {
     return result(mint, "DATA_INCOMPLETE", false, walletSetComplete, uniqueWallets.length, 0, 0, 0,
       ["A valid mint and at least two unique wallets are required."]);
   }
   if (!walletSetComplete) {
-    warnings.push("The supplied wallet set exceeds the bounded sixteen-wallet collection limit or contains invalid/duplicate wallet entries.");
-    return result(mint, "DATA_INCOMPLETE", false, false, uniqueWallets.length, 0, 0, 0, warnings, [], uniqueWallets);
+    warnings.push("The buyer set is not independently complete, exceeds the bounded sixteen-wallet limit, or contains invalid/duplicate wallet entries; only the first sixteen wallets are scanned for positive risk evidence.");
   }
 
+  const selectedWallets = uniqueWallets.slice(0, WALLET_HISTORY_MAX_WALLETS);
   const fetcher = config.fetcher ?? fetch;
   const url = buildHeliusRpcUrl(config.apiKey);
   const funderCounts = new Map<string, Map<string, { signatures: Set<string>; timestamps: number[] }>>();
   let transfersChecked = 0;
   let pagesScanned = 0;
-  let incomplete = false;
+  let incomplete = !walletSetComplete;
+  const walletsCovered = new Set<string>();
 
-  for (const wallet of uniqueWallets) {
+  for (const wallet of selectedWallets) {
     const counts = new Map<string, { signatures: Set<string>; timestamps: number[] }>();
     const seenCursors = new Set<string>();
     const seenSignatures = new Set<string>();
@@ -143,6 +146,7 @@ export async function collectCompleteWalletFundingEvidence(
     }
 
     if (!walletComplete) incomplete = true;
+    else walletsCovered.add(wallet);
     if (seenSignatures.size === 0) {
       warnings.push(`No incoming SOL transfers were found for wallet ${wallet}; the provider reported no remaining pages.`);
     }
@@ -152,7 +156,7 @@ export async function collectCompleteWalletFundingEvidence(
   const walletByFunder = new Map<string, Array<{ wallet: string; timestamps: number[] }>>();
   for (const [wallet, counts] of funderCounts) {
     for (const [funder, evidence] of counts) {
-      if (evidence.signatures.size < 2 || evidence.timestamps.length < 2) continue;
+      if (evidence.signatures.size < 1 || evidence.timestamps.length < 1) continue;
       const sorted = [...evidence.timestamps].sort((a, b) => a - b);
       if (sorted[sorted.length - 1]! - sorted[0]! > 60) continue;
       const recipients = walletByFunder.get(funder) ?? [];
@@ -185,7 +189,7 @@ export async function collectCompleteWalletFundingEvidence(
   if (links.length === 0) warnings.push("No repeated common SOL-funder relationship was observed in the completely collected transfer histories.");
   const complete = !incomplete && walletSetComplete;
   return result(mint, complete ? "OBSERVED" : "DATA_INCOMPLETE", complete, walletSetComplete,
-    uniqueWallets.length, uniqueWallets.length, transfersChecked, pagesScanned, warnings, links, uniqueWallets, complete ? uniqueWallets : []);
+    uniqueWallets.length, selectedWallets.length, transfersChecked, pagesScanned, warnings, links, uniqueWallets, [...walletsCovered]);
 }
 
 async function rpc(

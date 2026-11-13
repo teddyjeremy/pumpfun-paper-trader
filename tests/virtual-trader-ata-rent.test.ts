@@ -51,15 +51,16 @@ describe("virtual trader ATA rent accounting", () => {
         ...base,
         requirements: [
           { role: "base", address: "base", mint: "mint-a", tokenProgram: TOKEN_PROGRAM_ID.toBase58(), state: "MISSING_CREATE_REQUIRED" },
-          { role: "quote", address: "quote", mint: "mint-b", tokenProgram: TOKEN_PROGRAM_ID.toBase58(), state: "MISSING_CREATE_REQUIRED" }
+          { role: "quote", address: "quote", mint: "mint-b", tokenProgram: TOKEN_PROGRAM_ID.toBase58(), state: "MISSING_CREATE_REQUIRED" },
+          { role: "buyback", address: "buyback", mint: "mint-c", tokenProgram: TOKEN_PROGRAM_ID.toBase58(), state: "MISSING_CREATE_REQUIRED" }
         ]
       },
       config: { apiKey: "test-key", now: () => Date.parse("2026-11-13T00:00:00.000Z"), fetcher: rentFetcher(2_039_280, calls) }
     });
 
     expect(calls).toHaveLength(1);
-    expect(result.items.map(item => item.minimumRentLamports)).toEqual([2_039_280, 2_039_280]);
-    expect(result.newAtaRentReserveLamports).toBe(4_078_560);
+    expect(result.items.map(item => item.minimumRentLamports)).toEqual([2_039_280, 2_039_280, 2_039_280]);
+    expect(result.newAtaRentReserveLamports).toBe(6_117_840);
     expect(result.allNewAtaRentKnown).toBe(true);
     expect(result.paperRentCanBeReservedInPortfolio).toBe(true);
     expect(result.simulatedPayerBalanceChecked).toBe(false);

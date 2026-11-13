@@ -636,6 +636,8 @@ export interface HeliusBackfillArchiveInput {
     pagesScanned: number;
     scannedCount: number;
     before: string | null;
+    lastPageSlot: number | null;
+    lastPageBlockTime: number | null;
     status: "PENDING" | "PAGING" | "READY_TO_FETCH" | "COMPLETE" | "INCOMPLETE";
     reason: string | null;
   };
@@ -669,6 +671,9 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
       !Number.isSafeInteger(state.scannedCount) || state.scannedCount < 0 ||
       !Array.isArray(state.signatures) || state.signatures.length > state.maxSignatures ||
       (state.before !== null && !signaturePattern.test(state.before)) ||
+      (state.pagesScanned === 0 && (state.lastPageSlot !== null || state.lastPageBlockTime !== null)) ||
+      (state.pagesScanned > 0 && (!Number.isSafeInteger(state.lastPageSlot) ||
+        !Number.isSafeInteger(state.lastPageBlockTime))) ||
       (state.status === "COMPLETE" && !state.signatures.some(item => item.signature === state.createSignature)) ||
       !["PENDING","PAGING","READY_TO_FETCH","COMPLETE","INCOMPLETE"].includes(state.status)) {
     throw new Error("Historical backfill archive contains invalid identity or progress fields.");
@@ -714,19 +719,24 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
     const checkpoint = await client.query(
       `INSERT INTO helius_backfill_jobs
         (session_id,mint,bonding_curve,create_signature,launch_block_time,horizon_seconds,max_signatures,
-         pages_scanned,scanned_count,before_signature,status,reason,signature_count,signature_state,
+         pages_scanned,scanned_count,before_signature,last_page_slot,last_page_block_time,
+         window_end_block_time,scan_provider,scan_commitment,status,reason,signature_count,signature_state,
          decoded_complete,decoded_reason,verified_transaction_count,decoded_at,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,
-         CASE WHEN $15 THEN now() ELSE NULL END,now())
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'helius','confirmed',$14,$15,$16,$17::jsonb,$18,$19,$20,
+         CASE WHEN $18 THEN now() ELSE NULL END,now())
        ON CONFLICT (session_id,mint) DO UPDATE SET
          pages_scanned=EXCLUDED.pages_scanned,scanned_count=EXCLUDED.scanned_count,
-         before_signature=EXCLUDED.before_signature,status=EXCLUDED.status,reason=EXCLUDED.reason,
+         before_signature=EXCLUDED.before_signature,last_page_slot=EXCLUDED.last_page_slot,
+         last_page_block_time=EXCLUDED.last_page_block_time,window_end_block_time=EXCLUDED.window_end_block_time,
+         scan_provider=EXCLUDED.scan_provider,scan_commitment=EXCLUDED.scan_commitment,
+         status=EXCLUDED.status,reason=EXCLUDED.reason,
          signature_count=EXCLUDED.signature_count,signature_state=EXCLUDED.signature_state,
-         decoded_complete=helius_backfill_jobs.decoded_complete OR EXCLUDED.decoded_complete,
-         decoded_reason=CASE WHEN helius_backfill_jobs.decoded_complete OR EXCLUDED.decoded_complete THEN NULL
-           ELSE COALESCE(EXCLUDED.decoded_reason,helius_backfill_jobs.decoded_reason) END,
-         verified_transaction_count=GREATEST(helius_backfill_jobs.verified_transaction_count,EXCLUDED.verified_transaction_count),
-         decoded_at=CASE WHEN EXCLUDED.decoded_complete THEN COALESCE(helius_backfill_jobs.decoded_at,now()) ELSE helius_backfill_jobs.decoded_at END,
+         decoded_complete=(helius_backfill_jobs.signature_state=EXCLUDED.signature_state AND EXCLUDED.decoded_complete),
+         decoded_reason=CASE WHEN helius_backfill_jobs.signature_state=EXCLUDED.signature_state AND EXCLUDED.decoded_complete
+           THEN NULL ELSE EXCLUDED.decoded_reason END,
+         verified_transaction_count=EXCLUDED.verified_transaction_count,
+         decoded_at=CASE WHEN helius_backfill_jobs.signature_state=EXCLUDED.signature_state AND EXCLUDED.decoded_complete
+           THEN COALESCE(helius_backfill_jobs.decoded_at,now()) ELSE NULL END,
          updated_at=now()
        WHERE helius_backfill_jobs.bonding_curve=EXCLUDED.bonding_curve
          AND helius_backfill_jobs.create_signature=EXCLUDED.create_signature
@@ -743,9 +753,10 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
             AND EXCLUDED.signature_state=helius_backfill_jobs.signature_state))
        RETURNING mint`,
       [sessionId,mint,state.bondingCurve,state.createSignature,state.launchBlockTime,state.horizonSeconds,
-        state.maxSignatures,state.pagesScanned,state.scannedCount,state.before,state.status,state.reason,
-        state.signatures.length,JSON.stringify(state.signatures),input.decodeCoverage.complete,input.decodeCoverage.reason,
-        input.decodeCoverage.verifiedTransactionCount]
+        state.maxSignatures,state.pagesScanned,state.scannedCount,state.before,state.lastPageSlot,state.lastPageBlockTime,
+        state.launchBlockTime === null ? null : state.launchBlockTime + state.horizonSeconds,
+        state.status,state.reason,state.signatures.length,JSON.stringify(state.signatures),input.decodeCoverage.complete,
+        input.decodeCoverage.reason,input.decodeCoverage.verifiedTransactionCount]
     );
     if (checkpoint.rowCount !== 1) {
       throw new Error("Historical backfill checkpoint conflicts with immutable identity or previously persisted progress.");
@@ -767,12 +778,191 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
       if (transaction.source === "HISTORICAL_BACKFILL") {
         await client.query(
           `UPDATE helius_backfill_jobs SET verified_transaction_count=(
-             SELECT COUNT(*)::int FROM helius_transaction_observations
-             WHERE session_id=$1 AND mint=$2 AND observation_source='HISTORICAL_BACKFILL'
+             SELECT COUNT(*)::int FROM helius_transaction_observations t
+             WHERE t.session_id=$1 AND t.mint=$2 AND t.observation_source='HISTORICAL_BACKFILL'
+               AND t.signature IN (
+                 SELECT item->>'signature' FROM jsonb_array_elements(helius_backfill_jobs.signature_state) AS expected(item)
+               )
            ) WHERE session_id=$1 AND mint=$2`,
           [sessionId,mint]
         );
       }
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
+export interface HeliusGapRecoveryArchiveInput {
+  sessionId: string;
+  mint: string;
+  gap: {
+    bondingCurve: string;
+    startedAt: string;
+    endedAt: string;
+    startSignature: string;
+    startSlot: number;
+    endSignature: string;
+    endSlot: number;
+    pagesScanned: number;
+    signatures: Array<{ signature: string; slot: number; blockTime: number | null; err: unknown }>;
+    decodeCursor: number;
+    verifiedSignatures: string[];
+    failedSignatures: string[];
+    status: "SCANNING" | "SCANNED" | "DECODING" | "DECODED" | "ARCHIVED" | "INCOMPLETE";
+  };
+  transaction?: {
+    signature: string;
+    slot: number;
+    provider: "helius";
+    commitment: "confirmed" | "finalized";
+    receivedAt: string;
+    createEvents: unknown[];
+    tradeEvents: unknown[];
+  };
+}
+
+/** Persist an independently scanned WebSocket gap and any decoded transaction atomically. */
+export async function persistHeliusGapRecoveryArchive(input: HeliusGapRecoveryArchiveInput): Promise<void> {
+  if (!pool) throw new Error("PostgreSQL persistence is not configured.");
+  const { sessionId, mint, gap, transaction } = input;
+  const address = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  const signaturePattern = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
+  const started = Date.parse(gap.startedAt);
+  const ended = Date.parse(gap.endedAt);
+  if (!sessionId.trim() || sessionId.length > 128 || !address.test(mint) ||
+      !address.test(gap.bondingCurve) || !Number.isFinite(started) || !Number.isFinite(ended) || ended < started ||
+      !signaturePattern.test(gap.startSignature) || !signaturePattern.test(gap.endSignature) ||
+      gap.startSignature === gap.endSignature ||
+      !Number.isSafeInteger(gap.startSlot) || gap.startSlot < 0 ||
+      !Number.isSafeInteger(gap.endSlot) || gap.endSlot < gap.startSlot ||
+      !Number.isSafeInteger(gap.pagesScanned) || gap.pagesScanned < 0 ||
+      !Array.isArray(gap.signatures) || gap.signatures.length > 10_000 ||
+      !Number.isSafeInteger(gap.decodeCursor) || gap.decodeCursor < 0 ||
+      gap.decodeCursor > gap.signatures.length ||
+      !Array.isArray(gap.verifiedSignatures) || !Array.isArray(gap.failedSignatures) ||
+      !["SCANNING","SCANNED","DECODING","DECODED","ARCHIVED","INCOMPLETE"].includes(gap.status)) {
+    throw new Error("Helius gap archive contains invalid identity or progress fields.");
+  }
+  const seen = new Set<string>();
+  for (let i = 0; i < gap.signatures.length; i += 1) {
+    const item = gap.signatures[i]!;
+    if (!signaturePattern.test(item.signature) || seen.has(item.signature) ||
+        !Number.isSafeInteger(item.slot) || item.slot < 0 ||
+        !(item.blockTime === null || (Number.isSafeInteger(item.blockTime) && item.blockTime >= 0)) ||
+        !(item.err === null || (typeof item.err === "object" && !Array.isArray(item.err)))) {
+      throw new Error("Helius gap archive contains an invalid or duplicate signature record.");
+    }
+    if (i > 0 && (item.slot > gap.signatures[i - 1]!.slot ||
+        (item.blockTime !== null && gap.signatures[i - 1]!.blockTime !== null &&
+          item.blockTime > gap.signatures[i - 1]!.blockTime!))) {
+      throw new Error("Helius gap signatures must remain newest-to-oldest.");
+    }
+    seen.add(item.signature);
+  }
+  if (!seen.has(gap.startSignature) || !seen.has(gap.endSignature) ||
+      gap.signatures.some(item => item.signature === gap.startSignature && item.slot !== gap.startSlot) ||
+      gap.signatures.some(item => item.signature === gap.endSignature && item.slot !== gap.endSlot)) {
+    throw new Error("Helius gap archive is missing its exact signature/slot anchors.");
+  }
+  const verified = new Set(gap.verifiedSignatures);
+  const failed = new Set(gap.failedSignatures);
+  const decodedPrefix = new Set(gap.signatures.slice(0, gap.decodeCursor).map(item => item.signature));
+  if (verified.size !== gap.verifiedSignatures.length || failed.size !== gap.failedSignatures.length ||
+      [...verified, ...failed].some(signature => !decodedPrefix.has(signature)) ||
+      [...verified].some(signature => failed.has(signature)) ||
+      verified.size + failed.size !== gap.decodeCursor ||
+      gap.signatures.some((item, index) => index < gap.decodeCursor
+        ? (item.err === null ? !verified.has(item.signature) : !failed.has(item.signature))
+        : verified.has(item.signature) || failed.has(item.signature))) {
+    throw new Error("Helius gap decode outcomes do not match the persisted cursor or transaction status.");
+  }
+  if (transaction) {
+    const evidence = gap.signatures.find(item => item.signature === transaction.signature);
+    if (!evidence || evidence.slot !== transaction.slot || !verified.has(transaction.signature) ||
+        transaction.provider !== "helius" ||
+        (transaction.commitment !== "confirmed" && transaction.commitment !== "finalized") ||
+        !Number.isFinite(Date.parse(transaction.receivedAt)) ||
+        !Array.isArray(transaction.createEvents) || !Array.isArray(transaction.tradeEvents)) {
+      throw new Error("Decoded Helius gap transaction does not match verified signature evidence.");
+    }
+  }
+  if (gap.status === "ARCHIVED" &&
+      (gap.decodeCursor !== gap.signatures.length ||
+       verified.size + failed.size !== gap.signatures.length)) {
+    throw new Error("A Helius gap cannot be archived before every signature has a terminal decode outcome.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const session = await client.query("SELECT id FROM paper_sessions WHERE id=$1 FOR SHARE", [sessionId]);
+    if (session.rowCount !== 1) throw new Error("Paper session must be ingested before its Helius gap archive.");
+    const checkpoint = await client.query(
+      `INSERT INTO helius_gap_recovery_jobs
+        (session_id,mint,bonding_curve,started_at,ended_at,start_signature,start_slot,end_signature,end_slot,
+         pages_scanned,signature_state,decode_cursor,verified_signature_state,failed_signature_state,status,archived_complete,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13::jsonb,$14::jsonb,$15,FALSE,now())
+       ON CONFLICT (session_id,mint,started_at) DO UPDATE SET
+         pages_scanned=EXCLUDED.pages_scanned,signature_state=EXCLUDED.signature_state,
+         decode_cursor=EXCLUDED.decode_cursor,verified_signature_state=EXCLUDED.verified_signature_state,
+         failed_signature_state=EXCLUDED.failed_signature_state,status=EXCLUDED.status,updated_at=now()
+       WHERE helius_gap_recovery_jobs.bonding_curve=EXCLUDED.bonding_curve
+         AND helius_gap_recovery_jobs.ended_at=EXCLUDED.ended_at
+         AND helius_gap_recovery_jobs.start_signature=EXCLUDED.start_signature
+         AND helius_gap_recovery_jobs.start_slot=EXCLUDED.start_slot
+         AND helius_gap_recovery_jobs.end_signature=EXCLUDED.end_signature
+         AND helius_gap_recovery_jobs.end_slot=EXCLUDED.end_slot
+         AND EXCLUDED.pages_scanned >= helius_gap_recovery_jobs.pages_scanned
+         AND EXCLUDED.decode_cursor >= helius_gap_recovery_jobs.decode_cursor
+       RETURNING mint`,
+      [sessionId,mint,gap.bondingCurve,new Date(started).toISOString(),new Date(ended).toISOString(),
+        gap.startSignature,gap.startSlot,gap.endSignature,gap.endSlot,gap.pagesScanned,
+        JSON.stringify(gap.signatures),gap.decodeCursor,JSON.stringify(gap.verifiedSignatures),
+        JSON.stringify(gap.failedSignatures),gap.status]
+    );
+    if (checkpoint.rowCount !== 1) {
+      throw new Error("Helius gap checkpoint conflicts with immutable anchors or previously persisted progress.");
+    }
+    if (transaction) {
+      const raw = JSON.stringify({ ...transaction, mint, source: "GAP_RECOVERY" });
+      const result = await client.query(
+        `INSERT INTO helius_transaction_observations
+          (session_id,mint,signature,slot,provider,commitment,observation_source,received_at,create_events,trade_events,raw_observation)
+         VALUES ($1,$2,$3,$4,$5,$6,'GAP_RECOVERY',$7,$8::jsonb,$9::jsonb,$10::jsonb)
+         ON CONFLICT (session_id,mint,signature) DO UPDATE SET
+           observation_source='GAP_RECOVERY',raw_observation=EXCLUDED.raw_observation
+         WHERE helius_transaction_observations.slot=EXCLUDED.slot
+           AND helius_transaction_observations.provider=EXCLUDED.provider
+           AND helius_transaction_observations.commitment=EXCLUDED.commitment
+           AND helius_transaction_observations.create_events=EXCLUDED.create_events
+           AND helius_transaction_observations.trade_events=EXCLUDED.trade_events
+         RETURNING signature`,
+        [sessionId,mint,transaction.signature,transaction.slot,transaction.provider,transaction.commitment,
+          transaction.receivedAt,JSON.stringify(transaction.createEvents),JSON.stringify(transaction.tradeEvents),raw]
+      );
+      if (result.rowCount !== 1) throw new Error("Helius gap transaction conflicts with previously archived evidence.");
+    }
+    if (gap.status === "ARCHIVED") {
+      const archived = await client.query(
+        `SELECT COUNT(*)::int AS count FROM helius_transaction_observations
+         WHERE session_id=$1 AND mint=$2 AND observation_source='GAP_RECOVERY'
+           AND signature = ANY($3::text[])`,
+        [sessionId,mint,gap.verifiedSignatures]
+      );
+      if (Number(archived.rows[0]?.count ?? 0) !== verified.size) {
+        throw new Error("Helius gap cannot be marked archived until every verified transaction is acknowledged.");
+      }
+      await client.query(
+        `UPDATE helius_gap_recovery_jobs SET archived_complete=TRUE
+         WHERE session_id=$1 AND mint=$2 AND started_at=$3`,
+        [sessionId,mint,new Date(started).toISOString()]
+      );
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -796,29 +986,48 @@ export interface HeliusBackfillReplayDatasetRow {
   signatureCount: number;
   verifiedTransactionCount: number;
   transactions: unknown[];
+  riskEvidence: Array<{ occurredAt: string; payload: unknown }>;
 }
 
-/** Read only verified historical observations; live-monitor observations are excluded from replay. */
+/** Read verified historical observations and the timestamped risk evidence recorded during the same session. */
 export async function getHeliusBackfillReplayDataset(sessionId: string): Promise<HeliusBackfillReplayDatasetRow[]> {
   if (!pool) throw new Error("PostgreSQL persistence is not configured.");
   if (!sessionId.trim() || sessionId.length > 128) throw new Error("A valid paper session ID is required.");
-  const result = await pool.query(
-    `SELECT j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
-       j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count,
-       COALESCE(
-         json_agg(t.raw_observation ORDER BY t.slot ASC,t.signature ASC)
-           FILTER (WHERE t.signature IS NOT NULL AND t.observation_source='HISTORICAL_BACKFILL'),
-         '[]'::json
-       ) AS transactions
-     FROM helius_backfill_jobs j
-     LEFT JOIN helius_transaction_observations t
-       ON t.session_id=j.session_id AND t.mint=j.mint
-     WHERE j.session_id=$1
-     GROUP BY j.session_id,j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
-       j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count
-     ORDER BY j.launch_block_time ASC NULLS LAST,j.mint ASC`,
-    [sessionId]
-  );
+  const [result, evidenceResult] = await Promise.all([
+    pool.query(
+      `SELECT j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
+         j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count,
+         COALESCE(
+           json_agg(t.raw_observation ORDER BY t.slot ASC,t.signature ASC)
+             FILTER (WHERE t.signature IS NOT NULL AND t.observation_source='HISTORICAL_BACKFILL'
+               AND t.signature IN (
+                 SELECT item->>'signature' FROM jsonb_array_elements(j.signature_state) AS expected(item)
+               )),
+           '[]'::json
+         ) AS transactions
+       FROM helius_backfill_jobs j
+       LEFT JOIN helius_transaction_observations t
+         ON t.session_id=j.session_id AND t.mint=j.mint
+       WHERE j.session_id=$1
+       GROUP BY j.session_id,j.mint,j.launch_block_time,j.horizon_seconds,j.status,j.reason,
+         j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count
+       ORDER BY j.launch_block_time ASC NULLS LAST,j.mint ASC`,
+      [sessionId]
+    ),
+    pool.query(
+      `SELECT mint,occurred_at,payload FROM paper_session_events
+       WHERE session_id=$1 AND event_type='RISK_EVIDENCE' AND mint IS NOT NULL
+       ORDER BY occurred_at ASC,sequence ASC`,
+      [sessionId]
+    )
+  ]);
+  const evidenceByMint = new Map<string, Array<{ occurredAt: string; payload: unknown }>>();
+  for (const event of evidenceResult.rows) {
+    const mint = String(event.mint);
+    const items = evidenceByMint.get(mint) ?? [];
+    items.push({ occurredAt: new Date(String(event.occurred_at)).toISOString(), payload: event.payload });
+    evidenceByMint.set(mint, items);
+  }
   return result.rows.map(row => ({
     mint: String(row.mint),
     launchBlockTime: row.launch_block_time === null ? null : Number(row.launch_block_time),
@@ -829,7 +1038,8 @@ export async function getHeliusBackfillReplayDataset(sessionId: string): Promise
     decodedReason: row.decoded_reason === null ? null : String(row.decoded_reason),
     signatureCount: Number(row.signature_count),
     verifiedTransactionCount: Number(row.verified_transaction_count),
-    transactions: Array.isArray(row.transactions) ? row.transactions : []
+    transactions: Array.isArray(row.transactions) ? row.transactions : [],
+    riskEvidence: evidenceByMint.get(String(row.mint)) ?? []
   }));
 }
 

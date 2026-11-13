@@ -11,12 +11,68 @@ describe("paper portfolio accounting",()=>{
   const p=createPaperPortfolio();expect(p.availableCashUsd).toBe(2.7);
   expect(p.positionSizeUsd).toBe(1);expect(p.maxConcurrentPositions).toBe(1);
  });
+ it("accepts only sub-micro-dollar SOL lamport rounding around the configured stake",()=>{
+  const p=createPaperPortfolio();
+  const buy=quote("rounded-stake","BUY");
+  buy.requestedUsd=1.0000005;
+  const opened=openPaperPosition(p,{mint:"rounded-stake",positionId:"rounded-position",occurredAt:now,
+    buyQuote:buy,sellQuote:quote("rounded-stake","SELL"),nowMs:Date.parse(now)});
+  expect(opened.position.stakeUsd).toBe(1);
+  const tooLarge=quote("rounded-stake-large","BUY");
+  tooLarge.requestedUsd=1.000002;
+  expect(()=>openPaperPosition(p,{mint:"rounded-stake-large",positionId:"rounded-position-large",occurredAt:now,
+    buyQuote:tooLarge,sellQuote:quote("rounded-stake-large","SELL"),nowMs:Date.parse(now)})).toThrow(/exact planned stake/);
+ });
  it("requires fresh exact-size quotes and refuses repeat mints",()=>{
   const p=createPaperPortfolio();
   const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
-  expect(opened.state.availableCashUsd).toBe(1.693);
+  expect(opened.state.availableCashUsd).toBe(1.686);
   expect(()=>openPaperPosition(opened.state,{mint:"mint",positionId:"p2",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)})).toThrow(/only be bought once/);
  });
+ it("locks refundable ATA rent separately from trade costs and releases it on close",()=>{
+  const p=createPaperPortfolio();
+  const opened=openPaperPosition(p,{mint:"rent-mint",positionId:"rent-position",occurredAt:now,
+    buyQuote:quote("rent-mint","BUY"),sellQuote:quote("rent-mint","SELL"),rentReserveUsd:0.2,nowMs:Date.parse(now)});
+  expect(opened.state.availableCashUsd).toBeCloseTo(1.486,8);
+  expect(opened.state.reservedAccountRentUsd).toBeCloseTo(0.2,8);
+  expect(opened.position.rentReserveUsd).toBeCloseTo(0.2,8);
+  const closed=closePaperPosition(opened.state,{positionId:"rent-position",sellQuote:quote("rent-mint","SELL","1000000",1.5),
+    exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
+  expect(closed.state.reservedAccountRentUsd).toBe(0);
+  expect(closed.state.availableCashUsd).toBeCloseTo(3.186,8);
+  expect(closed.position.rentReserveUsd).toBeCloseTo(0.2,8);
+ });
+
+ it("locks the expected sell fee so concurrent entries cannot spend the same exit budget",()=>{
+  let state={...createPaperPortfolio(6),maxConcurrentPositions:2};
+  const first=openPaperPosition(state,{mint:"reserved-fee-1",positionId:"reserved-fee-position-1",occurredAt:now,
+    buyQuote:quote("reserved-fee-1","BUY"),sellQuote:quote("reserved-fee-1","SELL"),nowMs:Date.parse(now)});
+  expect(first.position.expectedSellCostsUsd).toBeCloseTo(0.007,8);
+  expect(first.state.availableCashUsd).toBeCloseTo(4.986,8);
+  const secondBuy=quote("reserved-fee-2","BUY");
+  secondBuy.requestedUsd=first.state.positionSizeUsd;
+  const second=openPaperPosition(first.state,{mint:"reserved-fee-2",positionId:"reserved-fee-position-2",occurredAt:now,
+    buyQuote:secondBuy,sellQuote:quote("reserved-fee-2","SELL"),nowMs:Date.parse(now)});
+  expect(second.state.availableCashUsd).toBeCloseTo(3.472,8);
+  const closed=closePaperPosition(second.state,{positionId:"reserved-fee-position-1",
+    sellQuote:quote("reserved-fee-1","SELL","1000000",1.5),exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
+  expect(closed.state.availableCashUsd).toBeCloseTo(4.972,8);
+ });
+ 
+ it("requires cash to cover the expected sell fee before an entry",()=>{
+  const p={...createPaperPortfolio(),availableCashUsd:1.01};
+  expect(()=>openPaperPosition(p,{mint:"sell-fee-budget",positionId:"sell-fee-position",occurredAt:now,
+    buyQuote:quote("sell-fee-budget","BUY"),sellQuote:quote("sell-fee-budget","SELL"),nowMs:Date.parse(now)}))
+    .toThrow(/stake, buy and sell fees, and refundable account rent reserve/);
+ });
+ 
+ it("blocks an entry when stake, fees and refundable rent cannot all be reserved",()=>{
+  const p=createPaperPortfolio();
+  expect(()=>openPaperPosition(p,{mint:"rent-mint",positionId:"rent-position",occurredAt:now,
+    buyQuote:quote("rent-mint","BUY"),sellQuote:quote("rent-mint","SELL"),rentReserveUsd:2,nowMs:Date.parse(now)}))
+    .toThrow(/stake and refundable account rent reserve/);
+ });
+
  it("rejects quotes with missing or non-finite notional evidence",()=>{
   const p=createPaperPortfolio();
   const buy=quote("mint","BUY"); buy.requestedUsd=Number.NaN;
@@ -67,7 +123,7 @@ describe("paper portfolio accounting",()=>{
   const opened=openPaperPosition(p,{mint:"mint-aggregate",positionId:"p-aggregate",occurredAt:now,buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)});
   expect(opened.position.buyCostsUsd).toBeCloseTo(0.009,8);
   expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(0.991,8);
-  expect(opened.state.availableCashUsd).toBeCloseTo(1.691,8);
+  expect(opened.state.availableCashUsd).toBeCloseTo(1.682,8);
  });
 
  it("includes protocol, creator, pool, priority and transfer fees in the round-trip cap",()=>{
@@ -136,7 +192,7 @@ describe("paper portfolio accounting",()=>{
   const opened=openPaperPosition(createPaperPortfolio(),{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
   expect(()=>openPaperPosition(opened.state,{mint:"mint2",positionId:"p1",occurredAt:now,buyQuote:quote("mint2","BUY"),sellQuote:quote("mint2","SELL"),nowMs:Date.parse(now)})).toThrow(/position ID must be unique/);
  });
- it("adds slots at $5 and $10 and adds 50% of the original stake per doubling",()=>{
+ it("adds one slot and compounds stake by 50% at each equity doubling, capped at $100",()=>{
   const openAndMark=(value:number)=>{
    const opened=openPaperPosition(createPaperPortfolio(),{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
    return markPaperPosition(opened.state,{sellQuotes:[quote("mint","SELL","1000000",value+0.007)],markedAt:now,nowMs:Date.parse(now)});
@@ -148,7 +204,19 @@ describe("paper portfolio accounting",()=>{
   const atTen=openAndMark(8.307);
   expect(atTen.bankroll.currentEquityUsd).toBeCloseTo(10);
   expect(atTen.maxConcurrentPositions).toBe(3);
-  expect(atTen.positionSizeUsd).toBe(2);
+  expect(atTen.positionSizeUsd).toBe(2.25);
+  const atTwenty=openAndMark(18.307);
+  expect(atTwenty.bankroll.currentEquityUsd).toBeCloseTo(20);
+  expect(atTwenty.maxConcurrentPositions).toBe(4);
+  expect(atTwenty.positionSizeUsd).toBe(3.375);
+  const atForty=openAndMark(38.307);
+  expect(atForty.bankroll.currentEquityUsd).toBeCloseTo(40);
+  expect(atForty.maxConcurrentPositions).toBe(5);
+  expect(atForty.positionSizeUsd).toBe(5.0625);
+  const atStakeCap=openAndMark(10_238.307);
+  expect(atStakeCap.bankroll.currentEquityUsd).toBeCloseTo(10_240);
+  expect(atStakeCap.maxConcurrentPositions).toBe(13);
+  expect(atStakeCap.positionSizeUsd).toBe(100);
  });
 
 });

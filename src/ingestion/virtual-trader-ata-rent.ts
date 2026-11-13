@@ -5,7 +5,7 @@ import type { VirtualTraderAtaPrerequisites } from "./virtual-trader-ata-prerequ
 const LEGACY_TOKEN_ACCOUNT_BYTES = 165;
 
 export interface AtaRentLineItem {
-  role: "base" | "quote";
+  role: "base" | "quote" | "buyback";
   address: string;
   tokenProgram: string;
   accountSpaceBytes: number | null;

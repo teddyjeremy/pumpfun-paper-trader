@@ -1,6 +1,6 @@
 import BN from "bn.js";
 import { Buffer } from "node:buffer";
-import { PublicKey, type AccountInfo } from "@solana/web3.js";
+import { PublicKey, SystemProgram, TransactionInstruction, type AccountInfo } from "@solana/web3.js";
 import {
   getAssociatedTokenAddressSync, getTransferFeeConfig, getTransferHook, unpackMint,
   type RawMint
@@ -13,7 +13,7 @@ import {
 } from "@pump-fun/pump-sdk";
 import {
   decodeSplTokenAccount, decodeVerifiedPumpCurveAccount,
-  PUMP_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+  NATIVE_SOL_MINT, PUMP_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
   type RawProgramAccount
 } from "./pump-account-decoder.js";
 import { derivePumpBondingCurvePda } from "./pump-pdas.js";
@@ -24,6 +24,7 @@ import {
   fetchVerifiedPumpQuoteAccountSnapshot, type VerifiedPumpQuoteSnapshot
 } from "./pump-quote-snapshot.js";
 import { isSolQuoteMint } from "./trade-flow.js";
+import { estimateFeesForUnsignedInstructions, type UnsignedInstructionFeeEvidence } from "./solana-fee-estimator.js";
 
 const PUMP_FEE_PROGRAM_ID = "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ";
 const MAX_U64 = 18_446_744_073_709_551_615n;
@@ -218,6 +219,7 @@ export interface PumpSdkCurveQuote {
   baseDecimals: number;
   quoteDecimals: number;
   transferTaxVerifiedZero: true;
+  snapshot?: VerifiedPumpQuoteSnapshot;
   executionReady: false;
   blockers: string[];
 }
@@ -355,7 +357,205 @@ export async function fetchPumpCurveSdkQuote(input: {
     },
     config: input.config
   });
-  return input.side === "BUY"
+  const quote = input.side === "BUY"
     ? quotePumpCurveBuyFromSnapshot(snapshot, input.amountBaseUnits)
     : quotePumpCurveSellFromSnapshot(snapshot, input.amountBaseUnits);
+  return { ...quote, snapshot };
+}
+
+
+export interface PumpCurveV3UnsignedInstruction {
+  provider: "pump-sdk-4.3.1";
+  venue: "PUMP_CURVE";
+  side: "BUY" | "SELL";
+  mint: string;
+  user: string;
+  quoteMint: string;
+  baseTokenProgram: string;
+  quoteTokenProgram: string;
+  buybackFeeRecipient: string;
+  userVolumeAccumulatorAddress: string;
+  instruction: TransactionInstruction;
+  requiredAccountAddressesToVerify: string[];
+  optionalAccountAddresses: string[];
+  slot: number;
+  observedAt: string;
+  executionReady: false;
+  paperEntryAuthorized: false;
+  blockers: string[];
+}
+
+/**
+ * Build one exact-size, unsigned Pump Curve V3 instruction from the same
+ * verified account snapshot used by the quote adapter. The caller must still
+ * verify every returned ATA, rent reserve, payer balance and fresh fee message.
+ * This function never signs, simulates or submits.
+ */
+export async function buildPumpCurveV3UnsignedInstruction(input: {
+  snapshot: VerifiedPumpQuoteSnapshot;
+  user: string;
+  side: "BUY" | "SELL";
+  tokenAmountBaseUnits: string;
+  quoteAmountBaseUnits: string;
+  buybackFeeRecipient?: string;
+}): Promise<PumpCurveV3UnsignedInstruction> {
+  if (!isU64BaseUnits(input.tokenAmountBaseUnits) || BigInt(input.tokenAmountBaseUnits) <= 0n) {
+    throw new Error("Pump curve instruction token amount must be a positive u64 base-unit integer.");
+  }
+  if (!isU64BaseUnits(input.quoteAmountBaseUnits) || BigInt(input.quoteAmountBaseUnits) <= 0n) {
+    throw new Error("Pump curve instruction quote amount must be a positive u64 base-unit integer.");
+  }
+  let user: PublicKey;
+  try { user = new PublicKey(input.user); }
+  catch { throw new Error("Pump curve instruction user address is invalid."); }
+  if (!user || user.equals(SystemProgram.programId)) {
+    throw new Error("Pump curve instruction user must be a non-zero public key.");
+  }
+
+  const context = decodeContext(input.snapshot);
+  if (context.curve.complete || context.curve.isCashbackCoin) {
+    throw new Error("Curve V3 instructions are unavailable for completed or cashback curves.");
+  }
+  const tokenAmount = new BN(input.tokenAmountBaseUnits);
+  const quoteAmount = new BN(input.quoteAmountBaseUnits);
+  if (input.side === "BUY") {
+    if (tokenAmount.gt(context.curveBaseTokenBalance)) {
+      throw new Error("Pump curve instruction buy amount exceeds the remaining curve token supply.");
+    }
+    const minimumQuote = getBuyV3QuoteAmountFromTokenAmount({
+      global: context.global, feeConfig: context.feeConfig,
+      mintSupply: context.curve.tokenTotalSupply, bondingCurve: context.curve,
+      amount: tokenAmount, curveBaseTokenBalance: context.curveBaseTokenBalance
+    });
+    if (quoteAmount.lt(minimumQuote)) {
+      throw new Error("Pump curve buy quote limit is below the official SDK gross quote.");
+    }
+  } else {
+    if (tokenAmount.gt(context.curve.realTokenReserves)) {
+      throw new Error("Pump curve instruction sell amount exceeds the real token reserve.");
+    }
+    const minimumQuote = getSellSolAmountFromTokenAmount({
+      global: context.global, feeConfig: context.feeConfig,
+      mintSupply: context.curve.tokenTotalSupply, bondingCurve: context.curve,
+      amount: tokenAmount
+    });
+    if (minimumQuote.lten(0) || quoteAmount.gt(minimumQuote)) {
+      throw new Error("Pump curve sell minimum exceeds the official SDK net quote.");
+    }
+  }
+
+  const configuredRecipients = context.global.buybackFeeRecipients ?? [];
+  const recipient = input.buybackFeeRecipient
+    ? new PublicKey(input.buybackFeeRecipient)
+    : configuredRecipients[0];
+  if (!recipient || !configuredRecipients.some(candidate => candidate.equals(recipient))) {
+    throw new Error("Buyback fee recipient must be selected from the verified on-chain Global configuration.");
+  }
+
+  const tokenProgram = new PublicKey(requiredAccount(input.snapshot, "baseMint").owner);
+  const quoteTokenProgram = new PublicKey(SPL_TOKEN_PROGRAM_ID);
+  const solPairedQuote = isSolQuoteMint(context.quoteMint.toBase58());
+  // Pump V3 instruction accounts always use WSOL for SOL-paired curves, even
+  // when a legacy curve stores Pubkey::default to represent native SOL.
+  const instructionQuoteMint = solPairedQuote ? new PublicKey(NATIVE_SOL_MINT) : context.quoteMint;
+  const params = {
+    user, mint: context.mint, amount: tokenAmount, quoteAmount,
+    tokenProgram, quoteMint: instructionQuoteMint, quoteTokenProgram,
+    buybackFeeRecipient: recipient
+  };
+  const method = input.side === "BUY" ? "getBuyV3InstructionRaw" : "getSellV3InstructionRaw";
+  const builder = (PUMP_SDK as unknown as Record<string, unknown>)[method];
+  if (typeof builder !== "function") {
+    throw new Error(`Pinned Pump SDK does not expose ${method}.`);
+  }
+  const instruction = await Promise.resolve(
+    (builder as (args: typeof params) => TransactionInstruction).call(PUMP_SDK, params)
+  );
+  if (!(instruction instanceof TransactionInstruction) ||
+      !instruction.programId.equals(new PublicKey(PUMP_PROGRAM_ID))) {
+    throw new Error("Pump SDK returned an invalid curve instruction.");
+  }
+
+  const userVolumeAccumulator = PublicKey.findProgramAddressSync(
+    [Buffer.from("user_volume_accumulator"), user.toBuffer()], new PublicKey(PUMP_PROGRAM_ID)
+  )[0];
+  const requiredAccountAddressesToVerify = [
+    getAssociatedTokenAddressSync(context.mint, user, false, tokenProgram).toBase58(),
+    userVolumeAccumulator.toBase58()
+  ];
+  const optionalAccountAddresses: string[] = [];
+  if (solPairedQuote) {
+    // For native-SOL curves the program takes WSOL ATA addresses but does not
+    // use or require those accounts to exist; the buyback recipient is a wallet.
+    optionalAccountAddresses.push(
+      getAssociatedTokenAddressSync(instructionQuoteMint, user, false, quoteTokenProgram).toBase58()
+    );
+    requiredAccountAddressesToVerify.push(recipient.toBase58());
+  } else {
+    requiredAccountAddressesToVerify.push(
+      getAssociatedTokenAddressSync(instructionQuoteMint, user, false, quoteTokenProgram).toBase58(),
+      getAssociatedTokenAddressSync(instructionQuoteMint, recipient, false, quoteTokenProgram).toBase58()
+    );
+  }
+  return {
+    provider: "pump-sdk-4.3.1", venue: "PUMP_CURVE", side: input.side,
+    mint: context.mint.toBase58(), user: user.toBase58(),
+    quoteMint: instructionQuoteMint.toBase58(),
+    userVolumeAccumulatorAddress: userVolumeAccumulator.toBase58(),
+    baseTokenProgram: tokenProgram.toBase58(), quoteTokenProgram: quoteTokenProgram.toBase58(),
+    buybackFeeRecipient: recipient.toBase58(),
+    instruction, requiredAccountAddressesToVerify, optionalAccountAddresses,
+    slot: input.snapshot.slot, observedAt: input.snapshot.observedAt,
+    executionReady: false, paperEntryAuthorized: false,
+    blockers: [
+      "USER_BASE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED",
+      "BUYBACK_FEE_RECIPIENT_ACCOUNT_EXISTENCE_AND_STATE_NOT_VERIFIED",
+      "ATA_RENT_AND_VIRTUAL_PAYER_BALANCE_NOT_VERIFIED",
+      "USER_VOLUME_ACCUMULATOR_STATE_AND_RENT_NOT_VERIFIED",
+      "EXACT_UNSIGNED_TRANSACTION_FEE_MESSAGE_NOT_ATTACHED",
+      "PAPER_ENTRY_AUTHORIZATION_NOT_GRANTED"
+    ]
+  };
+}
+
+
+export interface PumpCurveV3UnsignedInstructionWithFees extends PumpCurveV3UnsignedInstruction {
+  feeEvidence: UnsignedInstructionFeeEvidence;
+}
+
+/**
+ * Attach base-network and account-lock-specific priority-fee evidence to the
+ * exact unsigned curve instruction. The recent blockhash is supplied by the
+ * caller so the fee message is compiled from the same instruction that would
+ * be used for paper execution. No signing, simulation or submission occurs.
+ */
+export async function buildPumpCurveV3UnsignedInstructionWithFees(input: {
+  snapshot: VerifiedPumpQuoteSnapshot;
+  user: string;
+  side: "BUY" | "SELL";
+  tokenAmountBaseUnits: string;
+  quoteAmountBaseUnits: string;
+  buybackFeeRecipient?: string;
+  apiKey: string;
+  recentBlockhash: string;
+  computeUnitLimit: number;
+  fetcher?: typeof fetch;
+  nowMs?: number;
+}): Promise<PumpCurveV3UnsignedInstructionWithFees> {
+  const built = await buildPumpCurveV3UnsignedInstruction(input);
+  const feeEvidence = await estimateFeesForUnsignedInstructions({
+    apiKey: input.apiKey,
+    payer: new PublicKey(built.user),
+    recentBlockhash: input.recentBlockhash,
+    instructions: [built.instruction],
+    computeUnitLimit: input.computeUnitLimit,
+    ...(input.fetcher ? { fetcher: input.fetcher } : {}),
+    ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs })
+  });
+  const blockers = built.blockers.filter(blocker =>
+    blocker !== "EXACT_UNSIGNED_TRANSACTION_FEE_MESSAGE_NOT_ATTACHED");
+  if (feeEvidence.status !== "AVAILABLE") {
+    blockers.push("EXACT_UNSIGNED_TRANSACTION_FEE_EVIDENCE_UNAVAILABLE");
+  }
+  return { ...built, blockers, feeEvidence, executionReady: false, paperEntryAuthorized: false };
 }

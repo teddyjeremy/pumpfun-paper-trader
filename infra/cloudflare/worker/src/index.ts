@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "../../../../src/paper/session-ledger.js";
 import { updateCandidatePriceTracker, type CandidatePriceTracker } from "../../../../src/paper/candidate-price-ledger.js";
-import { evaluateStrictStrategyAudit, calculateReclaimConfirmation } from "../../../../src/paper/strategy-audit.js";
+import { evaluateStrictStrategyAudit, calculateReclaimConfirmation, canRequestExecutableQuote } from "../../../../src/paper/strategy-audit.js";
 import {
   closePaperPosition, createPaperPortfolio, markPaperPosition, openPaperPosition,
   type ExecutablePaperQuote, type PaperPortfolioState
@@ -33,13 +33,14 @@ import {
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork, resetHeliusSubscriptionIds,
+  recordHeliusCoverageGap, recordHeliusNotificationBoundary, markHeliusCoverageGapRecovered,
   retryHeliusSignatureWork,
   type HeliusMonitorState,
   type HeliusSignatureWork,
   type CandidateMonitoringEvidence
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
-import { buildCandidateTradeFlows, isSolQuoteMint, SOL_QUOTE_MINT } from "../../../../src/ingestion/trade-flow.js";
+import { buildCandidateTradeFlows, isSolQuoteMint, SOL_QUOTE_MINT, type CandidateTradeFlow } from "../../../../src/ingestion/trade-flow.js";
 import { fetchCompleteHolderConcentration, type HolderConcentrationResult } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
@@ -51,10 +52,14 @@ import {
   type HistoricalBackfillState
 } from "../../../../src/ingestion/helius-backfill.js";
 import { assessHistoricalDecodeCoverage } from "../../../../src/ingestion/helius-backfill-coverage.js";
+import { assessHeliusGapRecovery } from "../../../../src/ingestion/helius-gap-recovery.js";
+import { fetchHeliusGapAddressHistory, type HeliusGapHistoryResume } from "../../../../src/ingestion/helius-gap-history.js";
 import { enqueueHistoricalBackfillSignatures } from "../../../../src/ingestion/helius-backfill-queue.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
-import { evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
-import { collectCompleteWalletFundingEvidence, type CompleteCompleteWalletFundingEvidenceResult } from "../../../../src/ingestion/complete-wallet-history.js";
+import { classifyWalletClusterRiskWithCoverage, evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
+import { collectCompleteWalletFundingEvidence, type CompleteWalletFundingEvidenceResult } from "../../../../src/ingestion/complete-wallet-history.js";
+import { collectCompleteWalletTransactionHistory, type CompleteWalletTransactionHistoryResult } from "../../../../src/ingestion/complete-wallet-transaction-history.js";
+import { normalizeFullWalletHistoryMaxPages, selectFullWalletHistoryScope } from "../../../../src/ingestion/full-wallet-history-budget.js";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
@@ -66,6 +71,24 @@ import {
   parsePumpPortalDiscoveryMessage,
   pumpPortalDiscoverySubscriptions
 } from "../../../../src/ingestion/pumpportal.js";
+import {
+  createPumpCurveOfflineQuoteFetcher, createPumpSwapOfflineQuoteFetcher,
+  createPumpUnsignedPlanFeeEvidenceBuilder, fetchExecutableRoundTripQuote
+} from "../../../../src/ingestion/executable-quote-service.js";
+import { deriveNonSigningVirtualTraderIdentity } from "../../../../src/ingestion/virtual-trader-identity.js";
+import { getFreshExecutableQuoteCostPct } from "../../../../src/ingestion/executable-quote-eligibility.js";
+import { parseReviewedVolumeThresholds } from "../../../../src/strategy/reviewed-volume-thresholds.js";
+import { evaluateTradingReadiness } from "../../../../src/paper/trading-readiness.js";
+import {
+  executePaperExit
+} from "../../../../src/paper/exit-lifecycle.js";
+import { createUnverifiedMarketState } from "../../../../src/paper/pump-market-state.js";
+import { refreshPumpMarketStateFromHelius } from "../../../../src/ingestion/helius-pump-market.js";
+import { buildPumpCurveExitWindowEvidence } from "../../../../src/strategy/pump-curve-exit-window-evidence.js";
+import { buildExecutablePaperQuote } from "../../../../src/ingestion/executable-paper-quote.js";
+import { canCommitPaperEntry } from "../../../../src/paper/paper-entry-readiness.js";
+import { authorizePaperEntryFromVerifiedPlan } from "../../../../src/ingestion/paper-entry-authorization.js";
+import type { UnsignedInstructionFeeEvidence } from "../../../../src/ingestion/solana-fee-estimator.js";
 
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
@@ -73,6 +96,30 @@ interface Env {
   HELIUS_API_KEY: string;
   PAPER_EVENT_INGEST_URL?: string;
   PAPER_EVENT_INGEST_TOKEN?: string;
+  FULL_WALLET_HISTORY_ENABLED?: string;
+  FULL_WALLET_HISTORY_MAX_PAGES?: string;
+  REVIEWED_VOLUME_THRESHOLDS_JSON?: string;
+}
+
+interface WalletLinkEvidenceSnapshot {
+  provider: "helius";
+  mint: string;
+  status: "OBSERVED" | "DATA_INCOMPLETE";
+  coverage: "FULL_WALLET_HISTORY" | "FULL_SOL_TRANSFER_HISTORY" | "INCOMPLETE";
+  dataComplete: boolean;
+  walletSetComplete: boolean;
+  requestedWallets: string[];
+  walletsCovered: string[];
+  walletsRequested: number;
+  walletsChecked: number;
+  transactionsChecked: number;
+  pagesScanned: number;
+  estimatedCredits: number;
+  links: WalletLinkEvidence[];
+  warnings: string[];
+  observedAt: string;
+  fundingEvidence: CompleteWalletFundingEvidenceResult;
+  fullWalletHistory: CompleteWalletTransactionHistoryResult | null;
 }
 
 interface CoordinatorStatus {
@@ -81,7 +128,8 @@ interface CoordinatorStatus {
   connected: boolean;
   subscriptionsSent: boolean;
   enabled: boolean;
-  tradingReady: false;
+  tradingReady: boolean;
+  readinessBlockers: string[];
   quoteSdkModules: { curve: boolean; pumpSwap: boolean };
   blocker: string;
   connectedAt: string | null;
@@ -117,8 +165,9 @@ const INITIAL_STATUS: CoordinatorStatus = {
   subscriptionsSent: false,
   enabled: false,
   tradingReady: false,
+  readinessBlockers: ["Coordinator is stopped.", "No active paper session."],
   quoteSdkModules: officialPumpSdkModulesAvailable(),
-  blocker: "Live discovery, verified transaction decoding and strategy/risk audits are active; executable quote authorization and scheduled paper entry/exit execution are not connected.",
+  blocker: "Coordinator is stopped; runtime paper-trading readiness has not been established.",
   connectedAt: null,
   lastMessageAt: null,
   lastSignature: null,
@@ -157,7 +206,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private heliusBucket = new TokenBucket(2, 2);
   private drainingHelius = false;
   private verifiedTransactions: Array<VerifiedPumpTransaction & { receivedAt?: string }> = [];
-  private walletLinkSnapshots: Record<string, CompleteWalletFundingEvidenceResult> = {};
+  private walletLinkSnapshots: Record<string, WalletLinkEvidenceSnapshot> = {};
   private walletHoldingsByMint: Record<string, WalletHoldingEvidence[]> = {};
   private holderRiskSnapshots: Record<string, HolderConcentrationResult> = {};
   private riskEvidenceAttemptedAtByMint: Record<string, number> = {};
@@ -272,6 +321,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         throw new Error("PostgreSQL did not acknowledge the complete paper audit batch.");
       }
       await this.ctx.storage.put(cursorKey, lastEvent.sequence);
+      if (this.status.lastError === "Paper event ingestion failed; durable outbox will retry.") {
+        this.status.lastError = null;
+      }
       const meta = await this.ctx.storage.get<AuditSessionMeta>(`audit_session:${sessionId}`);
       if (meta && meta.eventCount > lastEvent.sequence) {
         await this.ctx.storage.setAlarm(Date.now() + 1_000);
@@ -279,6 +331,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     } catch {
       // The durable audit pages are the outbox. Do not advance the cursor on
       // failure; a retry is safe because PostgreSQL deduplicates event ids.
+      this.status.lastError = "Paper event ingestion failed; durable outbox will retry.";
       await this.ctx.storage.setAlarm(Date.now() + 30_000).catch(() => undefined);
     } finally {
       this.postgresFlushInFlight = false;
@@ -337,12 +390,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     ) ?? 0;
     const verifiedKey = `helius_verified_historical_signatures:${sessionId}:${mint}`;
     const expectedSignatures = new Set(state.signatures.map(item => item.signature));
-    const verified = new Set((await this.ctx.storage.get<string[]>(verifiedKey) ?? [])
-      .filter(signature => expectedSignatures.has(signature)));
+    const verified = new Set(await this.ctx.storage.get<string[]>(verifiedKey) ?? []);
     const transactionKey = `helius_verified_historical_transactions:${sessionId}:${mint}`;
     const storedTransactions = await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(transactionKey) ?? {};
     for (const signature of Object.keys(storedTransactions)) {
-      if (expectedSignatures.has(signature)) verified.add(signature);
+      if (!expectedSignatures.has(signature)) {
+        return {
+          complete: false,
+          reason: "Stored historical transactions contain a signature outside the verified backfill window.",
+          verifiedTransactionCount: 0
+        };
+      }
+      verified.add(signature);
     }
     for (const transaction of this.verifiedTransactions) {
       if (transaction.mint === mint && expectedSignatures.has(transaction.signature)) {
@@ -351,11 +410,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     if (verified.size > 0) await this.ctx.storage.put(verifiedKey, [...verified].slice(-500));
     const failedKey = `helius_failed_historical_signatures:${sessionId}:${mint}`;
-    const failed = new Set((await this.ctx.storage.get<string[]>(failedKey) ?? [])
-      .filter(signature => expectedSignatures.has(signature)));
+    const failed = new Set(await this.ctx.storage.get<string[]>(failedKey) ?? []);
     const archivedKey = `helius_archived_transaction_signatures:${sessionId}:${mint}`;
-    const archived = new Set((await this.ctx.storage.get<string[]>(archivedKey) ?? [])
-      .filter(signature => expectedSignatures.has(signature)));
+    const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
     const legacyArchived = new Set(await this.ctx.storage.get<string[]>(
       `helius_archived_transaction_signatures:${sessionId}`
     ) ?? []);
@@ -366,13 +423,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       `helius_backfill_decode_incomplete:${sessionId}:${mint}`
     );
     const queueSignatures = this.heliusState.queue
-      .filter(work => work.mint === mint && state.signatures.some(item => item.signature === work.signature))
+      .filter(work => work.mint === mint)
       .map(work => work.signature);
-    return assessHistoricalDecodeCoverage({
-      state, queueCursor: cursor, queueSignatures,
-      verifiedSignatures: [...verified], failedSignatures: [...failed],
-      archivedSignatures: [...archived], incompleteReason: failure?.reason ?? null
-    });
+    try {
+      return assessHistoricalDecodeCoverage({
+        state, queueCursor: cursor, queueSignatures,
+        verifiedSignatures: [...verified], failedSignatures: [...failed],
+        archivedSignatures: [...archived], incompleteReason: failure?.reason ?? null
+      });
+    } catch (error) {
+      return {
+        complete: false,
+        reason: error instanceof Error
+          ? `Historical decode evidence is inconsistent: ${error.message}`
+          : "Historical decode evidence is inconsistent.",
+        verifiedTransactionCount: 0
+      };
+    }
   }
 
   private async archiveVerifiedHistoricalTransaction(transaction: VerifiedPumpTransaction): Promise<void> {
@@ -504,6 +571,127 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     for (const sessionId of sessions) await this.flushAuditEventsToPostgres(sessionId);
   }
 
+  /**
+   * Scheduled, paper-only protective exit pass. Each position is refreshed
+   * against authoritative curve/pool accounts and quoted for its full balance.
+   * Incomplete market/fee evidence leaves the position open and records a
+   * blocker; no signing or transaction submission exists in this path.
+   */
+  private async runScheduledPaperExitCycle(): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId || !this.status.enabled || !this.postgresLeaseHeld ||
+        !this.env.HELIUS_API_KEY) return;
+    const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
+    const openPositions = portfolio?.positions.filter(position => position.status !== "CLOSED") ?? [];
+    if (openPositions.length === 0) return;
+    const flowReport = await this.listTradeFlows() as { flows: CandidateTradeFlow[] };
+
+    const config = { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const };
+    const identity = await deriveNonSigningVirtualTraderIdentity();
+    const computeUnitLimit = 1_400_000;
+    const buildExactFeeEvidence = createPumpUnsignedPlanFeeEvidenceBuilder({
+      identity, config, computeUnitLimit
+    });
+    const heldSellQuotes = new Map<string, ExecutablePaperQuote>();
+    for (const position of openPositions) {
+      if (position.status !== "OPEN") {
+        await this.appendAudit("ERROR", position.mint, {
+          stage: "SCHEDULED_PAPER_EXIT",
+          reason: "Position is already EXIT_BLOCKED; manual or explicit recovery is required before quoting."
+        }, `paper-exit-status-blocked:${sessionId}:${position.positionId}`);
+        continue;
+      }
+      try {
+        // Fetch the slower USD reference first; refresh authoritative market
+        // accounts immediately before the short-lived full-balance sell quote.
+        const solUsdResult = await fetchSolUsdPrice({ nowMs: Date.now() });
+        if (solUsdResult.status !== "AVAILABLE") {
+          throw new Error(`SOL/USD reference unavailable: ${solUsdResult.reason}`);
+        }
+        const marketState = await refreshPumpMarketStateFromHelius({
+          state: createUnverifiedMarketState(position.mint),
+          config
+        });
+        await this.ctx.storage.put(`paper_market_state:${sessionId}:${position.mint}`, marketState);
+        const marketQuoteMint = marketState.status === "LIVE_CURVE"
+          ? marketState.curve?.quoteMint
+          : marketState.pool?.quoteMint;
+        const flow = flowReport.flows.find(item =>
+          item.mint === position.mint && item.quoteMint === marketQuoteMint
+        ) ?? null;
+        const exitWindows = buildPumpCurveExitWindowEvidence({
+          marketState, flow, transactions: this.verifiedTransactions
+        });
+        if (marketState.status !== "LIVE_CURVE" &&
+            marketState.status !== "MIGRATED_POOL_VERIFIED") {
+          await this.appendAudit("ERROR", position.mint, {
+            stage: "SCHEDULED_PAPER_EXIT_MARKET_VERIFICATION",
+            status: marketState.status, reason: marketState.reason
+          }, `paper-exit-market-blocked:${sessionId}:${position.positionId}:${marketState.updatedAt}`);
+          continue;
+        }
+
+        const quoteFetcher = marketState.status === "LIVE_CURVE"
+          ? createPumpCurveOfflineQuoteFetcher({ mint: position.mint, config })
+          : createPumpSwapOfflineQuoteFetcher({
+              mint: position.mint, poolAddress: marketState.pool!.poolAddress, config
+            });
+        const result = await executePaperExit({
+          position, marketState, windows: exitWindows,
+          quoteSell: async ({ tokenAmountBaseUnits }) => {
+            const quote = await quoteFetcher({
+              side: "SELL", amountBaseUnits: tokenAmountBaseUnits
+            });
+            const feeEvidence = await buildExactFeeEvidence({ side: "SELL", quote });
+            if (feeEvidence.status !== "AVAILABLE") {
+              throw new Error(`Exact sell-message fee evidence unavailable: ${feeEvidence.reason}`);
+            }
+            return {
+              quote,
+              context: {
+                solUsd: solUsdResult.observation,
+                costs: {
+                  networkFeeLamports: feeEvidence.estimate.networkFeeLamports,
+                  priorityFeeLamports: feeEvidence.estimate.priorityFeeLamports,
+                  providerFeeUsd: 0,
+                  simulatedLatencyMs: 250,
+                  quoteTtlMs: 2_000
+                }
+              }
+            };
+          },
+          // Defer the complete-portfolio mark until every still-open position
+          // has a fresh quote. A partial mark is never committed.
+          commitMark: async ({ positionId, sellQuote }) => {
+            heldSellQuotes.set(positionId, sellQuote);
+            return { status: "DEFERRED_UNTIL_COMPLETE_PORTFOLIO_MARK" };
+          },
+          commitExit: input => this.recordPaperExit(input)
+        });
+        if (result.status === "BLOCKED") {
+          await this.appendAudit("ERROR", position.mint, {
+            stage: "SCHEDULED_PAPER_EXIT", status: result.status, reason: result.reason
+          }, `paper-exit-blocked:${sessionId}:${position.positionId}:${Date.now()}`);
+        }
+      } catch (error) {
+        await this.appendAudit("ERROR", position.mint, {
+          stage: "SCHEDULED_PAPER_EXIT_CYCLE",
+          reason: error instanceof Error ? error.message : "Scheduled paper exit failed closed."
+        }, `paper-exit-cycle-error:${sessionId}:${position.positionId}:${Date.now()}`);
+      }
+    }
+
+    const latestPortfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
+    const remainingOpen = latestPortfolio?.positions.filter(position => position.status !== "CLOSED") ?? [];
+    if (remainingOpen.length > 0 &&
+        remainingOpen.every(position => heldSellQuotes.has(position.positionId))) {
+      await this.recordPaperMark({
+        sellQuotes: remainingOpen.map(position => heldSellQuotes.get(position.positionId)!)
+      });
+    }
+    this.ctx.waitUntil(this.flushAuditEventsToPostgres(sessionId));
+  }
+
   async alarm(): Promise<void> {
     await this.hydrate();
     // The Durable Object's alarm survives eviction, but in-memory lease state
@@ -528,16 +716,29 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     if (this.status.enabled && this.postgresLeaseHeld) {
       await this.drainHeliusQueue();
+      try {
+        await this.runScheduledPaperExitCycle();
+      } catch (error) {
+        this.status.lastError = error instanceof Error
+          ? error.message : "Scheduled paper exit cycle failed.";
+        await this.appendAudit("ERROR", null, {
+          stage: "SCHEDULED_PAPER_EXIT_CYCLE",
+          reason: this.status.lastError
+        }, `paper-exit-cycle-failure:${Date.now()}`);
+      }
     }
     await this.flushAllAuditSessionsToPostgres();
     await this.flushAllHeliusBackfillArchivesToPostgres();
     if (this.status.enabled && this.postgresLeaseHeld) {
       const now = Date.now();
+      const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
+      const hasOpenPositions = Boolean(portfolio?.positions.some(position => position.status !== "CLOSED"));
+      const nextCycleDelayMs = hasOpenPositions ? 5_000 : 15_000;
       const pendingRetryAt = this.heliusState.queue
         .map(item => item.retryAfterAt ? Date.parse(item.retryAfterAt) : Number.NaN)
         .filter(at => Number.isFinite(at) && at > now)
         .reduce((earliest, at) => earliest === null ? at : Math.min(earliest, at), null as number | null);
-      await this.ctx.storage.setAlarm(Math.min(now + 15_000, pendingRetryAt ?? Number.POSITIVE_INFINITY));
+      await this.ctx.storage.setAlarm(Math.min(now + nextCycleDelayMs, pendingRetryAt ?? Number.POSITIVE_INFINITY));
     }
   }
 
@@ -547,7 +748,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.ctx.storage.get<CoordinatorStatus>("status"),
       this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
       this.ctx.storage.get<boolean>("enabled"),
-      this.ctx.storage.get<Record<string, CompleteWalletFundingEvidenceResult>>("wallet_link_snapshots"),
+      this.ctx.storage.get<Record<string, WalletLinkEvidenceSnapshot | CompleteWalletFundingEvidenceResult>>("wallet_link_snapshots"),
       this.ctx.storage.get<Record<string, WalletHoldingEvidence[]>>("wallet_holdings_by_mint"),
       this.ctx.storage.get<Record<string, HolderConcentrationResult>>("holder_risk_snapshots"),
       this.ctx.storage.get<Record<string, number>>("risk_evidence_attempted_at_by_mint"),
@@ -555,7 +756,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     ]);
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
     this.activeSessionId = activeSessionId ?? null;
-    this.walletLinkSnapshots = savedWalletLinks ?? {};
+    this.walletLinkSnapshots = Object.fromEntries(Object.entries(savedWalletLinks ?? {}).map(([mint, value]) => {
+      if ("fundingEvidence" in value) return [mint, value as WalletLinkEvidenceSnapshot];
+      const fundingEvidence = value as CompleteWalletFundingEvidenceResult;
+      return [mint, {
+        provider: "helius" as const, mint,
+        status: "DATA_INCOMPLETE" as const, coverage: "FULL_SOL_TRANSFER_HISTORY" as const,
+        dataComplete: false, walletSetComplete: false,
+        requestedWallets: fundingEvidence.requestedWallets ?? [],
+        walletsCovered: fundingEvidence.walletsCovered ?? [],
+        walletsRequested: fundingEvidence.walletsRequested,
+        walletsChecked: fundingEvidence.walletsChecked,
+        transactionsChecked: 0, pagesScanned: fundingEvidence.pagesScanned,
+        estimatedCredits: 0, links: fundingEvidence.links,
+        warnings: fundingEvidence.warnings, observedAt: fundingEvidence.observedAt,
+        fundingEvidence, fullWalletHistory: null
+      }];
+    }));
     this.walletHoldingsByMint = savedWalletHoldings ?? {};
     this.holderRiskSnapshots = savedHolderRisk ?? {};
     this.riskEvidenceAttemptedAtByMint = savedRiskAttempts ?? {};
@@ -795,7 +1012,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.syncCounts();
     this.status.monitoredCandidates = this.heliusState.subscriptions.length;
     this.status.queuedHeliusSignatures = this.heliusState.queue.length;
-    this.status.blocker = "Live discovery, verified transaction decoding and strategy/risk audits are active; executable quote authorization and scheduled paper entry/exit execution are not connected.";
+    const readiness = evaluateTradingReadiness({
+      coordinatorEnabled: this.status.enabled,
+      activeSession: Boolean(this.activeSessionId),
+      discoveryConnected: this.status.connected,
+      discoverySubscribed: this.status.subscriptionsSent,
+      heliusConnected: this.status.heliusConnected,
+      heliusApiKeyConfigured: Boolean(this.env.HELIUS_API_KEY),
+      fullWalletHistoryEnabled: this.env.FULL_WALLET_HISTORY_ENABLED === "true",
+      reviewedVolumeThresholdsAvailable: parseReviewedVolumeThresholds(this.env.REVIEWED_VOLUME_THRESHOLDS_JSON) !== null,
+      eventIngestConfigured: this.postgresIngestConfigured,
+      persistenceLeaseHeld: this.postgresLeaseHeld,
+      controlTokenConfigured: Boolean(this.env.CONTROL_TOKEN),
+      pumpProgramConfigured: Boolean(this.env.PUMPFUN_PROGRAM_ID),
+      quoteSdkModulesAvailable: this.status.quoteSdkModules.curve && this.status.quoteSdkModules.pumpSwap
+    });
+    this.status.tradingReady = readiness.tradingReady;
+    this.status.readinessBlockers = readiness.blockers;
+    this.status.blocker = readiness.blockers[0] ??
+      "System prerequisites passed; a persistent simulated entry/exit lifecycle still needs verification.";
     return { ...this.status };
   }
 
@@ -868,6 +1103,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async recordPaperEntry(input: {
     mint: string; positionId: string; buyQuote: ExecutablePaperQuote; sellQuote: ExecutablePaperQuote;
+    rentReserveUsd: number;
   }): Promise<unknown> {
     await this.hydrate();
     const sessionId = this.activeSessionId;
@@ -1097,6 +1333,105 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
+
+  /**
+   * Audited round-trip quote validation for a candidate. It checks a fresh
+   * buy, exact-output sellability, and exact unsigned-message fee evidence.
+   * It validates quotes only; the later entry gate separately requires an
+   * explicitly authorized unsigned plan and durable portfolio prerequisites.
+   */
+  async requestExecutableRoundTripQuote(input: {
+    mint: string;
+    venue: "PUMP_CURVE" | "PUMPSWAP";
+    buyAmountBaseUnits: string;
+    poolAddress?: string;
+    precomputedReport?: unknown;
+    solUsd?: { source: "binance-spot"; symbol: "SOLUSDT"; priceUsd: number; observedAt: string; ageMs: number };
+  }): Promise<unknown> {
+    await this.hydrate();
+    if (!this.activeSessionId) throw new Error("No active paper session.");
+    if (!this.env.HELIUS_API_KEY) throw new Error("HELIUS_API_KEY is required.");
+    if (input.venue === "PUMPSWAP" &&
+        (typeof input.poolAddress !== "string" || !input.poolAddress.trim())) {
+      throw new Error("A canonical PumpSwap pool address is required.");
+    }
+    if (!/^\d+$/.test(input.buyAmountBaseUnits) ||
+        input.buyAmountBaseUnits.length > 20 ||
+        BigInt(input.buyAmountBaseUnits) <= 0n ||
+        BigInt(input.buyAmountBaseUnits) > 18_446_744_073_709_551_615n) {
+      throw new Error("Buy amount must be a positive u64 quote-token amount.");
+    }
+
+    // Build the expensive candidate feature snapshot before starting the
+    // short-lived executable quote window. Reuse it for the final audit so
+    // quote validation is followed by evaluation, not another RPC-heavy scan.
+    const featureReport = input.precomputedReport ?? await this.listTradeFlows();
+    const requestId = crypto.randomUUID();
+    const computeUnitLimit = 1_400_000;
+    const config = { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const };
+    await this.appendAudit("QUOTE_REQUESTED", input.mint, {
+      requestId, venue: input.venue, operation: "ROUND_TRIP_VALIDATION",
+      buyAmountBaseUnits: input.buyAmountBaseUnits, computeUnitLimit,
+      poolAddress: input.poolAddress ?? null
+    }, `round-trip-quote-request:${requestId}`);
+    await this.ctx.storage.put(`executable_quote:${this.activeSessionId}:${input.mint}`, {
+      status: "PENDING", validatedAt: new Date().toISOString()
+    });
+    try {
+      const identity = await deriveNonSigningVirtualTraderIdentity();
+      const fetchQuote = input.venue === "PUMP_CURVE"
+        ? createPumpCurveOfflineQuoteFetcher({ mint: input.mint, config })
+        : createPumpSwapOfflineQuoteFetcher({
+            mint: input.mint, poolAddress: input.poolAddress!, config
+          });
+      const buildExactFeeEvidence = createPumpUnsignedPlanFeeEvidenceBuilder({
+        identity, config, computeUnitLimit
+      });
+      const result = await fetchExecutableRoundTripQuote({
+        fetchQuote, helius: config, buildExactFeeEvidence,
+        requireExactMessageFees: true,
+        buyAmountBaseUnits: input.buyAmountBaseUnits,
+        computeUnitLimit,
+        ...(input.solUsd ? { solUsd: input.solUsd } : {}),
+        executionDelayMs: 250,
+        quoteTtlMs: 2_000,
+        maxPriceImpactPct: 2,
+        maximumRoundTripCostPct: 4
+      });
+      const validatedAt = new Date().toISOString();
+      await this.ctx.storage.put(`executable_quote:${this.activeSessionId}:${input.mint}`, {
+        status: result.status, validatedAt, venue: input.venue, result
+      });
+      await this.appendAudit("QUOTE_RESULT", input.mint, {
+        requestId, status: result.status, venue: input.venue,
+        paperEntryAuthorized: false, result
+      }, `round-trip-quote-result:${requestId}`);
+      // Re-evaluate the candidate with this fresh quote evidence. This only
+      // updates audit rules; the quote remains explicitly unauthorized.
+      try {
+        await this.recordStrategyAudit(`round-trip:${requestId}`, featureReport, input.mint);
+      } catch {
+        await this.appendAudit("ERROR", input.mint, {
+          requestId, stage: "STRATEGY_REEVALUATION_AFTER_QUOTE",
+          message: "Quote validation succeeded but strategy audit refresh failed."
+        }, `round-trip-audit-error:${requestId}`);
+      }
+      return result;
+    } catch (error) {
+      const rawReason = error instanceof Error ? error.message : "Round-trip quote validation failed.";
+      const reason = this.env.HELIUS_API_KEY
+        ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
+        : rawReason;
+      await this.ctx.storage.put(`executable_quote:${this.activeSessionId}:${input.mint}`, {
+        status: "BLOCKED", validatedAt: new Date().toISOString(), reason
+      });
+      await this.appendAudit("QUOTE_RESULT", input.mint, {
+        requestId, status: "BLOCKED", paperEntryAuthorized: false, reason
+      }, `round-trip-quote-result:${requestId}`);
+      throw new Error(reason);
+    }
+  }
+
   async getPaperBankroll(): Promise<unknown> {
     await this.hydrate();
     const sessionId = this.activeSessionId ?? await this.ctx.storage.get<string>("latest_audit_session_id");
@@ -1112,10 +1447,19 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return sessions.filter((item): item is AuditSessionMeta => item !== undefined);
   }
 
-  private async recordStrategyAudit(triggerSignature: string): Promise<void> {
-    const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
+  private async recordStrategyAudit(
+    triggerSignature: string,
+    precomputedReport?: unknown,
+    onlyMint?: string
+  ): Promise<void> {
+    const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))]
+      .filter(mint => !onlyMint || mint === onlyMint);
     if (monitoredMints.length === 0) return;
-    const report = await this.listTradeFlows() as {
+    // Refresh global runtime prerequisites before spending quote RPC credits or
+    // committing a simulated fill. Candidate-level rules remain independently
+    // evaluated below; this gate prevents stale connection/config state passing.
+    const runtimeStatus = await this.getStatus();
+    const report = (precomputedReport ?? await this.listTradeFlows()) as {
       solUsdPrice?: Awaited<ReturnType<typeof fetchSolUsdPrice>>;
       flows: Array<{ mint: string; quoteMint: string | null; microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE"; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
       priceVolumeProfiles: Array<{ mint:string; quoteMint:string|null; baselinePrice:number|null; reclaimTime:number|null; buckets:Array<{closePrice:number;highPrice:number;endTime:number}>; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean; microTradeFilterStatus:"APPLIED"|"UNAVAILABLE"|"UNSUPPORTED_QUOTE" }>;
@@ -1155,6 +1499,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         reclaimTimeSeconds: profile?.reclaimTime ?? null,
         previousCompletedHigh, nowSeconds, nextObservationPrices
       });
+      const cachedQuote = await this.ctx.storage.get<unknown>(
+        `executable_quote:${this.activeSessionId}:${mint}`
+      );
+      const roundTripCostPct = getFreshExecutableQuoteCostPct(cachedQuote, mint);
+      const executableQuoteAvailable = roundTripCostPct !== null;
       const evaluated = evaluateStrictStrategyAudit({
         candidateAgeSeconds: ageSeconds,
         profile: profile ? {
@@ -1177,7 +1526,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         walletClusterRiskStatus: walletRisk?.status ?? null,
         attributionConfidenceBps: confidence > 0 ? confidence : null,
         signalAgeSeconds: freshness.signalAgeSeconds, nextObservationConfirmed: freshness.nextObservationConfirmed,
-        executableQuoteAvailable: false
+        executableQuoteAvailable,
+        volumeThresholds: parseReviewedVolumeThresholds(this.env.REVIEWED_VOLUME_THRESHOLDS_JSON),
+        roundTripCostPct
       });
       await this.appendAudit("FEATURE_SNAPSHOT", mint, { triggerSignature, profile, flow, solUsdPrice: report.solUsdPrice ?? null },
         `features:${triggerSignature}:${mint}`);
@@ -1214,6 +1565,190 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           triggerSignature, reason,
           classification: evaluated.rejectionReasons.includes(reason) ? "REJECT" : "WATCH"
         }, `decision-reason:${triggerSignature}:${mint}:${reason}`);
+      }
+      // Start an automatic quote only after all thirteen non-quote rules pass.
+      // The durable attempt key is scoped to the reclaim signal so retries,
+      // restarts and duplicate observations cannot fan out repeated SDK calls.
+      const solUsdObservation = report.solUsdPrice?.status === "AVAILABLE"
+        ? report.solUsdPrice.observation : null;
+      if (!executableQuoteAvailable && canRequestExecutableQuote(evaluated) &&
+          runtimeStatus.tradingReady &&
+          this.status.enabled && this.activeSessionId && this.postgresLeaseHeld &&
+          this.postgresIngestConfigured && this.env.HELIUS_API_KEY &&
+          solUsdObservation && profile?.quoteMint && isSolQuoteMint(profile.quoteMint) &&
+          profile.reclaimTime !== null && Number.isFinite(profile.reclaimTime)) {
+        const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
+        const occupiedSlots = portfolio?.positions.filter(position => position.status !== "CLOSED").length ?? 0;
+        const hasFreeSlot = Boolean(portfolio &&
+          occupiedSlots < portfolio.maxConcurrentPositions &&
+          !portfolio.enteredMints.includes(mint) &&
+          Number.isFinite(portfolio.positionSizeUsd) && portfolio.positionSizeUsd > 0 &&
+          Number.isFinite(portfolio.availableCashUsd) &&
+          portfolio.availableCashUsd >= portfolio.positionSizeUsd);
+        if (portfolio && hasFreeSlot) {
+          const attemptKey = `automatic_quote_attempt:${this.activeSessionId}:${mint}:${profile.reclaimTime}`;
+          const previousAttempt = await this.ctx.storage.get<Record<string, unknown>>(attemptKey);
+          if (!previousAttempt) {
+            // Claim the reclaim signal before any network call. If the DO is
+            // evicted mid-probe, a restart will not fan out another quote.
+            await this.ctx.storage.put(attemptKey, {
+              status: "VERIFYING_MARKET", reclaimTime: profile.reclaimTime,
+              startedAt: new Date().toISOString()
+            });
+            try {
+              const marketState = await refreshPumpMarketStateFromHelius({
+                state: createUnverifiedMarketState(mint),
+                config: { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const }
+              });
+              const venue = marketState.status === "LIVE_CURVE" ? "PUMP_CURVE"
+                : marketState.status === "MIGRATED_POOL_VERIFIED" ? "PUMPSWAP" : null;
+              const marketQuoteMint = venue === "PUMP_CURVE" ? marketState.curve?.quoteMint
+                : venue === "PUMPSWAP" ? marketState.pool?.quoteMint : null;
+              const poolAddress = venue === "PUMPSWAP" ? marketState.pool?.poolAddress : undefined;
+              if (!venue || marketQuoteMint !== profile.quoteMint ||
+                  (venue === "PUMPSWAP" && !poolAddress)) {
+                const reason = "A verified live Pump curve or canonical SOL-quoted PumpSwap pool was unavailable for this reclaim signal.";
+                await this.ctx.storage.put(attemptKey, {
+                  status: "BLOCKED", reclaimTime: profile.reclaimTime,
+                  blockedAt: new Date().toISOString(), reason
+                });
+                await this.appendAudit("ERROR", mint, {
+                  triggerSignature, stage: "AUTOMATIC_MARKET_VERIFICATION", reason
+                }, `automatic-market-blocked:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
+                continue;
+              }
+
+              const rawLamports = portfolio.positionSizeUsd / solUsdObservation.priceUsd * 1_000_000_000;
+              const buyAmountLamports = Math.round(rawLamports);
+              if (!Number.isSafeInteger(buyAmountLamports) || buyAmountLamports <= 0 ||
+                  BigInt(buyAmountLamports) > 18_446_744_073_709_551_615n) {
+                const reason = "Exact stake cannot be represented as a safe positive SOL lamport amount.";
+                await this.ctx.storage.put(attemptKey, {
+                  status: "BLOCKED", reclaimTime: profile.reclaimTime,
+                  blockedAt: new Date().toISOString(), reason
+                });
+                await this.appendAudit("ERROR", mint, {
+                  triggerSignature, stage: "AUTOMATIC_QUOTE_SIZE", reason
+                }, `automatic-quote-size-blocked:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
+                continue;
+              }
+
+              await this.ctx.storage.put(attemptKey, {
+                status: "REQUESTED", reclaimTime: profile.reclaimTime,
+                stakeUsd: portfolio.positionSizeUsd, buyAmountBaseUnits: String(buyAmountLamports),
+                venue, requestedAt: new Date().toISOString()
+              });
+              try {
+                await this.requestExecutableRoundTripQuote({
+                  mint, venue, buyAmountBaseUnits: String(buyAmountLamports),
+                  ...(poolAddress ? { poolAddress } : {}),
+                  precomputedReport: report,
+                  solUsd: solUsdObservation
+                });
+              } catch (error) {
+                const rawReason = error instanceof Error ? error.message : "Automatic quote request failed.";
+                const reason = this.env.HELIUS_API_KEY
+                  ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
+                  : rawReason;
+                await this.ctx.storage.put(attemptKey, {
+                  status: "FAILED", reclaimTime: profile.reclaimTime,
+                  venue, failedAt: new Date().toISOString(), reason
+                });
+                await this.appendAudit("ERROR", mint, {
+                  triggerSignature, stage: "AUTOMATIC_ROUND_TRIP_QUOTE", reason
+                }, `automatic-quote-error:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
+              }
+            } catch (error) {
+              const rawReason = error instanceof Error ? error.message : "Automatic market verification failed.";
+              const reason = this.env.HELIUS_API_KEY
+                ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
+                : rawReason;
+              await this.ctx.storage.put(attemptKey, {
+                status: "FAILED", reclaimTime: profile.reclaimTime,
+                failedAt: new Date().toISOString(), reason
+              });
+              await this.appendAudit("ERROR", mint, {
+                triggerSignature, stage: "AUTOMATIC_MARKET_VERIFICATION", reason
+              }, `automatic-market-error:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
+            }
+            // The quote method re-runs this mint's audit with the fresh quote
+            // and can commit only after independent plan and durable portfolio
+            // authorization gates pass. One attempt is allowed per reclaim.
+            continue;
+          }
+        }
+      }
+
+      // The portfolio transition is reachable only after the complete strict
+      // strategy audit returns BUY and both exact quote legs remain fresh.
+      // This is simulated accounting only; no wallet signing/submission exists.
+      const quoteResult = cachedQuote && typeof cachedQuote === "object"
+        ? (cachedQuote as {
+            result?: {
+              buyQuote?: ExecutablePaperQuote;
+              initialSellQuote?: ExecutablePaperQuote;
+              solUsdPriceUsd?: number;
+              exactFeeEvidence?: {
+                buy: UnsignedInstructionFeeEvidence;
+                sell: UnsignedInstructionFeeEvidence;
+              };
+            };
+          }).result
+        : undefined;
+      const portfolio = quoteResult?.buyQuote && quoteResult.initialSellQuote
+        ? await this.getPaperPortfolio() as PaperPortfolioState | null
+        : null;
+      const paperAuthorization = evaluated.decision === "BUY" &&
+          quoteResult?.buyQuote && quoteResult.initialSellQuote
+        ? authorizePaperEntryFromVerifiedPlan({
+            mint, portfolio,
+            buyQuote: quoteResult.buyQuote,
+            sellQuote: quoteResult.initialSellQuote,
+            exactFeeEvidence: quoteResult.exactFeeEvidence,
+            solUsdPriceUsd: quoteResult.solUsdPriceUsd ?? Number.NaN,
+            nowMs: Date.now()
+          })
+        : null;
+      if (evaluated.decision === "BUY" && !paperAuthorization?.authorized) {
+        await this.appendAudit("ERROR", mint, {
+          triggerSignature, stage: "PAPER_ENTRY_AUTHORIZATION",
+          reason: paperAuthorization?.reason ?? "Verified round-trip quote or active portfolio is unavailable."
+        }, `paper-entry-authorization-error:${triggerSignature}:${mint}`);
+      }
+      if (canCommitPaperEntry({
+          systemTradingReady: runtimeStatus.tradingReady,
+          sessionEnabled: this.status.enabled,
+          workerLeaseHeld: this.postgresLeaseHeld,
+          postgresIngestConfigured: this.postgresIngestConfigured,
+          strategyDecision: evaluated.decision,
+          buyAllowed: evaluated.buyAllowed,
+          executableQuoteAvailable,
+          hasBuyAndSellQuotes: Boolean(quoteResult?.buyQuote && quoteResult.initialSellQuote),
+          // The quote itself remains unauthorized. This independent preview
+          // verifies every non-portfolio account prerequisite and runs the
+          // exact portfolio entry guard against stake, both fee legs and rent.
+          unsignedPlanAuthorized: paperAuthorization?.authorized === true
+        }) && quoteResult?.buyQuote && quoteResult.initialSellQuote &&
+        paperAuthorization?.authorized === true && portfolio &&
+        !portfolio.enteredMints.includes(mint)) {
+        try {
+          await this.recordPaperEntry({
+            mint,
+            positionId: `paper-entry:${this.activeSessionId}:${mint}:${quoteResult.buyQuote.quoteId}`,
+            buyQuote: quoteResult.buyQuote,
+            sellQuote: quoteResult.initialSellQuote,
+            rentReserveUsd: paperAuthorization.rentReserveUsd
+          });
+          const committedSessionId = this.activeSessionId;
+          if (committedSessionId) {
+            this.ctx.waitUntil(this.flushAuditEventsToPostgres(committedSessionId));
+          }
+        } catch (error) {
+          await this.appendAudit("ERROR", mint, {
+            triggerSignature, stage: "STRICT_PAPER_ENTRY_TRANSITION",
+            reason: error instanceof Error ? error.message : "Paper entry transition failed closed."
+          }, `paper-entry-error:${triggerSignature}:${mint}`);
+        }
       }
     }
   }
@@ -1365,9 +1900,34 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async collectWalletLinks(mint: string): Promise<unknown> {
     await this.hydrate();
-    const launch = this.verifiedTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
+    const sessionId = this.activeSessionId;
+    const backfill = sessionId
+      ? await this.ctx.storage.get<HistoricalBackfillState>(`helius_backfill:${sessionId}:${mint}`)
+      : undefined;
+    const decodeCoverage = sessionId && backfill
+      ? await this.getHistoricalDecodeCoverage(sessionId, mint, backfill)
+      : null;
+    const archived = sessionId
+      ? await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(
+          `helius_verified_historical_transactions:${sessionId}:${mint}`)
+      : undefined;
+    const transactionsBySignature = new Map<string, VerifiedPumpTransaction>();
+    for (const transaction of Object.values(archived ?? {})) {
+      if (transaction.mint === mint) transactionsBySignature.set(transaction.signature, transaction);
+    }
+    for (const transaction of this.verifiedTransactions) {
+      if (transaction.mint === mint) transactionsBySignature.set(transaction.signature, transaction);
+    }
+    const candidateTransactions = [...transactionsBySignature.values()];
+    const expectedBackfillSignatures = new Set(backfill?.signatures.map(item => item.signature) ?? []);
+    const verifiedBackfillTransactionCount = candidateTransactions.filter(tx =>
+      expectedBackfillSignatures.has(tx.signature)).length;
+    const launch = candidateTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
+    const tradeCoverageComplete = backfill?.status === "COMPLETE" &&
+      decodeCoverage?.complete === true && launch !== undefined &&
+      verifiedBackfillTransactionCount === decodeCoverage.verifiedTransactionCount;
     const volumes = new Map<string, bigint>();
-    for (const transaction of this.verifiedTransactions) for (const trade of transaction.tradeEvents) {
+    for (const transaction of candidateTransactions) for (const trade of transaction.tradeEvents) {
       if (trade.mint !== mint || trade.quoteAmount <= 0n) continue;
       volumes.set(trade.user, (volumes.get(trade.user) ?? 0n) + trade.quoteAmount);
     }
@@ -1375,24 +1935,78 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       a[1] === b[1] ? a[0].localeCompare(b[0]) : a[1] > b[1] ? -1 : 1
     ).map(([wallet]) => wallet);
     const wallets = [...new Set([...(launch?.creator ? [launch.creator] : []), ...rankedWallets])];
-    const result = await collectCompleteWalletFundingEvidence(mint, wallets, {
+    const expectedSignaturesByWallet = Object.fromEntries(wallets.map(wallet => [
+      wallet,
+      candidateTransactions.filter(transaction =>
+        transaction.createEvents.some(event => event.mint === mint && event.creator === wallet) ||
+        transaction.tradeEvents.some(event => event.mint === mint && event.user === wallet)
+      ).map(transaction => transaction.signature)
+    ]));
+    const fetcher = this.rateLimitedHeliusFetcher();
+    const fundingEvidence = await collectCompleteWalletFundingEvidence(mint, wallets, {
       apiKey: this.env.HELIUS_API_KEY,
-      fetcher: this.rateLimitedHeliusFetcher()
+      walletSetVerifiedComplete: tradeCoverageComplete,
+      fetcher
     });
-    this.walletLinkSnapshots[mint] = result;
+    const fullHistoryEnabled = this.env.FULL_WALLET_HISTORY_ENABLED === "true";
+    const fullHistoryScope = selectFullWalletHistoryScope(
+      wallets, expectedSignaturesByWallet, tradeCoverageComplete
+    );
+    const fullWalletHistory = fullHistoryEnabled
+      ? await collectCompleteWalletTransactionHistory(mint, fullHistoryScope.wallets, {
+          apiKey: this.env.HELIUS_API_KEY,
+          walletSetVerifiedComplete: fullHistoryScope.walletSetVerifiedComplete,
+          maxPages: normalizeFullWalletHistoryMaxPages(this.env.FULL_WALLET_HISTORY_MAX_PAGES),
+          expectedSignaturesByWallet: fullHistoryScope.expectedSignaturesByWallet,
+          fetcher
+        })
+      : null;
+    const fullHistoryComplete = fullWalletHistory?.status === "OBSERVED" &&
+      fullWalletHistory.dataComplete && fullWalletHistory.walletSetComplete &&
+      fullWalletHistory.walletsCovered.length === fullWalletHistory.walletsRequested;
+    const linksByEvidence = new Map<string, WalletLinkEvidence>();
+    for (const link of [...fundingEvidence.links, ...(fullWalletHistory?.links ?? [])]) {
+      const key = [link.walletA, link.walletB].sort().join(":") + ":" + [...link.evidence].sort().join(",");
+      linksByEvidence.set(key, link);
+    }
+    const combined: WalletLinkEvidenceSnapshot = {
+      provider: "helius", mint,
+      status: fullHistoryComplete ? "OBSERVED" : "DATA_INCOMPLETE",
+      coverage: fullHistoryComplete ? "FULL_WALLET_HISTORY" :
+        fundingEvidence.dataComplete ? "FULL_SOL_TRANSFER_HISTORY" : "INCOMPLETE",
+      dataComplete: fullHistoryComplete,
+      walletSetComplete: tradeCoverageComplete && wallets.length <= 16,
+      requestedWallets: wallets,
+      walletsCovered: fullWalletHistory?.walletsCovered ?? fundingEvidence.walletsCovered,
+      walletsRequested: wallets.length,
+      walletsChecked: fullWalletHistory?.walletsChecked ?? fundingEvidence.walletsChecked,
+      transactionsChecked: fullWalletHistory?.transactionsChecked ?? 0,
+      pagesScanned: fundingEvidence.pagesScanned + (fullWalletHistory?.pagesScanned ?? 0),
+      estimatedCredits: fullWalletHistory?.estimatedCredits ?? 0,
+      links: [...linksByEvidence.values()],
+      warnings: [...fundingEvidence.warnings, ...(fullWalletHistory?.warnings ?? [])],
+      observedAt: fullWalletHistory?.observedAt ?? fundingEvidence.observedAt,
+      fundingEvidence,
+      fullWalletHistory
+    };
+    this.walletLinkSnapshots[mint] = combined;
     this.reconcileHelius();
     await this.persist();
-    const risk = evaluateWalletClusterRisk(this.verifiedTransactions, {
+    const risk = evaluateWalletClusterRisk(candidateTransactions, {
       mint,
       creator: launch?.creator ?? null,
       totalSupply: launch?.tokenTotalSupply.toString() ?? null,
-      links: result.links,
+      links: combined.links,
       holdings: this.walletHoldingsByMint[mint] ?? []
     });
     await this.appendAudit("RISK_EVIDENCE", mint, {
-      evidenceType: "WALLET_CLUSTER", fundingEvidence: jsonSafe(result), risk: jsonSafe(risk)
+      evidenceType: "WALLET_CLUSTER",
+      fundingEvidence: jsonSafe(fundingEvidence),
+      fullWalletHistory: jsonSafe(fullWalletHistory),
+      walletClusterEvidence: jsonSafe(combined),
+      risk: jsonSafe(risk)
     }, `wallet-links:${mint}:${Math.floor(Date.now() / 60_000)}`);
-    return { ...result, risk };
+    return { ...combined, risk };
   }
 
   /** Collect one bounded holder or wallet-link snapshot on each scheduled tick. */
@@ -1545,23 +2159,55 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       coverageStartByMint
     });
     const creatorRiskByMint = new Map(creatorSellRisk.map(item => [item.mint, item]));
-    // Missing linkage collection remains WATCH; only the on-demand bounded
-    // Helius funding snapshot can contribute explicit >=70% relationship edges.
-    const launchByMint = new Map(this.verifiedTransactions.flatMap(tx => tx.createEvents)
-      .map(event => [event.mint, event] as const));
+    // A clean cluster result is PASS_COMPLETE only when the buyer set was
+    // fully backfilled, every wallet transaction history exhausted pagination,
+    // and the holder census is a stable full-token-account snapshot.
+    const archivedWalletRiskTransactions = new Map<string, VerifiedPumpTransaction[]>();
+    if (this.activeSessionId) {
+      const completeHistoryMints = candidateMints.filter(mint =>
+        this.walletLinkSnapshots[mint]?.coverage === "FULL_WALLET_HISTORY");
+      const archivedRows = await Promise.all(completeHistoryMints.map(async mint => ({
+        mint,
+        rows: await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(
+          `helius_verified_historical_transactions:${this.activeSessionId}:${mint}`)
+      })));
+      for (const item of archivedRows) {
+        archivedWalletRiskTransactions.set(item.mint, Object.values(item.rows ?? {}));
+      }
+    }
     const walletClusterRisk = candidateMints.map(mint => {
-      const launch = launchByMint.get(mint);
       const snapshot = this.walletLinkSnapshots[mint];
+      const transactionsBySignature = new Map<string, VerifiedPumpTransaction>();
+      for (const transaction of archivedWalletRiskTransactions.get(mint) ?? []) {
+        if (transaction.mint === mint) transactionsBySignature.set(transaction.signature, transaction);
+      }
+      for (const transaction of this.verifiedTransactions) {
+        if (transaction.mint === mint) transactionsBySignature.set(transaction.signature, transaction);
+      }
+      const candidateTransactions = [...transactionsBySignature.values()];
+      const launch = candidateTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
+      const evaluatedRisk = evaluateWalletClusterRisk(candidateTransactions, {
+        mint,
+        creator: launch?.creator ?? null,
+        totalSupply: launch?.tokenTotalSupply.toString() ?? null,
+        links: snapshot?.links ?? [],
+        holdings: this.walletHoldingsByMint[mint] ?? []
+      });
+      const holder = this.holderRiskSnapshots[mint] ?? null;
+      const walletHistoryComplete = snapshot?.coverage === "FULL_WALLET_HISTORY" &&
+        snapshot.dataComplete && snapshot.walletSetComplete;
+      const holderCensusComplete = holder?.status === "OBSERVED" &&
+        holder.snapshot.dataComplete === true &&
+        holder.snapshot.coverage === "FULL_TOKEN_ACCOUNT_CENSUS_STABLE";
+      const status = classifyWalletClusterRiskWithCoverage({
+        risk: evaluatedRisk,
+        fullWalletTransactionHistoryComplete: walletHistoryComplete,
+        fullHolderCensusComplete: holderCensusComplete
+      });
       return {
-        ...evaluateWalletClusterRisk(this.verifiedTransactions, {
-          mint,
-          creator: launch?.creator ?? null,
-          totalSupply: launch?.tokenTotalSupply.toString() ?? null,
-          links: snapshot?.links ?? [],
-          holdings: this.walletHoldingsByMint[mint] ?? []
-        }),
+        ...evaluatedRisk, status,
         collection: snapshot ?? null,
-        holderConcentration: this.holderRiskSnapshots[mint] ?? null
+        holderConcentration: holder
       };
     });
     const creatorRiskRank = (status: string): number =>
@@ -1884,10 +2530,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         if (Number.isSafeInteger(record.id) && record.error) {
           const failed = this.heliusState.subscriptions.find(item => item.requestId === record.id);
           if (failed) {
-            this.heliusState = {
-              ...this.heliusState,
-              incompleteMints: [...new Set([...this.heliusState.incompleteMints, failed.mint])].slice(-10)
-            };
+            this.heliusState = recordHeliusCoverageGap(
+              this.heliusState, failed.mint, new Date().toISOString()
+            );
             this.status.incompleteHeliusTransactions += 1;
             this.auditInBackground("DATA_GAP", failed?.mint ?? null, {
               provider: "helius", reason: "SUBSCRIPTION_REJECTED", requestId: record.id,
@@ -1902,6 +2547,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const params = record.params as Record<string, unknown> | undefined;
         const subscriptionId = params?.subscription;
         if (!Number.isSafeInteger(subscriptionId)) { this.markHeliusIncomplete(); return; }
+        this.heliusState = recordHeliusNotificationBoundary(
+          this.heliusState, subscriptionId as number,
+          notification.signature, notification.slot, new Date().toISOString()
+        );
         const result = enqueueHeliusNotification(this.heliusState, {
           subscriptionId: subscriptionId as number,
           signature: notification.signature,
@@ -1939,8 +2588,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       socket.addEventListener("error", () => {
         if (this.heliusSocket !== socket) return;
         this.status.lastError = "Helius WebSocket transport error.";
+        // An error can precede a close event or leave the socket half-open.
+        // Invalidate the affected coverage immediately; never wait for close.
+        if (this.status.enabled) this.markHeliusCoverageGap();
         this.auditInBackground("ERROR", null, { subsystem: "HELIUS_WEBSOCKET", message: this.status.lastError });
         void this.persist().catch(() => undefined);
+        // Force the close path so the coordinator releases this socket and
+        // schedules a fresh connection instead of remaining half-open.
+        try { socket.close(1011, "Helius transport error"); } catch { /* close is best-effort */ }
       });
     } catch {
       this.heliusSocket = null;
@@ -1948,7 +2603,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.heliusConnectedAtMs = 0;
       this.heliusConnectingSinceMs = 0;
       this.status.lastError = "Unable to create the Helius WebSocket connection.";
+      if (this.status.enabled) this.markHeliusCoverageGap();
       this.auditInBackground("ERROR", null, { subsystem: "HELIUS_CONNECT", message: this.status.lastError });
+      void this.persist().catch(() => undefined);
     }
   }
 
@@ -2260,6 +2917,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         });
         activeWork = null;
       }
+      await this.scanIndependentHeliusGapHistory().catch(() => undefined);
+      await this.decodeIndependentHeliusGapHistory().catch(() => undefined);
+      await this.flushIndependentHeliusGapArchives().catch(() => undefined);
+      await this.recoverCoveredHeliusGaps().catch(() => undefined);
     } catch {
       this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
       this.auditInBackground("ERROR", activeWork?.mint ?? null, { subsystem: "HELIUS_QUEUE", message: this.status.lastError });
@@ -2300,17 +2961,390 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Independently scan one closed WebSocket interruption per queue cycle.
+   * Cursor and accumulated pages live in Durable Object storage, so a Worker
+   * restart resumes from the last validated Helius signature boundary.
+   *
+   * This phase only establishes signature-history coverage. It deliberately
+   * does not mark the gap recovered: transaction decoding and Neon archive
+   * acknowledgements are separate proof requirements.
+   */
+  private async scanIndependentHeliusGapHistory(): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId || !this.status.enabled) return;
+    const gaps = this.heliusState.coverageGaps.filter(item =>
+      item.endedAt !== null && item.recoveredAt == null
+    );
+    for (const gap of gaps) {
+      const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+      const subscription = this.heliusState.subscriptions.find(item => item.mint === gap.mint);
+      const saved = await this.ctx.storage.get<{
+        bondingCurve: string;
+        status: "SCANNING" | "SCANNED" | "INCOMPLETE";
+        resume?: HeliusGapHistoryResume;
+        signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
+        pagesScanned: number;
+        reason: string | null;
+        updatedAt: string;
+      }>(key);
+      // Skip this already-scanned interval and continue to the next one; a
+      // completed scan must not starve later interruption intervals.
+      if (saved?.status === "SCANNED") continue;
+      const bondingCurve = saved?.bondingCurve ?? subscription?.bondingCurve;
+      if (!bondingCurve) continue;
+
+      const throttledFetcher: typeof fetch = async (input, init) => {
+        while (!this.heliusBucket.tryTake()) {
+          await new Promise(resolve => setTimeout(resolve, this.heliusBucket.retryAfterMs));
+          if (!this.status.enabled || this.activeSessionId !== sessionId) {
+            throw new Error("Helius gap scan paused because the paper session stopped.");
+          }
+        }
+        return fetch(input, init);
+      };
+      const result = await fetchHeliusGapAddressHistory(
+        bondingCurve,
+        gap,
+        { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed", fetcher: throttledFetcher },
+        throttledFetcher,
+        1_000,
+        saved?.resume
+      );
+      const retryFromSavedBoundary = !result.complete && !result.resume && saved?.resume;
+      const next = {
+        bondingCurve,
+        status: result.complete ? "SCANNED" as const : "SCANNING" as const,
+        ...(result.resume ? { resume: result.resume } :
+          retryFromSavedBoundary ? { resume: saved.resume } : {}),
+        signatures: result.complete || result.resume ? result.signatures :
+          retryFromSavedBoundary ? saved.signatures : result.signatures,
+        pagesScanned: result.pagesScanned,
+        reason: result.complete ? null : result.reason,
+        updatedAt: new Date().toISOString()
+      };
+      await this.ctx.storage.put(key, next);
+      await this.appendAudit(result.complete ? "OBSERVATION" : "DATA_GAP", gap.mint, {
+        provider: "helius",
+        independentGapHistory: next.status,
+        startedAt: gap.startedAt,
+        endedAt: gap.endedAt,
+        pagesScanned: result.pagesScanned,
+        signaturesScanned: next.signatures.length,
+        resumable: Boolean(next.resume),
+        reason: next.reason,
+        storageKey: key
+      }, `helius-gap-history:${sessionId}:${gap.mint}:${gap.startedAt}:${result.pagesScanned}`);
+      return; // Bound work to one gap batch per queue cycle.
+    }
+  }
+
+  /**
+   * Decode the signature history for one independently scanned interruption.
+   * Each cursor advance is durable and bounded to one transaction per queue
+   * cycle. Only explicit failed transactions are terminal failures; unavailable
+   * or non-matching transactions remain incomplete and are retried.
+   *
+   * Successful decoded transactions are retained in Durable Object storage.
+   * Neon archival is a separate acknowledgement gate before recovery.
+   */
+  private async decodeIndependentHeliusGapHistory(): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId || !this.status.enabled) return;
+    for (const gap of this.heliusState.coverageGaps) {
+      if (gap.endedAt === null || gap.recoveredAt != null) continue;
+      const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+      const scan = await this.ctx.storage.get<{
+        bondingCurve: string;
+        status: "SCANNING" | "SCANNED" | "INCOMPLETE";
+        signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
+      }>(key);
+      if (scan?.status !== "SCANNED") continue;
+      const cursorKey = `${key}:decode_cursor`;
+      const cursor = await this.ctx.storage.get<number>(cursorKey) ?? 0;
+      if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor > scan.signatures.length) {
+        await this.ctx.storage.put(`${key}:decode_error`, {
+          reason: "Persisted independent gap decode cursor is invalid.",
+          updatedAt: new Date().toISOString()
+        });
+        return;
+      }
+      if (cursor >= scan.signatures.length) {
+        await this.ctx.storage.put(`${key}:decode_status`, {
+          status: "DECODED_PENDING_ARCHIVE",
+          decodedAt: new Date().toISOString(),
+          signatureCount: scan.signatures.length
+        });
+        continue;
+      }
+      const item = scan.signatures[cursor]!;
+      while (!this.heliusBucket.tryTake()) {
+        await new Promise(resolve => setTimeout(resolve, this.heliusBucket.retryAfterMs));
+        if (!this.status.enabled || this.activeSessionId !== sessionId) return;
+      }
+      const result = await fetchAndVerifyPumpTransaction(item.signature, gap.mint, {
+        apiKey: this.env.HELIUS_API_KEY,
+        commitment: "confirmed"
+      });
+      if (result.status === "DATA_INCOMPLETE" || result.status === "NOT_RELEVANT") {
+        await this.ctx.storage.put(`${key}:decode_error`, {
+          signature: item.signature,
+          reason: result.reason,
+          cursor,
+          updatedAt: new Date().toISOString()
+        });
+        await this.appendAudit("DATA_GAP", gap.mint, {
+          provider: "helius",
+          independentGapDecode: "WAITING",
+          signature: item.signature,
+          cursor,
+          reason: result.reason
+        }, `helius-gap-decode-wait:${sessionId}:${gap.mint}:${gap.startedAt}:${item.signature}`);
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+      if (result.status === "VERIFIED") {
+        if (result.transaction.slot !== item.slot) {
+          await this.ctx.storage.put(`${key}:decode_error`, {
+            signature: item.signature,
+            reason: "Decoded transaction slot does not match independently scanned signature history.",
+            cursor,
+            updatedAt: new Date().toISOString()
+          });
+          return;
+        }
+        const verifiedKey = `${key}:verified_transactions`;
+        const verified = await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(verifiedKey) ?? {};
+        verified[item.signature] = result.transaction;
+        await this.ctx.storage.put(verifiedKey, verified);
+        const signaturesKey = `${key}:verified_signatures`;
+        const signatures = new Set(await this.ctx.storage.get<string[]>(signaturesKey) ?? []);
+        signatures.add(item.signature);
+        await this.ctx.storage.put(signaturesKey, [...signatures]);
+      } else {
+        const failedKey = `${key}:failed_signatures`;
+        const failed = new Set(await this.ctx.storage.get<string[]>(failedKey) ?? []);
+        failed.add(item.signature);
+        await this.ctx.storage.put(failedKey, [...failed]);
+      }
+      await this.ctx.storage.put(cursorKey, cursor + 1);
+      await this.appendAudit("OBSERVATION", gap.mint, {
+        provider: "helius",
+        independentGapDecode: result.status,
+        signature: item.signature,
+        slot: item.slot,
+        cursor: cursor + 1,
+        totalSignatures: scan.signatures.length
+      }, `helius-gap-decode:${sessionId}:${gap.mint}:${gap.startedAt}:${item.signature}`);
+      return; // One getTransaction request per queue cycle.
+    }
+  }
+
+  /**
+   * Ship independently decoded gap evidence to the dedicated Neon archive.
+   * Transactions are sent one at a time and marked locally archived only after
+   * the API acknowledges the idempotent database write.
+   */
+  private async flushIndependentHeliusGapArchives(): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId || !this.postgresIngestConfigured) return;
+    for (const gap of this.heliusState.coverageGaps) {
+      if (gap.endedAt === null || gap.recoveredAt != null ||
+          !gap.startSignature || gap.startSlot === null ||
+          !gap.endSignature || gap.endSlot === null) continue;
+      const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+      const archiveStatus = await this.ctx.storage.get<{ status: string }>(`${key}:archive_status`);
+      if (archiveStatus?.status === "ARCHIVED") continue;
+      const scan = await this.ctx.storage.get<{
+        bondingCurve: string;
+        status: "SCANNING" | "SCANNED" | "INCOMPLETE";
+        signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
+        pagesScanned: number;
+      }>(key);
+      if (scan?.status !== "SCANNED") continue;
+      const cursor = await this.ctx.storage.get<number>(`${key}:decode_cursor`) ?? 0;
+      const verifiedSignatures = await this.ctx.storage.get<string[]>(`${key}:verified_signatures`) ?? [];
+      const failedSignatures = await this.ctx.storage.get<string[]>(`${key}:failed_signatures`) ?? [];
+      const transactions = await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(
+        `${key}:verified_transactions`
+      ) ?? {};
+      const archivedKey = `${key}:archived_signatures`;
+      const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
+      const completeDecode = cursor === scan.signatures.length &&
+        verifiedSignatures.length + failedSignatures.length === scan.signatures.length;
+      const state = {
+        bondingCurve: scan.bondingCurve,
+        startedAt: gap.startedAt,
+        endedAt: gap.endedAt,
+        startSignature: gap.startSignature,
+        startSlot: gap.startSlot,
+        endSignature: gap.endSignature,
+        endSlot: gap.endSlot,
+        pagesScanned: scan.pagesScanned,
+        signatures: scan.signatures,
+        decodeCursor: cursor,
+        verifiedSignatures,
+        failedSignatures,
+        status: completeDecode ? "DECODED" as const : "DECODING" as const
+      };
+      const checkpoint = await this.postPostgresIngest("/internal/helius-gap-recovery", {
+        sessionId, mint: gap.mint, gap: state
+      });
+      if (!checkpoint.ok) {
+        this.status.lastError = "Independent Helius gap checkpoint is waiting for Neon acknowledgement.";
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+      for (const signature of verifiedSignatures) {
+        if (archived.has(signature)) continue;
+        const transaction = transactions[signature];
+        if (!transaction) {
+          this.status.lastError = "Verified Helius gap transaction is missing from durable local storage.";
+          await this.ctx.storage.setAlarm(Date.now() + 30_000);
+          return;
+        }
+        const response = await this.postPostgresIngest("/internal/helius-gap-recovery", {
+          sessionId, mint: gap.mint, gap: state,
+          transaction: {
+            ...jsonSafe(transaction) as Record<string, unknown>,
+            provider: "helius", commitment: "confirmed",
+            receivedAt: transaction.receivedAt ?? new Date().toISOString()
+          }
+        });
+        if (!response.ok) {
+          this.status.lastError = "Independent Helius gap transaction is waiting for Neon acknowledgement.";
+          await this.ctx.storage.setAlarm(Date.now() + 30_000);
+          return;
+        }
+        archived.add(signature);
+        await this.ctx.storage.put(archivedKey, [...archived]);
+        return; // Bound Neon transaction writes to one per queue cycle.
+      }
+      if (completeDecode && archived.size === verifiedSignatures.length) {
+        const finalized = await this.postPostgresIngest("/internal/helius-gap-recovery", {
+          sessionId, mint: gap.mint, gap: { ...state, status: "ARCHIVED" }
+        });
+        if (!finalized.ok) {
+          this.status.lastError = "Independent Helius gap final archive acknowledgement is pending.";
+          await this.ctx.storage.setAlarm(Date.now() + 30_000);
+          return;
+        }
+        await this.ctx.storage.put(`${key}:archive_status`, {
+          status: "ARCHIVED",
+          archivedAt: new Date().toISOString(),
+          archivedSignatureCount: archived.size
+        });
+      }
+    }
+  }
+
+  /**
+   * Recover only interruptions wholly contained in an already completed,
+   * PostgreSQL-acknowledged launch-window backfill. Gaps outside that exact
+   * window remain incomplete; reconnects never clear them.
+   */
+  private async recoverCoveredHeliusGaps(): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId) return;
+    const gaps = this.heliusState.coverageGaps.filter(gap =>
+      gap.endedAt !== null && gap.recoveredAt == null
+    );
+    for (const gap of gaps) {
+      const independentKey = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+      const independentScan = await this.ctx.storage.get<{
+        status: "SCANNING" | "SCANNED" | "INCOMPLETE";
+        signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
+      }>(independentKey);
+      const independentArchive = await this.ctx.storage.get<{ status: string }>(
+        `${independentKey}:archive_status`
+      );
+      if (independentScan?.status === "SCANNED" && independentArchive?.status === "ARCHIVED") {
+        const [verifiedSignatures, failedSignatures, archivedSignatures] = await Promise.all([
+          this.ctx.storage.get<string[]>(`${independentKey}:verified_signatures`),
+          this.ctx.storage.get<string[]>(`${independentKey}:failed_signatures`),
+          this.ctx.storage.get<string[]>(`${independentKey}:archived_signatures`)
+        ]);
+        const proof = assessHeliusGapRecovery({
+          gap,
+          signatures: independentScan.signatures,
+          verifiedSignatures: verifiedSignatures ?? [],
+          failedSignatures: failedSignatures ?? [],
+          archivedSignatures: archivedSignatures ?? []
+        });
+        if (proof.recovered) {
+          const recovered = markHeliusCoverageGapRecovered(
+            this.heliusState, gap.mint, gap.startedAt,
+            { recovered: true, recoveredSignatures: proof.recoveredSignatures }
+          );
+          if (recovered !== this.heliusState) {
+            this.heliusState = recovered;
+            await this.ctx.storage.put("helius_monitor_state", this.heliusState);
+            await this.appendAudit("OBSERVATION", gap.mint, {
+              provider: "helius",
+              historicalGapRecovery: "RECOVERED",
+              startedAt: gap.startedAt,
+              endedAt: gap.endedAt,
+              recoveredSignatures: proof.recoveredSignatures,
+              evidenceSource: "INDEPENDENT_GAP_HISTORY_AND_NEON_ARCHIVE_ACKNOWLEDGEMENTS"
+            }, "helius-gap-recovered:" + sessionId + ":" + gap.mint + ":" + gap.startedAt);
+          }
+          continue;
+        }
+      }
+      const backfill = await this.ctx.storage.get<HistoricalBackfillState>(
+        "helius_backfill:" + sessionId + ":" + gap.mint
+      );
+      if (!backfill || backfill.status !== "COMPLETE") continue;
+      const decodeCoverage = await this.getHistoricalDecodeCoverage(sessionId, gap.mint, backfill);
+      if (!decodeCoverage.complete) continue;
+      const [verifiedSignatures, failedSignatures, archivedSignatures] = await Promise.all([
+        this.ctx.storage.get<string[]>("helius_verified_historical_signatures:" + sessionId + ":" + gap.mint),
+        this.ctx.storage.get<string[]>("helius_failed_historical_signatures:" + sessionId + ":" + gap.mint),
+        this.ctx.storage.get<string[]>("helius_archived_transaction_signatures:" + sessionId + ":" + gap.mint)
+      ]);
+      const proof = assessHeliusGapRecovery({
+        gap,
+        signatures: backfill.signatures,
+        verifiedSignatures: verifiedSignatures ?? [],
+        failedSignatures: failedSignatures ?? [],
+        archivedSignatures: archivedSignatures ?? []
+      });
+      if (!proof.recovered) continue;
+      const recovered = markHeliusCoverageGapRecovered(
+        this.heliusState, gap.mint, gap.startedAt,
+        { recovered: true, recoveredSignatures: proof.recoveredSignatures }
+      );
+      if (recovered === this.heliusState) continue;
+      this.heliusState = recovered;
+      await this.ctx.storage.put("helius_monitor_state", this.heliusState);
+      await this.appendAudit("OBSERVATION", gap.mint, {
+        provider: "helius",
+        historicalGapRecovery: "RECOVERED",
+        startedAt: gap.startedAt,
+        endedAt: gap.endedAt,
+        recoveredSignatures: proof.recoveredSignatures,
+        evidenceSource: "COMPLETE_LAUNCH_WINDOW_BACKFILL_AND_POSTGRES_ACKNOWLEDGEMENTS"
+      }, "helius-gap-recovered:" + sessionId + ":" + gap.mint + ":" + gap.startedAt);
+    }
+  }
   private markHeliusCoverageGap(): void {
+    const now = new Date().toISOString();
     const previouslyIncomplete = new Set(this.heliusState.incompleteMints);
-    const newlyIncomplete = [...new Set(this.heliusState.subscriptions.map(item => item.mint))]
-      .filter(mint => !previouslyIncomplete.has(mint));
-    if (newlyIncomplete.length === 0) return;
-    this.heliusState = {
-      ...this.heliusState,
-      incompleteMints: [...this.heliusState.incompleteMints, ...newlyIncomplete].slice(-10)
-    };
+    const affectedMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
+    for (const mint of affectedMints) {
+      this.heliusState = recordHeliusCoverageGap(this.heliusState, mint, now);
+    }
+    const newlyIncomplete = affectedMints.filter(mint => !previouslyIncomplete.has(mint));
+    if (affectedMints.length === 0) return;
     this.status.incompleteHeliusTransactions += newlyIncomplete.length;
-    this.auditInBackground("DATA_GAP", null, { reason: "HELIUS_COVERAGE_INTERRUPTED", affectedMints: newlyIncomplete });
+    this.auditInBackground("DATA_GAP", null, {
+      reason: "HELIUS_COVERAGE_INTERRUPTED",
+      affectedMints,
+      intervals: this.heliusState.coverageGaps.filter(gap =>
+        affectedMints.includes(gap.mint) && gap.endedAt === null
+      )
+    });
+    void this.ctx.storage.put("helius_monitor_state", this.heliusState).catch(() => undefined);
   }
 
   private markHeliusIncomplete(): void {
@@ -2500,6 +3534,38 @@ export default {
       } catch (error) {
         return Response.json({
           error: error instanceof Error ? error.message : "Unable to create PumpSwap quote"
+        }, { status: 409 });
+      }
+    }
+
+
+    if (url.pathname === "/executable-round-trip-quote" && request.method === "POST") {
+      let body: unknown;
+      try { body = await request.json(); } catch {
+        return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      const value = body && typeof body === "object" ? body as Record<string, unknown> : {};
+      const { mint, venue, buyAmountBaseUnits, poolAddress } = value;
+      if (typeof mint !== "string" || !mint.trim() ||
+          (venue !== "PUMP_CURVE" && venue !== "PUMPSWAP") ||
+          typeof buyAmountBaseUnits !== "string" || !/^\d+$/.test(buyAmountBaseUnits) ||
+          buyAmountBaseUnits.length > 20 || BigInt(buyAmountBaseUnits || "0") <= 0n ||
+          BigInt(buyAmountBaseUnits || "0") > 18_446_744_073_709_551_615n ||
+          (venue === "PUMPSWAP" && (typeof poolAddress !== "string" || !poolAddress.trim()))) {
+        return Response.json({
+          error: "mint, venue, positive u64 buyAmountBaseUnits, and poolAddress for PUMPSWAP are required"
+        }, { status: 400 });
+      }
+      try {
+        const result = await coordinator.requestExecutableRoundTripQuote({
+          mint, venue, buyAmountBaseUnits,
+          ...(typeof poolAddress === "string" ? { poolAddress } : {})
+        });
+        return Response.json(jsonSafe(result), { headers: { "cache-control": "no-store" } });
+      } catch (error) {
+        return Response.json({
+          error: error instanceof Error ? error.message : "Unable to validate executable round-trip quote",
+          paperEntryAuthorized: false
         }, { status: 409 });
       }
     }

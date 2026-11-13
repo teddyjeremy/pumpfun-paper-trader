@@ -2,7 +2,7 @@ import {describe,expect,it} from "vitest";
 import {assessHistoricalDecodeCoverage} from "../src/ingestion/helius-backfill-coverage.js";
 import type {HistoricalBackfillState} from "../src/ingestion/helius-backfill.js";
 
-const signatures=[{signature:"sig-a",slot:1,blockTime:100,err:null},{signature:"sig-b",slot:2,blockTime:101,err:null},{signature:"sig-c",slot:3,blockTime:102,err:null}];
+const signatures=[{signature:"sig-a",slot:1,blockTime:100,err:null},{signature:"sig-b",slot:2,blockTime:101,err:null},{signature:"sig-c",slot:3,blockTime:102,err:{InstructionError:[0,"Custom"]}}];
 const state={status:"COMPLETE",signatures} as HistoricalBackfillState;
 const base={
  state,queueCursor:3,queueSignatures:[],verifiedSignatures:["sig-a","sig-b"],
@@ -11,7 +11,7 @@ const base={
 describe("historical transaction decode coverage",()=>{
  it("requires every signature to have a terminal verified or failed outcome",()=>{
   expect(assessHistoricalDecodeCoverage(base).complete).toBe(true);
-  expect(assessHistoricalDecodeCoverage({...base,verifiedSignatures:["sig-a"],failedSignatures:[]}).complete).toBe(false);
+  expect(assessHistoricalDecodeCoverage({...base,verifiedSignatures:["sig-a","sig-b"],failedSignatures:[],archivedSignatures:["sig-a"]}).complete).toBe(false);
  });
  it("requires all verified transactions to be durably archived",()=>{
   const result=assessHistoricalDecodeCoverage({...base,archivedSignatures:["sig-a"]});
@@ -19,7 +19,7 @@ describe("historical transaction decode coverage",()=>{
   expect(result.reason).toContain("unarchived");
  });
  it("does not complete while queue work remains",()=>{
-  const result=assessHistoricalDecodeCoverage({...base,queueSignatures:["sig-b"]});
+  const result=assessHistoricalDecodeCoverage({...base,failedSignatures:[],queueSignatures:["sig-c"]});
   expect(result.complete).toBe(false);
   expect(result.reason).toContain("transaction queue");
  });
@@ -38,5 +38,21 @@ describe("historical transaction decode coverage",()=>{
  });
  it("rejects a signature marked both verified and failed",()=>{
   expect(()=>assessHistoricalDecodeCoverage({...base,failedSignatures:["sig-a","sig-c"]})).toThrow();
+ });
+ it("requires terminal outcomes to agree with the RPC transaction error field",()=>{
+  expect(()=>assessHistoricalDecodeCoverage({...base,verifiedSignatures:["sig-a"],failedSignatures:["sig-b","sig-c"],archivedSignatures:["sig-a"]})).toThrow(/successful transaction/);
+  expect(()=>assessHistoricalDecodeCoverage({...base,verifiedSignatures:["sig-a","sig-b","sig-c"],failedSignatures:[],archivedSignatures:["sig-a","sig-b","sig-c"]})).toThrow(/failed or unknown-status/);
+ });
+ it("rejects unrelated queue entries instead of silently filtering them",()=>{
+  expect(()=>assessHistoricalDecodeCoverage({...base,queueSignatures:["other"]})).toThrow();
+ });
+ it("rejects archived signatures that were never successfully decoded",()=>{
+  expect(()=>assessHistoricalDecodeCoverage({...base,archivedSignatures:["sig-a","sig-c"]})).toThrow();
+ });
+ it("rejects terminal signatures that remain queued",()=>{
+  expect(()=>assessHistoricalDecodeCoverage({...base,queueSignatures:["sig-a"]})).toThrow();
+ });
+ it("rejects duplicate signatures in the source backfill window",()=>{
+  expect(()=>assessHistoricalDecodeCoverage({...base,state:{...state,signatures:[...signatures,signatures[0]!]} })).toThrow();
  });
 });

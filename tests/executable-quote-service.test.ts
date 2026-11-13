@@ -1,6 +1,7 @@
 import {describe,expect,it} from "vitest";
-import {fetchExecutableRoundTripQuote} from "../src/ingestion/executable-quote-service.js";
+import {createPumpUnsignedPlanFeeEvidenceBuilder,fetchExecutableRoundTripQuote} from "../src/ingestion/executable-quote-service.js";
 import type {OfflinePumpQuote} from "../src/ingestion/executable-paper-quote.js";
+import type {UnsignedInstructionFeeEvidence} from "../src/ingestion/solana-fee-estimator.js";
 
 const mint="So11111111111111111111111111111111111111112";
 const observedAt="2026-11-12T12:00:00.000Z";
@@ -17,6 +18,22 @@ function quote(side:"BUY"|"SELL",slot:number,amount:string):OfflinePumpQuote {
   if(side==="BUY") return {...common,venue:"PUMP_CURVE" as const,venueFeeBaseUnits:"0"};
   return {...common,venue:"PUMP_CURVE" as const,venueFeeBaseUnits:"1000000"};
 }
+
+function exactFeeEvidence(networkFeeLamports:string,priorityFeeLamports:string):UnsignedInstructionFeeEvidence {
+  const estimate={
+    provider:"helius-solana-rpc" as const,commitment:"confirmed" as const,
+    networkFeeLamports,priorityFeeLamports,priorityFeeMicroLamportsPerCu:"1000",
+    computeUnitLimit:200_000,feeMessageSha256:"a".repeat(64),sampleCount:10,
+    firstSampleSlot:90,lastSampleSlot:99,observedSlot:100,
+    observedAt,priorityPercentile:75 as const
+  };
+  return {
+    status:"AVAILABLE",messageSha256:"a".repeat(64),
+    writableAccountKeys:["11111111111111111111111111111111"],
+    computeUnitLimit:200_000,estimate
+  };
+}
+
 describe("executable quote service",()=>{
   it("requires an exact-size fresh sell quote on the same venue and quote mint",async()=>{
     let calls=0;
@@ -36,6 +53,7 @@ describe("executable quote service",()=>{
     expect(calls).toBe(2);
     expect(result.status).toBe("QUOTES_VALIDATED");
     expect(result.paperEntryAuthorized).toBe(false);
+    expect(result.solUsdPriceUsd).toBe(150);
     expect(result.sellability.quoteSellable).toBe(true);
     expect(result.sellability.tokenAmountBaseUnits).toBe("1000000");
     expect(result.sellability.sellSlot).toBeGreaterThan(result.sellability.buySlot);
@@ -44,6 +62,33 @@ describe("executable quote service",()=>{
     expect(result.economics.roundTripCostPct).toBeLessThan(2.1);
     expect(result.economics.meetsRoundTripCostLimit).toBe(true);
     expect(result.economics.meetsMinimumNetReturn).toBe(false);
+  });
+
+  it("requires exact unsigned-message fee evidence for both buy and exact-size sell quotes",async()=>{
+    const calls:Array<{side:"BUY"|"SELL";amount:string}>=[];
+    const result=await fetchExecutableRoundTripQuote({
+      fetchQuote:async({side,amountBaseUnits})=>{
+        return side==="BUY"?quote("BUY",100,amountBaseUnits):{
+          ...quote("SELL",101,amountBaseUnits),inputAmountBaseUnits:amountBaseUnits
+        };
+      },
+      buildExactFeeEvidence:async({side,quote:raw})=>{
+        calls.push({side,amount:raw.inputAmountBaseUnits});
+        return exactFeeEvidence("5000","2000");
+      },
+      requireExactMessageFees:true,
+      helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
+        result:[{slot:99,prioritizationFee:1000}]
+      }),{status:200})},
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,
+      solUsd,now:()=>Date.parse(observedAt),executionDelayMs:100
+    });
+    expect(calls.map(item=>item.side)).toEqual(["BUY","SELL"]);
+    expect(calls[0]?.amount).toBe("100000000");
+    expect(calls[1]?.amount).toBe(result.buyQuote.outputAmountBaseUnits);
+    expect(result.exactFeeEvidence?.buy.status).toBe("AVAILABLE");
+    expect(result.exactFeeEvidence?.sell.status).toBe("AVAILABLE");
+    expect(result.paperEntryAuthorized).toBe(false);
   });
   it("blocks when the sell quote does not match the exact buy output",async()=>{
     await expect(fetchExecutableRoundTripQuote({
@@ -95,5 +140,26 @@ describe("executable quote service",()=>{
       }),{status:200})},
       buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,solUsd,now:()=>Date.parse(observedAt)
     })).rejects.toThrow(/maximum price impact/);
+  });
+});
+
+
+describe("exact unsigned plan fee evidence adapter",()=>{
+  it("fails closed without a verified quote snapshot and never authorizes signing or submission",async()=>{
+    const buildExactFeeEvidence=createPumpUnsignedPlanFeeEvidenceBuilder({
+      identity:{
+        kind:"NON_SIGNING_VIRTUAL_TRADER",publicKey:"11111111111111111111111111111111",
+        derivationVersion:1,canSign:false,canSubmit:false
+      },
+      config:{apiKey:"test"},
+      computeUnitLimit:200_000
+    });
+    const evidence=await buildExactFeeEvidence({
+      side:"BUY",quote:quote("BUY",100,"100000000")
+    });
+    expect(evidence.status).toBe("UNAVAILABLE");
+    if(evidence.status==="UNAVAILABLE") {
+      expect(evidence.reason).toMatch(/verified same-context account snapshot/);
+    }
   });
 });

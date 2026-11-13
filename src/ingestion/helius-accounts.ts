@@ -15,7 +15,7 @@ export interface HeliusAccountSnapshot {
 }
 
 function decodeBase64(value: string, maximumBytes: number): Uint8Array {
-  if (!value || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     throw new Error("Helius account data is not valid base64.");
   }
   const estimatedBytes = Math.floor(value.length * 3 / 4);
@@ -55,12 +55,22 @@ function parseAccount(
   if (data.length !== 2 || typeof data[0] !== "string" || data[1] !== "base64") {
     throw new Error("Helius account data must use the base64 encoding.");
   }
+  const lamports = account.lamports;
+  const executable = account.executable;
+  if (lamports !== undefined && (!Number.isSafeInteger(lamports) || (lamports as number) < 0)) {
+    throw new Error("Helius account lamports are invalid.");
+  }
+  if (executable !== undefined && typeof executable !== "boolean") {
+    throw new Error("Helius account executable flag is invalid.");
+  }
   return {
     address,
     owner: account.owner,
     data: decodeBase64(data[0], maxAccountBytes),
     slot,
-    observedAt
+    observedAt,
+    ...(lamports === undefined ? {} : { lamports: lamports as number }),
+    ...(executable === undefined ? {} : { executable })
   };
 }
 

@@ -124,6 +124,18 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     );
     expect(counts.rows[0]).toEqual({ events: 1, positions: 1, quotes: 2, trades: 1 });
 
+    const dashboardLedger = await ledgerPersistence!.getPaperSessionLedgerSnapshot(sessionId);
+    expect(dashboardLedger.available).toBe(true);
+    expect(dashboardLedger.positions).toHaveLength(1);
+    expect(dashboardLedger.positions[0]).toMatchObject({
+      session_id: sessionId, mint, status: "OPEN", token_amount_base_units: "1000000"
+    });
+    expect(dashboardLedger.quotes).toHaveLength(2);
+    expect(dashboardLedger.trades).toHaveLength(1);
+    expect(dashboardLedger.trades[0]).toMatchObject({
+      session_id: sessionId, mint, side: "buy", quote_id: "integration-buy-q"
+    });
+
     await expect(ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
       data: { ...entryEvent.data, position: { ...position, stakeUsd: 1.25 } }
@@ -155,43 +167,84 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     );
     expect(afterRollback.rows[0]).toEqual({ last_sequence: "1", events: 1, positions: 1 });
 
+    const closedAt = "2026-11-12T10:01:00.000Z";
+    const closedPosition = {
+      ...position, status: "CLOSED", closedAt,
+      latestLiquidationValueUsd: 0, realizedPnlUsd: -0.021, exitReason: "TEST_EXIT"
+    };
+    const exitQuote = {
+      ...quote("SELL", "integration-exit-sell-q"),
+      observedAt: "2026-11-12T10:00:59.000Z",
+      expiresAt: "2026-11-12T10:01:01.000Z",
+      simulatedFillAt: "2026-11-12T10:01:00.050Z"
+    };
+    const exitEvent = {
+      ...entryEvent, sequence: 2, eventId: "integration-exit-2",
+      kind: "PAPER_EXIT", occurredAt: closedAt,
+      data: { position: closedPosition, sellQuoteId: exitQuote.quoteId,
+        exitReason: "TEST_EXIT", sellQuote: exitQuote }
+    };
+    const exit = await ledgerPersistence!.persistPaperAuditEvents(sessionId, [exitEvent]);
+    expect(exit).toEqual({ inserted: 1, duplicates: 0, lastSequence: 2 });
+    expect(await ledgerPersistence!.persistPaperAuditEvents(sessionId, [exitEvent]))
+      .toEqual({ inserted: 0, duplicates: 1, lastSequence: 2 });
+
+    // A fresh dashboard read must reconstruct the closed trade and both fills
+    // from the durable PostgreSQL projections, independent of Worker memory.
+    const recoveredLedger = await ledgerPersistence!.getPaperSessionLedgerSnapshot(sessionId);
+    expect(recoveredLedger.available).toBe(true);
+    expect(recoveredLedger.positions).toHaveLength(1);
+    expect(recoveredLedger.positions[0]).toMatchObject({
+      session_id: sessionId, mint, status: "CLOSED", exit_reason: "TEST_EXIT"
+    });
+    expect(recoveredLedger.quotes).toHaveLength(3);
+    expect(recoveredLedger.trades).toHaveLength(2);
+    expect(recoveredLedger.trades.map((trade: { side: string }) => trade.side).sort())
+      .toEqual(["buy", "sell"]);
+
     const next = await ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
-      sequence: 2,
-      eventId: "integration-session-heartbeat-2",
+      sequence: 3,
+      eventId: "integration-session-heartbeat-3",
       kind: "SESSION_HEARTBEAT",
-      occurredAt: "2026-11-12T10:00:02.000Z",
+      occurredAt: "2026-11-12T10:01:02.000Z",
       data: { heartbeat: true }
     }]);
-    expect(next).toEqual({ inserted: 1, duplicates: 0, lastSequence: 2 });
+    expect(next).toEqual({ inserted: 1, duplicates: 0, lastSequence: 3 });
   });
   it("persists resumable Helius checkpoints and verified decoded transactions idempotently", async () => {
     await ledgerPersistence!.persistPaperAuditEvents(sessionId, [entryEvent]);
     const backfillMint = "So11111111111111111111111111111111111111112";
     const createSignature = "5".repeat(64);
+    const tradeSignature = "4".repeat(64);
     const state = {
       bondingCurve: "11111111111111111111111111111111",
       createSignature,
       launchBlockTime: 1762941600,
       horizonSeconds: 600,
       maxSignatures: 120,
-      signatures: [{ signature: createSignature, slot: 123, blockTime: 1762941600, err: null }],
+      signatures: [
+        { signature: tradeSignature, slot: 124, blockTime: 1762941601, err: null },
+        { signature: createSignature, slot: 123, blockTime: 1762941600, err: null }
+      ],
       pagesScanned: 1,
-      scannedCount: 1,
+      scannedCount: 2,
       before: null,
+      lastPageSlot: 123,
+      lastPageBlockTime: 1762941600,
       status: "COMPLETE" as const,
       reason: null
     };
     const transaction = {
       mint: backfillMint,
-      signature: createSignature,
-      slot: 123,
+      signature: tradeSignature,
+      slot: 124,
       provider: "helius" as const,
       commitment: "confirmed" as const,
       source: "HISTORICAL_BACKFILL" as const,
       receivedAt: "2026-11-12T10:00:03.000Z",
-      createEvents: [{ mint: backfillMint, bondingCurve: state.bondingCurve }],
-      tradeEvents: []
+      createEvents: [],
+      tradeEvents: [{ mint: backfillMint, trader: "11111111111111111111111111111111" }]
     };
     const pendingDecode = { complete: false, reason: "Historical signatures are still being checked.", verifiedTransactionCount: 0 };
     await ledgerPersistence!.persistHeliusBackfillArchive({ sessionId, mint: backfillMint, state, transaction, decodeCoverage: pendingDecode });
@@ -210,17 +263,73 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       [sessionId, backfillMint]
     );
     expect(archived.rows[0]).toEqual({
-      status: "COMPLETE", pages_scanned: 1, signature_count: 1,
+      status: "COMPLETE", pages_scanned: 1, signature_count: 2,
       launch_block_time: "1762941600", decoded_complete: true,
       verified_transaction_count: 1, transactions: 1
     });
+    await ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
+      ...entryEvent,
+      sequence: 4,
+      eventId: "integration-wallet-risk-4",
+      kind: "RISK_EVIDENCE",
+      mint: backfillMint,
+      occurredAt: "2026-11-12T10:00:04.000Z",
+      data: {
+        evidenceType: "WALLET_CLUSTER",
+        fundingEvidence: {
+          status: "OBSERVED", dataComplete: true, walletSetComplete: true,
+          observedAt: "2026-11-12T10:00:03.900Z",
+          requestedWallets: ["11111111111111111111111111111111"],
+          walletsCovered: ["11111111111111111111111111111111"], links: []
+        }
+      }
+    }]);
     const replayDataset = await ledgerPersistence!.getHeliusBackfillReplayDataset(sessionId);
     expect(replayDataset).toHaveLength(1);
     expect(replayDataset[0]).toMatchObject({
       mint: backfillMint, launchBlockTime: 1762941600, decodedComplete: true,
-      signatureCount: 1, verifiedTransactionCount: 1
+      signatureCount: 2, verifiedTransactionCount: 1
     });
     expect(replayDataset[0]?.transactions).toHaveLength(1);
+    expect(replayDataset[0]?.riskEvidence).toHaveLength(1);
+    expect(replayDataset[0]?.riskEvidence[0]).toMatchObject({
+      occurredAt: "2026-11-12T10:00:04.000Z",
+      payload: { evidenceType: "WALLET_CLUSTER" }
+    });
+
+    const expandedWindow = {
+      ...state,
+      pagesScanned: 2,
+      scannedCount: 3,
+      lastPageSlot: 122,
+      lastPageBlockTime: 1762941599,
+      signatures: [
+        state.signatures[1]!,
+        { signature: "7".repeat(64), slot: 122, blockTime: 1762941599, err: null }
+      ]
+    };
+    await ledgerPersistence!.persistHeliusBackfillArchive({
+      sessionId, mint: backfillMint, state: expandedWindow,
+      decodeCoverage: { complete: false, reason: "Expanded signature window requires decoding.", verifiedTransactionCount: 0 }
+    });
+    const revoked = await inspector!.query(
+      "SELECT decoded_complete,decoded_reason,window_end_block_time,last_page_slot,last_page_block_time,scan_provider,scan_commitment FROM helius_backfill_jobs WHERE session_id=$1 AND mint=$2",
+      [sessionId, backfillMint]
+    );
+    expect(revoked.rows[0]).toEqual({
+      decoded_complete: false,
+      decoded_reason: "Expanded signature window requires decoding.",
+      window_end_block_time: "1762942200",
+      last_page_slot: "122",
+      last_page_block_time: "1762941599",
+      scan_provider: "helius",
+      scan_commitment: "confirmed"
+    });
+    const refreshedReplay = await ledgerPersistence!.getHeliusBackfillReplayDataset(sessionId);
+    expect(refreshedReplay[0]).toMatchObject({
+      decodedComplete: false, signatureCount: 2, verifiedTransactionCount: 0
+    });
+    expect(refreshedReplay[0]?.transactions).toHaveLength(0);
 
     await expect(ledgerPersistence!.persistHeliusBackfillArchive({
       sessionId, mint: backfillMint, state,
@@ -235,6 +344,8 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       signatures: [],
       pagesScanned: 0,
       scannedCount: 0,
+      lastPageSlot: null,
+      lastPageBlockTime: null,
       status: "INCOMPLETE" as const,
       reason: "Verified launch block time is unavailable."
     };
@@ -250,6 +361,83 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       status: "INCOMPLETE", launch_block_time: null,
       reason: "Verified launch block time is unavailable."
     });
+  });
+
+  it("archives every independently recovered gap transaction before marking the gap complete", async () => {
+    await ledgerPersistence!.persistPaperAuditEvents(sessionId, [entryEvent]);
+    const gapMint = "So11111111111111111111111111111111111111112";
+    const olderSignature = "8".repeat(64);
+    const newerSignature = "9".repeat(64);
+    const baseGap = {
+      bondingCurve: "11111111111111111111111111111111",
+      startedAt: "2026-11-12T11:00:00.000Z",
+      endedAt: "2026-11-12T11:01:00.000Z",
+      startSignature: olderSignature,
+      startSlot: 200,
+      endSignature: newerSignature,
+      endSlot: 201,
+      pagesScanned: 1,
+      signatures: [
+        { signature: newerSignature, slot: 201, blockTime: 1794481260, err: null },
+        { signature: olderSignature, slot: 200, blockTime: 1794481200, err: null }
+      ],
+      decodeCursor: 2,
+      verifiedSignatures: [newerSignature, olderSignature],
+      failedSignatures: [],
+      status: "DECODED" as const
+    };
+    const transaction = {
+      signature: newerSignature,
+      slot: 201,
+      provider: "helius" as const,
+      commitment: "confirmed" as const,
+      receivedAt: "2026-11-12T11:01:01.000Z",
+      createEvents: [],
+      tradeEvents: [{ mint: gapMint, trader: "11111111111111111111111111111111" }]
+    };
+    const olderTransaction = {
+      ...transaction,
+      signature: olderSignature,
+      slot: 200,
+      receivedAt: "2026-11-12T11:00:01.000Z"
+    };
+
+    await ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: baseGap
+    });
+    await expect(ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: { ...baseGap, status: "ARCHIVED" }
+    })).rejects.toThrow(/cannot be marked archived/);
+    await ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: baseGap, transaction
+    });
+    await ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: baseGap, transaction
+    });
+    await ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: baseGap, transaction: olderTransaction
+    });
+    await ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: { ...baseGap, status: "ARCHIVED" }
+    });
+
+    const result = await inspector!.query(
+      `SELECT j.status,j.archived_complete,
+        (SELECT COUNT(*)::int FROM helius_transaction_observations t
+          WHERE t.session_id=j.session_id AND t.mint=j.mint
+            AND t.observation_source='GAP_RECOVERY') AS archived_transactions
+       FROM helius_gap_recovery_jobs j
+       WHERE j.session_id=$1 AND j.mint=$2 AND j.started_at=$3`,
+      [sessionId, gapMint, baseGap.startedAt]
+    );
+    expect(result.rows[0]).toEqual({
+      status: "ARCHIVED", archived_complete: true, archived_transactions: 2
+    });
+
+    await expect(ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint,
+      gap: { ...baseGap, endSlot: 202, status: "ARCHIVED" }
+    })).rejects.toThrow(/anchors/);
   });
 
 });

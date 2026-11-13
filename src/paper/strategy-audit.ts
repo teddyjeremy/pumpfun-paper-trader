@@ -50,6 +50,28 @@ export interface StrictStrategyAudit {
   watchReasons: string[];
   blockingUnknownRules: string[];
 }
+
+const REQUIRED_STRATEGY_RULES = Object.freeze([
+  "CANDIDATE_AGE", "IMPULSE", "PULLBACK", "RECLAIM", "THREE_FLOW_WINDOWS",
+  "DISTINCT_BUYERS", "BUYER_CONCENTRATION", "CREATOR_SELL_RISK", "WALLET_CLUSTER_RISK",
+  "ATTRIBUTION_CONFIDENCE", "PULLBACK_VOLUME_CONTRACTION", "RECLAIM_VOLUME_EXPANSION",
+  "SIGNAL_FRESHNESS", "EXECUTABLE_QUOTE", "ROUND_TRIP_COST"
+] as const);
+
+/** True only when every non-quote rule passes and both quote-dependent rules are still UNKNOWN. */
+export function canRequestExecutableQuote(audit: Pick<StrictStrategyAudit, "rules">): boolean {
+  if (!Array.isArray(audit.rules) || audit.rules.length !== REQUIRED_STRATEGY_RULES.length) return false;
+  const statuses = new Map<string, RuleStatus>();
+  for (const rule of audit.rules) {
+    if (!rule || !REQUIRED_STRATEGY_RULES.includes(rule.rule as typeof REQUIRED_STRATEGY_RULES[number]) ||
+        statuses.has(rule.rule)) return false;
+    statuses.set(rule.rule, rule.status);
+  }
+  if (statuses.size !== REQUIRED_STRATEGY_RULES.length) return false;
+  return REQUIRED_STRATEGY_RULES.slice(0, -2).every(rule => statuses.get(rule) === "PASS") &&
+    statuses.get("EXECUTABLE_QUOTE") === "UNKNOWN" &&
+    statuses.get("ROUND_TRIP_COST") === "UNKNOWN";
+}
 function result(rule: string, status: RuleStatus, actual: unknown, expected: string, reason: string): RuleResult {
   return { rule, status, actual, expected, reason };
 }
@@ -147,9 +169,8 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
   const watchReasons = unknownRules.map(rule => `${rule.rule}: ${rule.reason}`);
   const blockingUnknownRules = unknownRules.map(rule => rule.rule);
   // A BUY is possible only when every mandatory rule is present exactly once
-  // and PASS. The worker currently supplies no calibrated volume thresholds,
-  // no complete wallet-cluster clearance and no executable quote, so it remains
-  // WATCH until those real evidence sources are connected.
+  // and PASS. The Worker still lacks reviewed volume thresholds and complete
+  // wallet-cluster clearance; those unknowns keep candidates on WATCH.
   const allRulesPass = rules.length === 15 && rules.every(rule => rule.status === "PASS");
   const buyAllowed = rejectionReasons.length === 0 && unknownRules.length === 0 && allRulesPass;
   return {

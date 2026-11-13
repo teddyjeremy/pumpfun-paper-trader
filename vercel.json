@@ -10,5 +10,11 @@
       "source": "/(.*)",
       "destination": "/api/index"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "main": true,
+      "batch/unsigned-execution-readiness": false
+    }
+  }
 }
