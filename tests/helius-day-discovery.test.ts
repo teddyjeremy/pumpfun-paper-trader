@@ -81,6 +81,27 @@ describe("bounded historical Pump launch discovery", () => {
     expect(result.reason).toMatch(/ceiling/);
   });
 
+  it("resumes from a durable cursor without re-scanning prior pages", async () => {
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      rpcResult([{ signature: "7".repeat(88), slot: 899, blockTime: 1_699, err: null }]));
+    const result = await discoverPumpLaunchesInTimeRange(1_700, 1_900, {
+      apiKey: "test", fetcher, maxCredits: 20, maxLaunches: 10,
+      pageSize: 1, requestIntervalMs: 0,
+      resume: {
+        before: "8".repeat(88), pagesScanned: 4, signaturesScanned: 20,
+        transactionFetches: 12, creditsUsed: 16, launches: [],
+        previousOldest: { signature: "8".repeat(88), slot: 900, blockTime: 1_800 }
+      }
+    });
+    expect(result).toMatchObject({
+      status: "DAY_EXHAUSTED", pagesScanned: 5, signaturesScanned: 20,
+      transactionFetches: 12, creditsUsed: 17,
+      nextBefore: "8".repeat(88),
+      resumeBoundary: { signature: "8".repeat(88), slot: 900, blockTime: 1_800 }
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed on invalid ranges and malformed page order", async () => {
     const fetcher = vi.fn(async () => rpcResult([
       { signature, slot: 900, blockTime: 1_800, err: null },
