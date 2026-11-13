@@ -135,8 +135,8 @@ export async function fetchPumpCreateScanPage(input: {
       validationFailures.push(`matchedTransactions=${String(scan.matchedTransactions ?? "missing")}`);
     }
     if (!Number.isSafeInteger(scan.creditsCharged) ||
-        (scan.creditsCharged as number) < 10 || (scan.creditsCharged as number) > 20) {
-      validationFailures.push(`creditsCharged=${String(scan.creditsCharged ?? "missing")} (expected integer 10-20)`);
+        (scan.creditsCharged as number) < 10 || (scan.creditsCharged as number) > 21) {
+      validationFailures.push(`creditsCharged=${String(scan.creditsCharged ?? "missing")} (expected integer 10-21)`);
     }
   }
   const paginationTokenValid = result.paginationToken === undefined || result.paginationToken === null ||
