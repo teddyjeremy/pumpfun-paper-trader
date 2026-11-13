@@ -781,7 +781,7 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
              SELECT COUNT(*)::int FROM helius_transaction_observations t
              WHERE t.session_id=$1 AND t.mint=$2 AND t.observation_source='HISTORICAL_BACKFILL'
                AND t.signature IN (
-                 SELECT item->>'signature' FROM jsonb_array_elements(helius_backfill_jobs.signature_state) item
+                 SELECT item->>'signature' FROM jsonb_array_elements(helius_backfill_jobs.signature_state) AS expected(item)
                )
            ) WHERE session_id=$1 AND mint=$2`,
           [sessionId,mint]
@@ -825,7 +825,7 @@ export async function getHeliusBackfillReplayDataset(sessionId: string): Promise
            json_agg(t.raw_observation ORDER BY t.slot ASC,t.signature ASC)
              FILTER (WHERE t.signature IS NOT NULL AND t.observation_source='HISTORICAL_BACKFILL'
                AND t.signature IN (
-                 SELECT item->>'signature' FROM jsonb_array_elements(j.signature_state) item
+                 SELECT item->>'signature' FROM jsonb_array_elements(j.signature_state) AS expected(item)
                )),
            '[]'::json
          ) AS transactions
