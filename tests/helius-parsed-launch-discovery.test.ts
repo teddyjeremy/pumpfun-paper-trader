@@ -77,6 +77,9 @@ describe("Helius Parsed Events historical launch discovery", () => {
       { status: "INCOMPLETE", paginationToken: null, pagesScanned: 6, hasUnverifiedMatch: true }
     ], 20)).toBe(0);
     expect(findFirstResumableParsedLaunchBucket([
+      { status: "INCOMPLETE", paginationToken: null, pagesScanned: 6, reason: "Selected Create transaction is unavailable." }
+    ], 20)).toBe(0);
+    expect(findFirstResumableParsedLaunchBucket([
       { status: "INCOMPLETE", paginationToken: null, pagesScanned: 6, hasUnverifiedMatch: true, rescanAttempts: 1 }
     ], 20)).toBeNull();
   });
