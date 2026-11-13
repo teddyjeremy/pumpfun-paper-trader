@@ -124,6 +124,18 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     );
     expect(counts.rows[0]).toEqual({ events: 1, positions: 1, quotes: 2, trades: 1 });
 
+    const dashboardLedger = await ledgerPersistence!.getPaperSessionLedgerSnapshot(sessionId);
+    expect(dashboardLedger.available).toBe(true);
+    expect(dashboardLedger.positions).toHaveLength(1);
+    expect(dashboardLedger.positions[0]).toMatchObject({
+      session_id: sessionId, mint, status: "OPEN", token_amount_base_units: "1000000"
+    });
+    expect(dashboardLedger.quotes).toHaveLength(2);
+    expect(dashboardLedger.trades).toHaveLength(1);
+    expect(dashboardLedger.trades[0]).toMatchObject({
+      session_id: sessionId, mint, side: "buy", quote_id: "integration-buy-q"
+    });
+
     await expect(ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
       data: { ...entryEvent.data, position: { ...position, stakeUsd: 1.25 } }
