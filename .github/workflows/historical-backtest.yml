@@ -67,6 +67,10 @@ jobs:
         if: always() && hashFiles('artifacts/coins/*.json') != ''
         run: npm run backtest:rank -- --date="$BACKTEST_DATE" --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
 
+      - name: Rank decoded coins by first-30-second buyers, price movement and liquidity
+        if: always()
+        run: npm run backtest:rank -- --date="$BACKTEST_DATE" --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
+
       - name: Save checkpoint and collected data
         if: always()
         uses: actions/upload-artifact@v4
