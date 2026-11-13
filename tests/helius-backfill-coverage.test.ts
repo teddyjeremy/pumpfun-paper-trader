@@ -39,6 +39,10 @@ describe("historical transaction decode coverage",()=>{
  it("rejects a signature marked both verified and failed",()=>{
   expect(()=>assessHistoricalDecodeCoverage({...base,failedSignatures:["sig-a","sig-c"]})).toThrow();
  });
+ it("requires terminal outcomes to agree with the RPC transaction error field",()=>{
+  expect(()=>assessHistoricalDecodeCoverage({...base,failedSignatures:["sig-b"]})).toThrow(/successful transaction/);
+  expect(()=>assessHistoricalDecodeCoverage({...base,verifiedSignatures:["sig-a","sig-b","sig-c"],failedSignatures:[]})).toThrow(/failed or unknown-status/);
+ });
  it("rejects unrelated queue entries instead of silently filtering them",()=>{
   expect(()=>assessHistoricalDecodeCoverage({...base,queueSignatures:["other"]})).toThrow();
  });
