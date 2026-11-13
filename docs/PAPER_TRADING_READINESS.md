@@ -42,7 +42,7 @@ This document is the operational checklist for reaching the first verified simul
 - [ ] Define and compute calibrated volume thresholds from that dataset.
 - [ ] Calibrate buyer activity, liquidity, price response, wallet freshness, concentration, and entry timing thresholds.
 - [ ] Include fees, rent reserve, quote impact, slippage, and failed-entry costs in replay.
-- [ ] Report sample size, win rate, expectancy, profit factor, drawdown, and sensitivity to threshold changes.
+- [x] Calibration reports sample size, win rate, net expectancy, profit factor, and chronological compounded max drawdown for training and holdout.\n- [ ] Validate the reported metrics against a real, fully evidenced historical dataset and perform sensitivity analysis across thresholds.
 - [ ] Validate the full set of 15 mandatory strategy rules using evidence produced by the real collectors.
 - [ ] Do not weaken mandatory rules or fabricate evidence to force BUY decisions.
 
