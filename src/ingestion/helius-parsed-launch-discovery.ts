@@ -118,16 +118,35 @@ export async function fetchPumpCreateScanPage(input: {
     throw new Error("Malformed Parsed Events Scan response.");
   }
   const result = payload as Record<string, unknown>;
-  const scan = result.scan as Record<string, unknown> | undefined;
-  if (!result || !scan || !Array.isArray(result.data) ||
-      !["windowEnd", "limit", "budget", "deadline"].includes(String(scan.stoppedOn)) ||
-      !Number.isSafeInteger(scan.scannedTransactions) || (scan.scannedTransactions as number) < 0 ||
-      !Number.isSafeInteger(scan.matchedTransactions) || (scan.matchedTransactions as number) < 0 ||
-      !Number.isSafeInteger(scan.creditsCharged) || (scan.creditsCharged as number) < 10 ||
-      (scan.creditsCharged as number) > 20 ||
-      !(result.paginationToken === undefined || result.paginationToken === null ||
-        (typeof result.paginationToken === "string" && result.paginationToken.length > 0 && result.paginationToken.length <= 256))) {
-    throw new Error("Parsed Events Scan response is missing validated pagination or billing evidence.");
+  const scan = result.scan && typeof result.scan === "object" && !Array.isArray(result.scan)
+    ? result.scan as Record<string, unknown> : null;
+  const validationFailures: string[] = [];
+  if (!Array.isArray(result.data)) validationFailures.push("data is not an array");
+  if (!scan) {
+    validationFailures.push("scan summary is missing or malformed");
+  } else {
+    if (!["windowEnd", "limit", "budget", "deadline"].includes(String(scan.stoppedOn))) {
+      validationFailures.push(`stoppedOn=${String(scan.stoppedOn ?? "missing")}`);
+    }
+    if (!Number.isSafeInteger(scan.scannedTransactions) || (scan.scannedTransactions as number) < 0) {
+      validationFailures.push(`scannedTransactions=${String(scan.scannedTransactions ?? "missing")}`);
+    }
+    if (!Number.isSafeInteger(scan.matchedTransactions) || (scan.matchedTransactions as number) < 0) {
+      validationFailures.push(`matchedTransactions=${String(scan.matchedTransactions ?? "missing")}`);
+    }
+    if (!Number.isSafeInteger(scan.creditsCharged) ||
+        (scan.creditsCharged as number) < 10 || (scan.creditsCharged as number) > 20) {
+      validationFailures.push(`creditsCharged=${String(scan.creditsCharged ?? "missing")} (expected integer 10-20)`);
+    }
+  }
+  const paginationTokenValid = result.paginationToken === undefined || result.paginationToken === null ||
+    (typeof result.paginationToken === "string" && result.paginationToken.length > 0 && result.paginationToken.length <= 256);
+  if (!paginationTokenValid) {
+    const token = result.paginationToken;
+    validationFailures.push(`paginationToken type=${typeof token}, length=${typeof token === "string" ? token.length : "n/a"}`);
+  }
+  if (validationFailures.length > 0 || !scan || !Array.isArray(result.data)) {
+    throw new Error(`Parsed Events Scan response failed validation: ${validationFailures.join("; ").slice(0, 320)}.`);
   }
   const data: ParsedCreateSignature[] = [];
   for (const raw of result.data) {
