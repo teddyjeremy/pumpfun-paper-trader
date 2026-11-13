@@ -213,3 +213,22 @@ function emptyRisk(
 function ceilBps(amount: bigint, denominator: bigint): number {
   return Number((amount * 10_000n + denominator - 1n) / denominator);
 }
+
+
+/**
+ * A WATCH result becomes PASS_COMPLETE only when both independent data sources
+ * are complete at the same evaluation point and the graph has no high-
+ * confidence links. SOL-transfer-only history is not sufficient.
+ */
+export function classifyWalletClusterRiskWithCoverage(input: {
+  risk: WalletClusterRisk;
+  fullWalletTransactionHistoryComplete: boolean;
+  fullHolderCensusComplete: boolean;
+}): "PASS_COMPLETE" | "REJECT_OBSERVED" | "WATCH" {
+  if (input.risk.status === "REJECT_OBSERVED") return "REJECT_OBSERVED";
+  if (input.fullWalletTransactionHistoryComplete && input.fullHolderCensusComplete &&
+      input.risk.attributionStatus === "NO_HIGH_CONFIDENCE_LINKS") {
+    return "PASS_COMPLETE";
+  }
+  return "WATCH";
+}
