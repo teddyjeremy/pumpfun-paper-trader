@@ -7,7 +7,8 @@ import {
 } from "../src/paper/portfolio-session.js";
 
 class MemoryStorage implements PaperSessionStorage {
-  private values = new Map<string, unknown>();
+  constructor(private values = new Map<string, unknown>()) {}
+  reopen(): MemoryStorage { return new MemoryStorage(this.values); }
   async transaction<T>(closure: (txn: PaperSessionTransaction) => Promise<T>): Promise<T> {
     const working = new Map(this.values);
     const txn: PaperSessionTransaction = {
@@ -74,6 +75,31 @@ describe("atomic paper portfolio transitions", () => {
     expect(second.status).toBe("DUPLICATE");
     expect(applications).toBe(1);
     expect(db.read<any>(`audit_session:${sessionId}`)?.eventCount).toBe(2);
+  });
+
+  it("recovers the committed portfolio and idempotency marker after a storage-backed Worker restart", async () => {
+    const beforeRestart = storage();
+    const input = {
+      sessionId, idempotencyKey: "entry:mint:restart-safe", occurredAt, mint: "mint",
+      apply: (portfolio: ReturnType<typeof createPaperPortfolio>) => ({
+        state: { ...portfolio, availableCashUsd: 1.686 },
+        result: "position-recovered",
+        events: [{ kind: "PAPER_ENTRY" as const, data: { positionId: "position-recovered" } }]
+      })
+    };
+    const first = await commitPaperPortfolioTransition(beforeRestart, input);
+    expect(first.status).toBe("APPLIED");
+
+    // A new coordinator instance receives the same durable backing storage.
+    const afterRestart = beforeRestart.reopen();
+    expect(afterRestart.read<any>(`paper_portfolio:${sessionId}`)?.availableCashUsd).toBe(1.686);
+    const replay = await commitPaperPortfolioTransition(afterRestart, {
+      ...input,
+      apply: () => { throw new Error("replayed entry must not be applied"); }
+    });
+    expect(replay.status).toBe("DUPLICATE");
+    expect(afterRestart.read<any>(`audit_session:${sessionId}`)?.eventCount).toBe(2);
+    expect(afterRestart.read<any[]>(`audit_events:${sessionId}:00000000`)).toHaveLength(1);
   });
 
   it("rejects a transition after the session is stopped or replaced", async () => {
