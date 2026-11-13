@@ -43,13 +43,6 @@ async function inspectPumpUserVolumeAccumulator(input: {
   address: string;
   config: HeliusAccountReadConfig;
 }): Promise<PumpUserVolumeAccumulatorPrerequisite> {
-  const expectedAddress = PublicKey.findProgramAddressSync(
-    [Buffer.from("user_volume_accumulator"), new PublicKey(input.user).toBuffer()],
-    new PublicKey(PUMP_PROGRAM_ID)
-  )[0].toBase58();
-  if (input.address !== expectedAddress) {
-    throw new Error("Pump user volume accumulator address does not match the canonical user PDA.");
-  }
   const snapshot = await fetchHeliusMultipleAccounts([input.address], input.config);
   const nowMs = (input.config.now ?? Date.now)();
   const observedMs = Date.parse(snapshot.observedAt);
@@ -113,6 +106,16 @@ function removeBlocker(blockers: string[], blocker: string): void {
   if (index >= 0) blockers.splice(index, 1);
 }
 
+function assertCanonicalUserVolumeAccumulator(user: string, address: string): void {
+  const expectedAddress = PublicKey.findProgramAddressSync(
+    [Buffer.from("user_volume_accumulator"), new PublicKey(user).toBuffer()],
+    new PublicKey(PUMP_PROGRAM_ID)
+  )[0].toBase58();
+  if (address !== expectedAddress) {
+    throw new Error("Pump user volume accumulator address does not match the canonical user PDA.");
+  }
+}
+
 function assertTraderMatches(identity: NonSigningVirtualTraderIdentity, user: string): void {
   if (identity.kind !== "NON_SIGNING_VIRTUAL_TRADER" || identity.canSign !== false ||
       identity.canSubmit !== false || identity.publicKey !== user) {
@@ -129,6 +132,9 @@ export async function inspectPumpCurveV3InstructionPrerequisites(input: {
   config: HeliusAccountReadConfig;
 }): Promise<PumpInstructionAccountPrerequisites> {
   assertTraderMatches(input.identity, input.instruction.user);
+  assertCanonicalUserVolumeAccumulator(
+    input.instruction.user, input.instruction.userVolumeAccumulatorAddress
+  );
   const ataSnapshot = await inspectVirtualTraderAtaPrerequisites({
     identity: input.identity,
     baseMint: input.instruction.mint,
