@@ -1596,7 +1596,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             reason: error instanceof Error ? error.message : "Paper entry transition failed closed."
           }, `paper-entry-error:${triggerSignature}:${mint}`);
         }
-      }    }
+      }
+    }
   }
 
   private async recordCandidateTradePrice(
