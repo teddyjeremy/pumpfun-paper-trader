@@ -3003,11 +3003,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       1_000,
       saved?.resume
     );
+    const retryFromSavedBoundary = !result.complete && !result.resume && saved?.resume;
     const next = {
-      status: result.complete ? "SCANNED" as const :
-        result.resume ? "SCANNING" as const : "INCOMPLETE" as const,
-      ...(result.resume ? { resume: result.resume } : {}),
-      signatures: result.signatures,
+      status: result.complete ? "SCANNED" as const : "SCANNING" as const,
+      ...(result.resume ? { resume: result.resume } :
+        retryFromSavedBoundary ? { resume: saved.resume } : {}),
+      signatures: result.complete ? result.signatures :
+        result.resume ? result.signatures :
+        retryFromSavedBoundary ? saved.signatures : result.signatures,
       pagesScanned: result.pagesScanned,
       reason: result.complete ? null : result.reason,
       updatedAt: new Date().toISOString()
