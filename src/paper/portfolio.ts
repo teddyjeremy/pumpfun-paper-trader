@@ -38,6 +38,8 @@ export interface PaperPosition {
   buyQuoteId: string;
   entryPriceUsdPerToken: number;
   buyCostsUsd: number;
+  /** Sell-side execution costs reserved from cash until this position exits. */
+  expectedSellCostsUsd: number;
   /** Refundable simulated SOL rent held while this position's required ATAs exist. */
   rentReserveUsd: number;
   highWaterPriceUsdPerToken: number;
@@ -229,13 +231,14 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   const position: PaperPosition = {
     positionId: input.positionId, mint: input.mint, openedAt: input.occurredAt,
     stakeUsd: stake, tokenAmountBaseUnits: tokens.toString(), tokenDecimals, buyQuoteId: input.buyQuote.quoteId,
-    entryPriceUsdPerToken: entryPrice, buyCostsUsd: round(buyCosts), rentReserveUsd: round(rentReserveUsd),
+    entryPriceUsdPerToken: entryPrice, buyCostsUsd: round(buyCosts),
+    expectedSellCostsUsd: round(expectedSellCosts), rentReserveUsd: round(rentReserveUsd),
     highWaterPriceUsdPerToken: initialLiquidationPrice, latestPriceUsdPerToken: initialLiquidationPrice,
     latestLiquidationValueUsd: initialLiquidationValue,
     latestSellQuoteId: input.sellQuote.quoteId, latestSellQuoteAt: input.sellQuote.observedAt,
     realizedPnlUsd: null, status: "OPEN", exitReason: null
   };
-  const availableCashUsd = round(state.availableCashUsd - stake - buyCosts - rentReserveUsd);
+  const availableCashUsd = round(state.availableCashUsd - stake - buyCosts - expectedSellCosts - rentReserveUsd);
   if (availableCashUsd < 0) throw new Error("Buy fees and refundable rent reserve exceed available paper cash.");
   const reservedAccountRentUsd = round((state.reservedAccountRentUsd ?? 0) + rentReserveUsd);
   const positions = [...state.positions, position];
@@ -249,7 +252,7 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
     };
   }
 
-  const equity = round(availableCashUsd + reservedAccountRentUsd + initialLiquidationValue);
+  const equity = round(availableCashUsd + reservedAccountRentUsd + expectedSellCosts + initialLiquidationValue);
   const adjusted = applyEquityAndTopUp({ ...state, availableCashUsd, reservedAccountRentUsd }, equity, input.occurredAt);
   return {
     state: { ...state, ...adjusted, reservedAccountRentUsd, positions, enteredMints: [...state.enteredMints, input.mint] },
@@ -312,7 +315,7 @@ export function markPaperPosition(state: PaperPortfolioState, input: {
     throw new Error("Sell quotes include a mint that is not an open position.");
   }
   const equity = round(state.availableCashUsd + (state.reservedAccountRentUsd ?? 0) + positions.reduce((sum, position) =>
-    sum + (position.status === "CLOSED" ? 0 : position.latestLiquidationValueUsd), 0));
+    sum + (position.status === "CLOSED" ? 0 : position.latestLiquidationValueUsd + (position.expectedSellCostsUsd ?? 0)), 0));
   const adjusted = applyEquityAndTopUp({ ...state, positions }, equity, input.markedAt);
   return { ...state, ...adjusted, positions, lastMarkedAt: input.markedAt };
 }
@@ -347,7 +350,8 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
   positions[index] = position;
   const releasedRentReserveUsd = previous.rentReserveUsd ?? 0;
   const reservedAccountRentUsd = round(Math.max(0, (state.reservedAccountRentUsd ?? 0) - releasedRentReserveUsd));
-  const availableCashUsd = round(state.availableCashUsd + netProceeds + releasedRentReserveUsd);
+  const releasedSellFeeReserveUsd = previous.expectedSellCostsUsd ?? 0;
+  const availableCashUsd = round(state.availableCashUsd + netProceeds + releasedRentReserveUsd + releasedSellFeeReserveUsd);
   const remainingOpen = positions.some(item => item.status !== "CLOSED");
 
   // If other positions remain open, their last quotes may be stale. Defer
