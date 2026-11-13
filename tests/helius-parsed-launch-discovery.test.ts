@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   fetchPumpCreateScanPage, fetchVerifiedParsedLaunch,
-  canContinueParsedLaunchBucket, findFirstResumableParsedLaunchBucket
+  canContinueParsedLaunchBucket, findFirstResumableParsedLaunchBucket, canMarkParsedLaunchBucketEmpty
 } from "../src/ingestion/helius-parsed-launch-discovery.js";
 import { PUMP_FUN_PROGRAM_ID } from "../src/ingestion/helius.js";
 
@@ -29,6 +29,19 @@ function createLog(timestamp: number): string {
 const json = (value: unknown) => Response.json(value);
 
 describe("Helius Parsed Events historical launch discovery", () => {
+
+
+  it("never calls a bucket empty after a selected launch failed verification", () => {
+    expect(canMarkParsedLaunchBucketEmpty({
+      stoppedOn: "windowEnd", paginationToken: null, priorVerificationFailure: false
+    })).toBe(true);
+    expect(canMarkParsedLaunchBucketEmpty({
+      stoppedOn: "windowEnd", paginationToken: null, priorVerificationFailure: true
+    })).toBe(false);
+    expect(canMarkParsedLaunchBucketEmpty({
+      stoppedOn: "limit", paginationToken: null, priorVerificationFailure: false
+    })).toBe(false);
+  });
 
   it("keeps a failed selected transaction resumable while a bounded scan cursor remains", () => {
     expect(canContinueParsedLaunchBucket({
