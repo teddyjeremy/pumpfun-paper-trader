@@ -950,11 +950,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     // Acquire the fenced persistence lease only after the active session ID
     // exists. Acquiring before session creation sends a null session ID and
     // leaves the coordinator enabled without a lease or a scheduled alarm.
-    const leaseAcquired = this.postgresLeaseHeld || await this.acquirePostgresWorkerLease();
-    if (!leaseAcquired) {
+    let leaseError: string | null = null;
+    if (!this.postgresLeaseHeld) {
+      try {
+        await this.acquirePostgresWorkerLease();
+      } catch (error) {
+        leaseError = error instanceof Error ? error.message.slice(0, 180) : "Unknown PostgreSQL lease error.";
+      }
+    }
+    if (!this.postgresLeaseHeld) {
       await this.ctx.storage.put("enabled", false);
       this.status.enabled = false;
-      this.status.lastError = "PostgreSQL worker lease could not be acquired; provider streams remain stopped.";
+      this.status.lastError = leaseError ?? "PostgreSQL worker lease is not configured; provider streams remain stopped.";
       await this.persist();
       return this.getStatus();
     }
@@ -1059,9 +1066,17 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     // still enabled. Reacquire the fenced DB lease before reconnecting provider
     // streams; never collect live data while persistence ownership is absent.
     if (!this.postgresLeaseHeld) {
-      const leaseAcquired = await this.acquirePostgresWorkerLease();
-      if (!leaseAcquired) {
-        this.status.lastError = "PostgreSQL worker lease is unavailable; provider streams remain stopped.";
+      try {
+        await this.acquirePostgresWorkerLease();
+      } catch (error) {
+        this.status.lastError = error instanceof Error
+          ? error.message.slice(0, 180)
+          : "Unknown PostgreSQL lease error.";
+        await this.persist();
+        return this.getStatus();
+      }
+      if (!this.postgresLeaseHeld) {
+        this.status.lastError = "PostgreSQL worker lease is not configured; provider streams remain stopped.";
         await this.persist();
         return this.getStatus();
       }
