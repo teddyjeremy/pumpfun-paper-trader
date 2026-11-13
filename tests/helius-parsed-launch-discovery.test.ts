@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  fetchPumpCreateScanPage, fetchVerifiedParsedLaunch
+  fetchPumpCreateScanPage, fetchVerifiedParsedLaunch,
+  canContinueParsedLaunchBucket, findFirstResumableParsedLaunchBucket
 } from "../src/ingestion/helius-parsed-launch-discovery.js";
 import { PUMP_FUN_PROGRAM_ID } from "../src/ingestion/helius.js";
 
@@ -28,6 +29,28 @@ function createLog(timestamp: number): string {
 const json = (value: unknown) => Response.json(value);
 
 describe("Helius Parsed Events historical launch discovery", () => {
+
+  it("keeps a failed selected transaction resumable while a bounded scan cursor remains", () => {
+    expect(canContinueParsedLaunchBucket({
+      paginationToken: "cursor:next", pagesScanned: 1, maxPagesPerBucket: 5
+    })).toBe(true);
+    expect(canContinueParsedLaunchBucket({
+      paginationToken: null, pagesScanned: 1, maxPagesPerBucket: 5
+    })).toBe(false);
+    expect(canContinueParsedLaunchBucket({
+      paginationToken: "cursor:last", pagesScanned: 5, maxPagesPerBucket: 5
+    })).toBe(false);
+  });
+
+  it("resumes the earliest incomplete bucket with a safe cursor and remaining page allowance", () => {
+    expect(findFirstResumableParsedLaunchBucket([
+      { status: "FOUND", paginationToken: null, pagesScanned: 1 },
+      { status: "INCOMPLETE", paginationToken: null, pagesScanned: 1 },
+      { status: "INCOMPLETE", paginationToken: "cursor:2", pagesScanned: 2 },
+      { status: "INCOMPLETE", paginationToken: "cursor:3", pagesScanned: 5 }
+    ], 5)).toBe(2);
+  });
+
   it("requests only Pump create instructions inside the exact time bucket", async () => {
     const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => json({
       data: [{ signature, slot: 900, blockTime: 1_800 }],
