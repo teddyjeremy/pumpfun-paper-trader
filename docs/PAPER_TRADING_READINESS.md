@@ -12,7 +12,7 @@ This document is the operational checklist for reaching the first verified simul
 
 ### 1. CI and release integrity
 
-- [x] Latest PR head `37b1160dd54c7ce977fbbc4460401b6c46a39031` passed [GitHub CI run 43420524236](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43420524236): TypeScript no-emit check, 61 test files / 455 tests, TypeScript build, and Cloudflare Worker bundle.
+- [x] PR head `690d9e89d6e3d6284308281d8bc9a23addde19e6` passed [GitHub CI run 43423726899](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43423726899): `npm run check` and Cloudflare Worker bundle validation.
 - [x] Production dashboard deployment `dpl_BARieVKofhUX76xk1JpT3LUqjyVT` is READY at [pumpfun-paper-trader-six.vercel.app](https://pumpfun-paper-trader-six.vercel.app), deployed from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
 - [x] Production Worker deployment succeeded in [Cloudflare deployment workflow 43378493964](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43378493964); deployed version is `1dac036e-76c4-4ff6-90bc-37345d114c3b` from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
 - [ ] Production Worker smoke health and a complete simulated entry/exit lifecycle remain unverified. The deployed main-branch code still reports `tradingReady=false`; PR #77 is not deployed.
@@ -25,7 +25,9 @@ This document is the operational checklist for reaching the first verified simul
 - [x] Backfill coverage helper rejects empty/duplicate source signatures, unrelated queue entries, archived-but-unverified signatures, and signatures that are both queued and terminal.
 - [x] Worker passes unfiltered stored evidence to the integrity checker and fails closed on inconsistent state.
 - [ ] Confirm the live backfill worker archives every expected signature and records verified/failed terminal outcomes.
-- [ ] Demonstrate contiguous, complete launch-window event coverage with persisted provenance.
+- [x] Worker marks monitored mints incomplete immediately on Helius WebSocket transport errors, connection failures, and socket closure; transport errors force the close/reconnect path.
+- [x] Exit-window evidence rejects transaction buffers whose per-window event counts do not reconcile with the claimed complete-flow snapshots.
+- [ ] Demonstrate contiguous, complete launch-window event coverage with persisted provenance. A reconnect restores future subscriptions but does not prove that notifications were complete or recover events missed during the gap.
 - [ ] Ensure retry exhaustion, pagination truncation, missing transactions, and decoder errors cannot be interpreted as complete coverage.
 
 ### 3. Buyer, wallet-cluster, and holder risk
