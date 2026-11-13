@@ -815,7 +815,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (!this.postgresIngestConfigured) {
       throw new Error("Worker-to-Neon ingestion is not configured.");
     }
-    const keepLease = this.postgresLeaseHeld || this.status.enabled;
+    const keepLease = this.status.enabled;
     try {
       await this.acquirePostgresWorkerLease();
       if (!this.postgresLeaseHeld) throw new Error("Worker could not acquire its Neon lease.");
