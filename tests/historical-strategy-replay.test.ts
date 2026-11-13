@@ -222,7 +222,7 @@ describe("historical strategy replay", () => {
     expect(result.outcome?.netFinalReturnPct).toBeNull();
   });
   it("reports net expectancy, profit factor and drawdown on chronological holdout candidates", () => {
-    const replays = Array.from({ length: 40 }, (_, index) => {
+    const replays = Array.from({ length: 60 }, (_, index) => {
       const positive = index % 2 === 0;
       const launchBlockTime = index;
       return {
@@ -256,9 +256,9 @@ describe("historical strategy replay", () => {
   });
 
   it("rejects a volume threshold that does not generalize to positive net holdout returns", () => {
-    const replays = Array.from({ length: 40 }, (_, index) => {
+    const replays = Array.from({ length: 60 }, (_, index) => {
       const positive = index % 2 === 0;
-      const holdout = index >= 28;
+      const holdout = index >= 42;
       const launchBlockTime = index;
       return {
         mint, launchBlockTime, horizonSeconds: 600, decodeComplete: true,
