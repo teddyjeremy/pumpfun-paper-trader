@@ -119,6 +119,18 @@ describe("Pump.fun TradeEvent decoder", () => {
     });
   });
 
+  it("preserves verified trade fields when newer deployments append bounded fields", () => {
+    const [event] = decodePumpTradeEvents([
+      "Program data: " + encodeBase64([...tradeEventPayload(), ...u64(99n)])
+    ]);
+    expect(event).toMatchObject({
+      mint: "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+      solAmount: 5_000_000n,
+      tokenAmount: 1_000_000n,
+      trailingBytes: 8
+    });
+  });
+
   it("rejects truncated matching trade events", () => {
     expect(() => decodePumpTradeEvents(["Program data: " + encodeBase64(tradeDiscriminator)])).toThrow(/Truncated/);
   });

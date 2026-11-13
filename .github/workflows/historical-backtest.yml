@@ -21,7 +21,7 @@ on:
       previous_run_id:
         description: "Previous run ID containing pump-backtest-state for this date"
         required: false
-        default: "43505595998"
+        default: "43507464167"
         type: string
 
 permissions:
