@@ -77,6 +77,28 @@ describe("bounded Helius historical backfill", () => {
     expect(result.signaturesToFetch.map(item => item.signature)).toEqual([newer, create]);
   });
 
+  it("rejects pagination pages that repeat or move newer than the prior cursor", () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const first = applyAddressSignaturesPage(initial, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null }
+    ]);
+    expect(first.status).toBe("CONTINUE");
+    if (first.status !== "CONTINUE") return;
+    const repeated = applyAddressSignaturesPage(first.state, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null },
+      { signature: older, slot: 11, blockTime: 1050, err: null }
+    ]);
+    const outOfOrder = applyAddressSignaturesPage(first.state, [
+      { signature: "8".repeat(64), slot: 13, blockTime: 1070, err: null }
+    ]);
+    expect(repeated.status).toBe("INCOMPLETE");
+    expect(repeated.state.reason).toMatch(/preceding pagination page/i);
+    expect(outOfOrder.status).toBe("INCOMPLETE");
+    expect(outOfOrder.state.reason).toMatch(/pagination moved backwards/i);
+  });
+
   it("rejects duplicate or out-of-order address-history records", () => {
     const initial = createHistoricalBackfillState({
       mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
