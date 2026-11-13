@@ -20,7 +20,12 @@ function fetcherForMissingAccounts() {
       const addresses = body.params[0] as string[];
       return Response.json({
         jsonrpc: "2.0", id: "accounts",
-        result: { context: { slot: 1234 }, value: addresses.map(() => null) }
+        result: {
+          context: { slot: 1234 },
+          value: addresses.map(address => address === new PublicKey(new Uint8Array(32).fill(8)).toBase58()
+            ? { owner: "11111111111111111111111111111111", data: ["", "base64"], lamports: 1, executable: false }
+            : null)
+        }
       });
     }
     if (body.method === "getMinimumBalanceForRentExemption") {
@@ -70,7 +75,7 @@ describe("unsigned Pump instruction account prerequisites", () => {
     expect(result.totalNewRentReserveLamports).toBe(3_883_680);
     expect(result.blockers).toContain("USER_VOLUME_ACCUMULATOR_RENT_RESERVE_NOT_RECORDED_IN_PAPER_PORTFOLIO");
     expect(result.blockers).toContain("USER_VOLUME_ACCUMULATOR_INIT_INSTRUCTION_NOT_INCLUDED");
-    expect(result.blockers).toContain("BUYBACK_FEE_RECIPIENT_ACCOUNT_EXISTENCE_AND_STATE_NOT_VERIFIED");
+    expect(result.blockers).not.toContain("BUYBACK_FEE_RECIPIENT_ACCOUNT_EXISTENCE_AND_STATE_NOT_VERIFIED");
     expect(result.paperEntryAuthorized).toBe(false);
     expect(mock.rentCalls.sort((a, b) => a - b)).toEqual([137, 165]);
   });
@@ -117,8 +122,10 @@ describe("unsigned Pump instruction account prerequisites", () => {
           result: {
             context: { slot: 1234 },
             value: addresses.map(address => accountReads === 2 && address === volumePda.toBase58()
-              ? { owner: PUMP_PROGRAM_ID, data: [invalidAccountBase64, "base64"] }
-              : null)
+              ? { owner: PUMP_PROGRAM_ID, data: [invalidAccountBase64, "base64"], lamports: 1, executable: false }
+              : address === new PublicKey(new Uint8Array(32).fill(8)).toBase58()
+                ? { owner: "11111111111111111111111111111111", data: ["", "base64"], lamports: 1, executable: false }
+                : null)
           }
         });
       }
@@ -165,8 +172,10 @@ describe("unsigned Pump instruction account prerequisites", () => {
           result: {
             context: { slot: 1234 },
             value: addresses.map(address => accountReads === 2 && address === volumePda.toBase58()
-              ? { owner: PUMP_PROGRAM_ID, data: [encoded, "base64"] }
-              : null)
+              ? { owner: PUMP_PROGRAM_ID, data: [encoded, "base64"], lamports: 1_844_400, executable: false }
+              : address === new PublicKey(new Uint8Array(32).fill(8)).toBase58()
+                ? { owner: "11111111111111111111111111111111", data: ["", "base64"], lamports: 1, executable: false }
+                : null)
           }
         });
       }
