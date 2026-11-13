@@ -56,18 +56,18 @@ export async function collectCompleteWalletFundingEvidence(
       ["A valid mint and at least two unique wallets are required."]);
   }
   if (!walletSetComplete) {
-    warnings.push("The supplied wallet set exceeds the bounded sixteen-wallet collection limit or contains invalid/duplicate wallet entries.");
-    return result(mint, "DATA_INCOMPLETE", false, false, uniqueWallets.length, 0, 0, 0, warnings, [], uniqueWallets);
+    warnings.push("The supplied wallet set exceeds the bounded sixteen-wallet collection limit or contains invalid/duplicate wallet entries; only the first sixteen wallets are scanned for positive risk evidence.");
   }
 
+  const selectedWallets = uniqueWallets.slice(0, WALLET_HISTORY_MAX_WALLETS);
   const fetcher = config.fetcher ?? fetch;
   const url = buildHeliusRpcUrl(config.apiKey);
   const funderCounts = new Map<string, Map<string, { signatures: Set<string>; timestamps: number[] }>>();
   let transfersChecked = 0;
   let pagesScanned = 0;
-  let incomplete = false;
+  let incomplete = !walletSetComplete;
 
-  for (const wallet of uniqueWallets) {
+  for (const wallet of selectedWallets) {
     const counts = new Map<string, { signatures: Set<string>; timestamps: number[] }>();
     const seenCursors = new Set<string>();
     const seenSignatures = new Set<string>();
@@ -185,7 +185,7 @@ export async function collectCompleteWalletFundingEvidence(
   if (links.length === 0) warnings.push("No repeated common SOL-funder relationship was observed in the completely collected transfer histories.");
   const complete = !incomplete && walletSetComplete;
   return result(mint, complete ? "OBSERVED" : "DATA_INCOMPLETE", complete, walletSetComplete,
-    uniqueWallets.length, uniqueWallets.length, transfersChecked, pagesScanned, warnings, links, uniqueWallets, complete ? uniqueWallets : []);
+    uniqueWallets.length, selectedWallets.length, transfersChecked, pagesScanned, warnings, links, uniqueWallets, complete ? selectedWallets : selectedWallets);
 }
 
 async function rpc(
