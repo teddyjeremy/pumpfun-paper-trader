@@ -673,7 +673,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     if (this.status.enabled && this.postgresLeaseHeld) {
       await this.drainHeliusQueue();
-      await this.runScheduledPaperExitCycle();
+      try {
+        await this.runScheduledPaperExitCycle();
+      } catch (error) {
+        this.status.lastError = error instanceof Error
+          ? error.message : "Scheduled paper exit cycle failed.";
+        await this.appendAudit("ERROR", null, {
+          stage: "SCHEDULED_PAPER_EXIT_CYCLE",
+          reason: this.status.lastError
+        }, `paper-exit-cycle-failure:${Date.now()}`);
+      }
     }
     await this.flushAllAuditSessionsToPostgres();
     await this.flushAllHeliusBackfillArchivesToPostgres();
