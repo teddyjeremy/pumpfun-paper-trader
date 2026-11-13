@@ -40,9 +40,10 @@ describe("fresh executable quote eligibility",()=>{
     (oneFee.result as any).exactFeeEvidence.sell.status="UNAVAILABLE";
     expect(getFreshExecutableQuoteCostPct(oneFee,"mint-1",now)).toBeNull();
   });
-  it("rejects round-trip costs that fail the configured limit",()=>{
-    const failed=evidence();
-    (failed.result as any).economics.meetsRoundTripCostLimit=false;
-    expect(getFreshExecutableQuoteCostPct(failed,"mint-1",now)).toBeNull();
+  it("preserves quote availability while leaving an excessive cost for the strategy cost rule to fail",()=>{
+    const expensive=evidence();
+    (expensive.result as any).economics.roundTripCostPct=5.2;
+    (expensive.result as any).economics.meetsRoundTripCostLimit=false;
+    expect(getFreshExecutableQuoteCostPct(expensive,"mint-1",now)).toBe(5.2);
   });
 });
