@@ -153,6 +153,9 @@ export async function inspectPumpSwapV2InstructionPrerequisites(input: {
   config: HeliusAccountReadConfig;
 }): Promise<PumpInstructionAccountPrerequisites> {
   assertTraderMatches(input.identity, input.instruction.user);
+  if (input.instruction.buybackFeeRecipients.length === 0) {
+    throw new Error("PumpSwap V2 requires at least one buyback fee recipient.");
+  }
   const additionalRequirements = input.instruction.buybackFeeRecipients.map(owner => ({
     role: "buyback" as const,
     owner,
