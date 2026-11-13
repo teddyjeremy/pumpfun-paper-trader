@@ -3,8 +3,6 @@ import { Keypair } from "@solana/web3.js";
 import { fetchCompleteHolderConcentration } from "../src/ingestion/holder-risk.js";
 
 const mint = "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi";
-const accountA = "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR";
-const accountB = "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY";
 const ownerA = "So11111111111111111111111111111111111111112";
 const ownerB = "11111111111111111111111111111111";
 const ownerC = Keypair.generate().publicKey.toBase58();
