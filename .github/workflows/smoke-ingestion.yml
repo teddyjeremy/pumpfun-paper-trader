@@ -1,0 +1,33 @@
+name: Production Worker-to-Neon smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/smoke-ingestion.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-worker-neon-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install application dependencies
+        run: npm install
+      - name: Verify production Worker, API and Neon persistence
+        run: npm run smoke:ingestion
+        env:
+          PAPER_WORKER_CONTROL_TOKEN: ${{ secrets.PAPER_WORKER_CONTROL_TOKEN }}
