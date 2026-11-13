@@ -32,6 +32,8 @@ export interface CompleteWalletTransactionHistoryConfig {
   walletSetVerifiedComplete: boolean;
   fetcher?: typeof fetch;
   maxPages?: number;
+  /** Independently observed trade/create signatures that must appear in each wallet's full history pages. */
+  expectedSignaturesByWallet?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -58,6 +60,19 @@ export async function collectCompleteWalletTransactionHistory(
     throw new Error("Wallet transaction history maxPages must be between 1 and 5.");
   }
   const warnings: string[] = [];
+  const expectedByWallet = config.expectedSignaturesByWallet;
+  const expectedWalletKeys = expectedByWallet ? Object.keys(expectedByWallet) : [];
+  const expectedSignatureMapValid = Boolean(expectedByWallet) &&
+    expectedWalletKeys.length === uniqueWallets.length &&
+    uniqueWallets.every(wallet => {
+      const signatures = expectedByWallet?.[wallet];
+      return Array.isArray(signatures) && signatures.length > 0 &&
+        new Set(signatures).size === signatures.length &&
+        signatures.every(signature => typeof signature === "string" && SIGNATURE.test(signature));
+    });
+  if (!expectedSignatureMapValid) {
+    warnings.push("Expected historical create/trade signatures are missing, malformed, or do not cover every requested wallet.");
+  }
   if (!ADDRESS.test(mint) || uniqueWallets.length < 2) {
     return result(mint, false, walletSetComplete, uniqueWallets, [], 0, 0, 0, 0,
       ["A valid mint and at least two unique wallets are required."]);
@@ -75,7 +90,7 @@ export async function collectCompleteWalletTransactionHistory(
   let transactionsChecked = 0;
   let pagesScanned = 0;
   let walletsChecked = 0;
-  let incomplete = !walletSetComplete;
+  let incomplete = !walletSetComplete || !expectedSignatureMapValid;
 
   for (const wallet of selectedWallets) {
     walletsChecked += 1;
@@ -179,6 +194,12 @@ export async function collectCompleteWalletTransactionHistory(
         warnings.push(`Wallet ${wallet} history exceeded the configured ${maxPages * WALLET_TRANSACTION_HISTORY_PAGE_SIZE}-transaction cap.`);
         incomplete = true;
       }
+    }
+    const expected = new Set(expectedByWallet?.[wallet] ?? []);
+    const missingExpected = [...expected].filter(signature => !seenSignatures.has(signature));
+    if (missingExpected.length > 0) {
+      warnings.push(`Wallet ${wallet} history omitted ${missingExpected.length} independently observed create/trade signature(s).`);
+      walletComplete = false;
     }
     if (walletComplete) completedWallets.add(wallet);
     else incomplete = true;
