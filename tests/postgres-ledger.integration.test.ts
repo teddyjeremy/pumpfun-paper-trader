@@ -395,6 +395,12 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       createEvents: [],
       tradeEvents: [{ mint: gapMint, trader: "11111111111111111111111111111111" }]
     };
+    const olderTransaction = {
+      ...transaction,
+      signature: olderSignature,
+      slot: 200,
+      receivedAt: "2026-11-12T11:00:01.000Z"
+    };
 
     await ledgerPersistence!.persistHeliusGapRecoveryArchive({
       sessionId, mint: gapMint, gap: baseGap
@@ -407,6 +413,9 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     });
     await ledgerPersistence!.persistHeliusGapRecoveryArchive({
       sessionId, mint: gapMint, gap: baseGap, transaction
+    });
+    await ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: baseGap, transaction: olderTransaction
     });
     await ledgerPersistence!.persistHeliusGapRecoveryArchive({
       sessionId, mint: gapMint, gap: { ...baseGap, status: "ARCHIVED" }
@@ -422,7 +431,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       [sessionId, gapMint, baseGap.startedAt]
     );
     expect(result.rows[0]).toEqual({
-      status: "ARCHIVED", archived_complete: true, archived_transactions: 1
+      status: "ARCHIVED", archived_complete: true, archived_transactions: 2
     });
 
     await expect(ledgerPersistence!.persistHeliusGapRecoveryArchive({
