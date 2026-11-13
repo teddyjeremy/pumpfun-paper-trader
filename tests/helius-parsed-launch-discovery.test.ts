@@ -5,8 +5,6 @@ import {
 import { PUMP_FUN_PROGRAM_ID } from "../src/ingestion/helius.js";
 
 const signature = "5".repeat(88);
-const mint = "1".repeat(32);
-const curve = "2".repeat(32);
 const discriminator = [27, 114, 169, 77, 222, 235, 99, 118];
 const u32 = (n: number) => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
 const u64 = (n: bigint) => Array.from({ length: 8 }, (_, i) => Number((n >> BigInt(i * 8)) & 255n));
