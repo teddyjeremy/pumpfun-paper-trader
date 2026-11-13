@@ -43,6 +43,13 @@ export function assessHistoricalDecodeCoverage(
   if ([...verified].some(signature => failed.has(signature))) {
     throw new Error("A historical signature cannot be both verified and confirmed failed.");
   }
+  const sourceBySignature = new Map(input.state.signatures.map(item => [item.signature, item]));
+  if ([...verified].some(signature => sourceBySignature.get(signature)?.err !== null)) {
+    throw new Error("A failed or unknown-status transaction cannot be classified as successfully verified.");
+  }
+  if ([...failed].some(signature => sourceBySignature.get(signature)?.err === null)) {
+    throw new Error("A successful transaction cannot be classified as confirmed failed.");
+  }
   if ([...archived].some(signature => !verified.has(signature))) {
     throw new Error("A historical transaction cannot be archived before successful verification.");
   }
