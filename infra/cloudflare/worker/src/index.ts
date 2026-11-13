@@ -944,7 +944,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put(`audit_event_id:${sessionId}:session-started:${sessionId}`, 1);
       });
       this.activeSessionId = sessionId;
-      this.ctx.waitUntil(this.flushAuditEventsToPostgres(sessionId));
     } else {
       await this.appendAudit("PROVIDER_STATUS", null, { action: "START_REQUESTED" });
     }
@@ -960,6 +959,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       return this.getStatus();
     }
 
+    if (this.activeSessionId) this.ctx.waitUntil(this.flushAuditEventsToPostgres(this.activeSessionId));
     await this.ctx.storage.put("enabled", true);
     this.status.enabled = true;
     this.status.nextReconnectAt = null;
