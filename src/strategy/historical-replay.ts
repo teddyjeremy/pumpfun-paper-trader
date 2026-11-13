@@ -599,7 +599,8 @@ export function splitChronologicalCalibrationCoins<T extends { launchBlockTime: 
 export function calibrateVolumeThresholds(
   replays: readonly HistoricalCoinReplay[]
 ): VolumeThresholdCalibration {
-  const labeled = replays.filter(coin => coin.outcome !== null && coin.outcome.label !== "UNKNOWN" &&
+  const labeled = replays.filter(coin => coin.status === "COMPLETE" &&
+    coin.decodeComplete === true && coin.outcome !== null && coin.outcome.label !== "UNKNOWN" &&
     coin.firstSetup !== null &&
     coin.firstSetup.pullbackVolumeVsImpulsePct !== null &&
     coin.firstSetup.reclaimVolumeVsPullbackPct !== null);
