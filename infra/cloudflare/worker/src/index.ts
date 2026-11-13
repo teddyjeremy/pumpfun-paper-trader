@@ -898,7 +898,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async start(): Promise<CoordinatorStatus> {
     await this.hydrate();
-    await this.acquirePostgresWorkerLease();
     if (!this.status.enabled || this.heliusSocket?.readyState !== WebSocket.OPEN) {
       this.markHeliusCoverageGap();
     }
@@ -949,6 +948,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     } else {
       await this.appendAudit("PROVIDER_STATUS", null, { action: "START_REQUESTED" });
     }
+    // Acquire the fenced persistence lease only after the active session ID
+    // exists. Acquiring before session creation sends a null session ID and
+    // leaves the coordinator enabled without a lease or a scheduled alarm.
+    const leaseAcquired = this.postgresLeaseHeld || await this.acquirePostgresWorkerLease();
+    if (!leaseAcquired) {
+      await this.ctx.storage.put("enabled", false);
+      this.status.enabled = false;
+      this.status.lastError = "PostgreSQL worker lease could not be acquired; provider streams remain stopped.";
+      await this.persist();
+      return this.getStatus();
+    }
+
     await this.ctx.storage.put("enabled", true);
     this.status.enabled = true;
     this.status.nextReconnectAt = null;
