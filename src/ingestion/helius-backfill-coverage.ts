@@ -24,6 +24,10 @@ export function assessHistoricalDecodeCoverage(
   input: HistoricalDecodeCoverageInput
 ): HistoricalDecodeCoverage {
   const signatures = input.state.signatures.map(item => item.signature);
+  if (signatures.some(signature => typeof signature !== "string" || signature.length === 0) ||
+      new Set(signatures).size !== signatures.length) {
+    throw new Error("Historical signature window contains an empty or duplicate signature.");
+  }
   const expected = new Set(signatures);
   const validSubset = (values: readonly string[], label: string): Set<string> => {
     const result = new Set(values);
@@ -35,9 +39,15 @@ export function assessHistoricalDecodeCoverage(
   const verified = validSubset(input.verifiedSignatures, "verified");
   const failed = validSubset(input.failedSignatures, "failed");
   const archived = validSubset(input.archivedSignatures, "archived");
-  const queued = validSubset(input.queueSignatures.filter(value => expected.has(value)), "queued");
+  const queued = validSubset(input.queueSignatures, "queued");
   if ([...verified].some(signature => failed.has(signature))) {
     throw new Error("A historical signature cannot be both verified and confirmed failed.");
+  }
+  if ([...archived].some(signature => !verified.has(signature))) {
+    throw new Error("A historical transaction cannot be archived before successful verification.");
+  }
+  if ([...queued].some(signature => verified.has(signature) || failed.has(signature))) {
+    throw new Error("A terminal historical signature cannot remain in the decode queue.");
   }
   if (!Number.isSafeInteger(input.queueCursor) || input.queueCursor < 0 ||
       input.queueCursor > signatures.length) {
