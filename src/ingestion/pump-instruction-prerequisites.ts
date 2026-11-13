@@ -14,6 +14,8 @@ import type { NonSigningVirtualTraderIdentity } from "./virtual-trader-identity.
 import type { PumpCurveV3UnsignedInstruction } from "./pump-sdk-curve-quote-adapter.js";
 import type { PumpSwapV2UnsignedInstruction } from "./pump-sdk-quote-adapter.js";
 
+const USER_VOLUME_ACCUMULATOR_DISCRIMINATOR = Uint8Array.from([30, 11, 48, 57, 93, 5, 90, 28]);
+
 export interface PumpUserVolumeAccumulatorPrerequisite {
   address: string;
   state: "PRESENT_AND_VERIFIED" | "MISSING_INIT_IF_NEEDED";
@@ -52,8 +54,9 @@ async function inspectPumpUserVolumeAccumulator(input: {
   if (account) {
     if (account.address !== input.address || account.slot !== snapshot.slot ||
         account.observedAt !== snapshot.observedAt || account.owner !== PUMP_PROGRAM_ID ||
-        account.data.length !== 137) {
-      throw new Error("Pump user volume accumulator has an unexpected owner, size or snapshot context.");
+        account.data.length !== 137 ||
+        !USER_VOLUME_ACCUMULATOR_DISCRIMINATOR.every((byte, index) => account.data[index] === byte)) {
+      throw new Error("Pump user volume accumulator has an unexpected owner, discriminator, size or snapshot context.");
     }
     return {
       address: input.address, state: "PRESENT_AND_VERIFIED",
