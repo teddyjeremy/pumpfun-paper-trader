@@ -12,7 +12,10 @@ This document is the operational checklist for reaching the first verified simul
 
 ### 1. CI and release integrity
 
-- [x] Latest code-changing commit verified by CI is `1253dd84d599b355a855ee7a9d9c277ea1c37908`: dependency installation, TypeScript checks, 59 test files / 443 tests, and Cloudflare Worker bundle.
+- [x] Latest PR head `37b1160dd54c7ce977fbbc4460401b6c46a39031` passed [GitHub CI run 43420524236](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43420524236): TypeScript no-emit check, 61 test files / 455 tests, TypeScript build, and Cloudflare Worker bundle.
+- [x] Production dashboard deployment `dpl_BARieVKofhUX76xk1JpT3LUqjyVT` is READY at [pumpfun-paper-trader-six.vercel.app](https://pumpfun-paper-trader-six.vercel.app), deployed from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
+- [x] Production Worker deployment succeeded in [Cloudflare deployment workflow 43378493964](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43378493964); deployed version is `1dac036e-76c4-4ff6-90bc-37345d114c3b` from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
+- [ ] Production Worker smoke health and a complete simulated entry/exit lifecycle remain unverified. The deployed main-branch code still reports `tradingReady=false`; PR #77 is not deployed.
 - [x] PostgreSQL-backed integration tests pass in the CI test suite.
 - [ ] The final PR head is reviewed and the merge is performed only against that exact tested head.
 - [ ] Production smoke tests pass after the single planned deployment.
@@ -29,6 +32,7 @@ This document is the operational checklist for reaching the first verified simul
 
 - [x] Two-pass holder census implementation with pagination, stable supply/slot checks, owner aggregation, and fail-closed incomplete states.
 - [x] Wallet evidence distinguishes full SOL-transfer history from full wallet transaction history.
+- [ ] Production Cloudflare Worker does not have `FULL_WALLET_HISTORY_ENABLED` configured. The full transaction-history collector remains off; enabling it can consume Helius credits and needs an explicit bounded budget decision.
 - [x] Historical risk evidence is replayed as a timestamped timeline; later evidence cannot clear an earlier candidate and incomplete refreshes revoke prior clearance.
 - [ ] Connect complete buyer-set provenance from fully decoded launch-window events to wallet-history collection.
 - [ ] Prove complete transaction history for every wallet used in the candidate's risk decision; sampled signatures are not sufficient.
@@ -110,6 +114,7 @@ Until these items pass, dynamic exhaustion remains disabled. Protective exits st
 
 - [x] Database migrations 0001–0007 have been applied in the configured environment (deployment state still requires verification).
 - [ ] Verify production connection and migration version.
+- Production Vercel environment contains `DATABASE_URL` and `PAPER_EVENT_INGEST_TOKEN`; Cloudflare has `PAPER_EVENT_INGEST_URL` pointed at the dashboard alias and a `PAPER_EVENT_INGEST_TOKEN` secret binding. The secret values are write-only, so matching and successful event ingestion still need an end-to-end acknowledgement.
 - [ ] Persist paper entries, exits, trade state, portfolio snapshots, and append-only events.
 - [ ] Enforce idempotency keys and unique constraints for entry/exit transitions.
 - [ ] Verify lease acquisition, renewal, expiry, and recovery.
@@ -132,6 +137,7 @@ Do not rotate the shared ingestion token without coordinated authorization to up
 
 - [ ] Complete and test all changes on the existing `batch/unsigned-execution-readiness` branch and PR #77.
 - [ ] Keep changes batched; do not repeatedly deploy production during implementation.
+- [x] `vercel.json` keeps `main` deployments enabled and disables Vercel preview deployments for `batch/unsigned-execution-readiness`; no new preview deployment was created after the configuration commit. The production alias remains on main.
 - [ ] Review the final diff and all CI jobs on the exact PR head.
 - [ ] Merge only when all required checks are green and the integration tests pass.
 - [ ] Perform the planned production deployment once.
@@ -158,6 +164,7 @@ If any item fails, keep `tradingReady=false` and report the exact blocker. Do no
 ## Current known blockers
 
 - Historical buyer-set provenance and complete wallet transaction-history clearance are not yet proven end to end.
+- Production full wallet transaction-history collection is still disabled because the Cloudflare Worker has no `FULL_WALLET_HISTORY_ENABLED` binding; the opt-in collector's Helius credit budget has not been approved.
 - No empirically validated and operator-reviewed volume calibration is configured in production; the Worker now accepts only an explicit approved payload and remains fail-closed without it.
 - Complete contiguous rolling event-stream coverage is not yet available; PumpSwap event decoding and multi-window exhaustion evidence remain outstanding.
 - The Worker now treats the paper portfolio as the simulated payer budget and previews stake, both exact fee legs, and refundable ATA/accumulator rent before an entry. Actual Worker-to-Vercel/Neon ingestion and production account-state/rent reconciliation remain unverified; quote-only unsigned plans continue to return `paperEntryAuthorized=false`.
