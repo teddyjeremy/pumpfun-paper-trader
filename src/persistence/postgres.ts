@@ -798,6 +798,169 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
 }
 
 
+export interface HeliusGapRecoveryArchiveInput {
+  sessionId: string;
+  mint: string;
+  gap: {
+    bondingCurve: string;
+    startedAt: string;
+    endedAt: string;
+    startSignature: string;
+    startSlot: number;
+    endSignature: string;
+    endSlot: number;
+    pagesScanned: number;
+    signatures: Array<{ signature: string; slot: number; blockTime: number | null; err: unknown }>;
+    decodeCursor: number;
+    verifiedSignatures: string[];
+    failedSignatures: string[];
+    status: "SCANNING" | "SCANNED" | "DECODING" | "DECODED" | "ARCHIVED" | "INCOMPLETE";
+  };
+  transaction?: {
+    signature: string;
+    slot: number;
+    provider: "helius";
+    commitment: "confirmed" | "finalized";
+    receivedAt: string;
+    createEvents: unknown[];
+    tradeEvents: unknown[];
+  };
+}
+
+/** Persist an independently scanned WebSocket gap and any decoded transaction atomically. */
+export async function persistHeliusGapRecoveryArchive(input: HeliusGapRecoveryArchiveInput): Promise<void> {
+  if (!pool) throw new Error("PostgreSQL persistence is not configured.");
+  const { sessionId, mint, gap, transaction } = input;
+  const address = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  const signaturePattern = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
+  const started = Date.parse(gap.startedAt);
+  const ended = Date.parse(gap.endedAt);
+  if (!sessionId.trim() || sessionId.length > 128 || !address.test(mint) ||
+      !address.test(gap.bondingCurve) || !Number.isFinite(started) || !Number.isFinite(ended) || ended < started ||
+      !signaturePattern.test(gap.startSignature) || !signaturePattern.test(gap.endSignature) ||
+      gap.startSignature === gap.endSignature ||
+      !Number.isSafeInteger(gap.startSlot) || gap.startSlot < 0 ||
+      !Number.isSafeInteger(gap.endSlot) || gap.endSlot < gap.startSlot ||
+      !Number.isSafeInteger(gap.pagesScanned) || gap.pagesScanned < 0 ||
+      !Array.isArray(gap.signatures) || gap.signatures.length > 10_000 ||
+      !Number.isSafeInteger(gap.decodeCursor) || gap.decodeCursor < 0 ||
+      gap.decodeCursor > gap.signatures.length ||
+      !Array.isArray(gap.verifiedSignatures) || !Array.isArray(gap.failedSignatures) ||
+      !["SCANNING","SCANNED","DECODING","DECODED","ARCHIVED","INCOMPLETE"].includes(gap.status)) {
+    throw new Error("Helius gap archive contains invalid identity or progress fields.");
+  }
+  const seen = new Set<string>();
+  for (let i = 0; i < gap.signatures.length; i += 1) {
+    const item = gap.signatures[i]!;
+    if (!signaturePattern.test(item.signature) || seen.has(item.signature) ||
+        !Number.isSafeInteger(item.slot) || item.slot < 0 ||
+        !(item.blockTime === null || (Number.isSafeInteger(item.blockTime) && item.blockTime >= 0))) {
+      throw new Error("Helius gap archive contains an invalid or duplicate signature record.");
+    }
+    if (i > 0 && item.slot > gap.signatures[i - 1]!.slot) {
+      throw new Error("Helius gap signatures must remain newest-to-oldest.");
+    }
+    seen.add(item.signature);
+  }
+  if (!seen.has(gap.startSignature) || !seen.has(gap.endSignature) ||
+      gap.signatures.some(item => item.signature === gap.startSignature && item.slot !== gap.startSlot) ||
+      gap.signatures.some(item => item.signature === gap.endSignature && item.slot !== gap.endSlot)) {
+    throw new Error("Helius gap archive is missing its exact signature/slot anchors.");
+  }
+  const verified = new Set(gap.verifiedSignatures);
+  const failed = new Set(gap.failedSignatures);
+  if (verified.size !== gap.verifiedSignatures.length || failed.size !== gap.failedSignatures.length ||
+      [...verified, ...failed].some(signature => !seen.has(signature)) ||
+      [...verified].some(signature => failed.has(signature)) ||
+      verified.size + failed.size > gap.decodeCursor) {
+    throw new Error("Helius gap decode outcomes do not match the persisted cursor.");
+  }
+  if (transaction) {
+    const evidence = gap.signatures.find(item => item.signature === transaction.signature);
+    if (!evidence || evidence.slot !== transaction.slot || !verified.has(transaction.signature) ||
+        !Number.isFinite(Date.parse(transaction.receivedAt)) ||
+        !Array.isArray(transaction.createEvents) || !Array.isArray(transaction.tradeEvents)) {
+      throw new Error("Decoded Helius gap transaction does not match verified signature evidence.");
+    }
+  }
+  if (gap.status === "ARCHIVED" &&
+      (gap.decodeCursor !== gap.signatures.length ||
+       verified.size + failed.size !== gap.signatures.length)) {
+    throw new Error("A Helius gap cannot be archived before every signature has a terminal decode outcome.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const session = await client.query("SELECT id FROM paper_sessions WHERE id=$1 FOR SHARE", [sessionId]);
+    if (session.rowCount !== 1) throw new Error("Paper session must be ingested before its Helius gap archive.");
+    const checkpoint = await client.query(
+      `INSERT INTO helius_gap_recovery_jobs
+        (session_id,mint,bonding_curve,started_at,ended_at,start_signature,start_slot,end_signature,end_slot,
+         pages_scanned,signature_state,decode_cursor,verified_signature_state,failed_signature_state,status,archived_complete,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13::jsonb,$14::jsonb,$15,FALSE,now())
+       ON CONFLICT (session_id,mint,started_at) DO UPDATE SET
+         pages_scanned=EXCLUDED.pages_scanned,signature_state=EXCLUDED.signature_state,
+         decode_cursor=EXCLUDED.decode_cursor,verified_signature_state=EXCLUDED.verified_signature_state,
+         failed_signature_state=EXCLUDED.failed_signature_state,status=EXCLUDED.status,updated_at=now()
+       WHERE helius_gap_recovery_jobs.bonding_curve=EXCLUDED.bonding_curve
+         AND helius_gap_recovery_jobs.ended_at=EXCLUDED.ended_at
+         AND helius_gap_recovery_jobs.start_signature=EXCLUDED.start_signature
+         AND helius_gap_recovery_jobs.start_slot=EXCLUDED.start_slot
+         AND helius_gap_recovery_jobs.end_signature=EXCLUDED.end_signature
+         AND helius_gap_recovery_jobs.end_slot=EXCLUDED.end_slot
+         AND EXCLUDED.pages_scanned >= helius_gap_recovery_jobs.pages_scanned
+         AND EXCLUDED.decode_cursor >= helius_gap_recovery_jobs.decode_cursor
+       RETURNING mint`,
+      [sessionId,mint,gap.bondingCurve,new Date(started).toISOString(),new Date(ended).toISOString(),
+        gap.startSignature,gap.startSlot,gap.endSignature,gap.endSlot,gap.pagesScanned,
+        JSON.stringify(gap.signatures),gap.decodeCursor,JSON.stringify(gap.verifiedSignatures),
+        JSON.stringify(gap.failedSignatures),gap.status]
+    );
+    if (checkpoint.rowCount !== 1) {
+      throw new Error("Helius gap checkpoint conflicts with immutable anchors or previously persisted progress.");
+    }
+    if (transaction) {
+      const raw = JSON.stringify({ ...transaction, mint, source: "GAP_RECOVERY" });
+      const result = await client.query(
+        `INSERT INTO helius_transaction_observations
+          (session_id,mint,signature,slot,provider,commitment,observation_source,received_at,create_events,trade_events,raw_observation)
+         VALUES ($1,$2,$3,$4,$5,$6,'GAP_RECOVERY',$7,$8::jsonb,$9::jsonb,$10::jsonb)
+         ON CONFLICT (session_id,mint,signature) DO UPDATE SET
+           raw_observation=EXCLUDED.raw_observation
+         WHERE helius_transaction_observations.raw_observation=EXCLUDED.raw_observation
+         RETURNING signature`,
+        [sessionId,mint,transaction.signature,transaction.slot,transaction.provider,transaction.commitment,
+          transaction.receivedAt,JSON.stringify(transaction.createEvents),JSON.stringify(transaction.tradeEvents),raw]
+      );
+      if (result.rowCount !== 1) throw new Error("Helius gap transaction conflicts with previously archived evidence.");
+    }
+    if (gap.status === "ARCHIVED") {
+      const archived = await client.query(
+        `SELECT COUNT(*)::int AS count FROM helius_transaction_observations
+         WHERE session_id=$1 AND mint=$2 AND observation_source='GAP_RECOVERY'
+           AND signature = ANY($3::text[])`,
+        [sessionId,mint,gap.verifiedSignatures]
+      );
+      if (Number(archived.rows[0]?.count ?? 0) !== verified.size) {
+        throw new Error("Helius gap cannot be marked archived until every verified transaction is acknowledged.");
+      }
+      await client.query(
+        `UPDATE helius_gap_recovery_jobs SET archived_complete=TRUE
+         WHERE session_id=$1 AND mint=$2 AND started_at=$3`,
+        [sessionId,mint,new Date(started).toISOString()]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
 
 export interface HeliusBackfillReplayDatasetRow {
   mint: string;
