@@ -642,7 +642,7 @@ export function calibrateVolumeThresholds(
   const generalizes = Boolean(best && best.training.accepted >= 5 && best.holdout.accepted >= 2 &&
     (best.holdout.f1 ?? 0) >= 0.5 && (best.holdout.precision ?? 0) >= 0.5 &&
     (best.holdout.expectancyNetPct ?? Number.NEGATIVE_INFINITY) > 0 &&
-    (best.holdout.profitFactor ?? 0) > 1);
+    (best.holdout.profitFactor === null ? best.holdout.winRate === 1 : best.holdout.profitFactor > 1));
   return {
     status: generalizes ? "CALIBRATION_CANDIDATE" : "NO_GENERALIZATION",
     labeledCoins: labeled.length, trainingCoins: training.length, holdoutCoins: holdout.length,
