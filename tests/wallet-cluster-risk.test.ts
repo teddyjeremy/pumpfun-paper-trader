@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PumpTradeEvent } from "../src/ingestion/pump-events.js";
 import type { VerifiedPumpTransaction } from "../src/ingestion/helius.js";
-import { evaluateWalletClusterRisk } from "../src/ingestion/wallet-cluster-risk.js";
+import { classifyWalletClusterRiskWithCoverage, evaluateWalletClusterRisk, type WalletClusterRisk } from "../src/ingestion/wallet-cluster-risk.js";
 
 const mint = "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi";
 const creator = "creator-wallet";
@@ -97,5 +97,54 @@ describe("wallet cluster risk", () => {
       holdings: [{ mint, wallet: "w1", amount: "10000" }, { mint, wallet: "w2", amount: "10000" }]
     });
     expect(result.status).toBe("WATCH");
+  });
+});
+
+describe("wallet cluster evidence completeness gate", () => {
+  const cleanRisk: WalletClusterRisk = {
+    mint: "11111111111111111111111111111111",
+    status: "WATCH",
+    attributionStatus: "NO_HIGH_CONFIDENCE_LINKS",
+    linkedWalletCount: 0,
+    largestClusterConfidenceBps: null,
+    largestIndividualHolderShareBps: null,
+    linkedWalletSellShareBps: null,
+    largestLinkedClusterSellShareBps: null,
+    largestClusterBuyVolumeShareBps: null,
+    largestClusterHoldingShareBps: null,
+    reasons: [],
+    limitations: []
+  };
+
+  it("passes only with complete full wallet transaction history and full holder census", () => {
+    expect(classifyWalletClusterRiskWithCoverage({
+      risk: cleanRisk,
+      fullWalletTransactionHistoryComplete: true,
+      fullHolderCensusComplete: true
+    })).toBe("PASS_COMPLETE");
+  });
+
+  it("keeps SOL-transfer-only or partial wallet evidence on WATCH", () => {
+    expect(classifyWalletClusterRiskWithCoverage({
+      risk: cleanRisk,
+      fullWalletTransactionHistoryComplete: false,
+      fullHolderCensusComplete: true
+    })).toBe("WATCH");
+  });
+
+  it("does not clear confirmed relationship edges even with complete coverage", () => {
+    expect(classifyWalletClusterRiskWithCoverage({
+      risk: { ...cleanRisk, attributionStatus: "CONFIRMED_LINKS" },
+      fullWalletTransactionHistoryComplete: true,
+      fullHolderCensusComplete: true
+    })).toBe("WATCH");
+  });
+
+  it("preserves an observed rejection even when coverage is incomplete", () => {
+    expect(classifyWalletClusterRiskWithCoverage({
+      risk: { ...cleanRisk, status: "REJECT_OBSERVED" },
+      fullWalletTransactionHistoryComplete: false,
+      fullHolderCensusComplete: false
+    })).toBe("REJECT_OBSERVED");
   });
 });
