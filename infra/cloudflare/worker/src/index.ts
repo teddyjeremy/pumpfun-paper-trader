@@ -1932,6 +1932,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       a[1] === b[1] ? a[0].localeCompare(b[0]) : a[1] > b[1] ? -1 : 1
     ).map(([wallet]) => wallet);
     const wallets = [...new Set([...(launch?.creator ? [launch.creator] : []), ...rankedWallets])];
+    const expectedSignaturesByWallet = Object.fromEntries(wallets.map(wallet => [
+      wallet,
+      candidateTransactions.filter(transaction =>
+        transaction.createEvents.some(event => event.mint === mint && event.creator === wallet) ||
+        transaction.tradeEvents.some(event => event.mint === mint && event.user === wallet)
+      ).map(transaction => transaction.signature)
+    ]));
     const fetcher = this.rateLimitedHeliusFetcher();
     const fundingEvidence = await collectCompleteWalletFundingEvidence(mint, wallets, {
       apiKey: this.env.HELIUS_API_KEY,
@@ -1946,6 +1953,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           walletSetVerifiedComplete: tradeCoverageComplete,
           maxPages: Number.isSafeInteger(configuredMaxPages) && configuredMaxPages >= 1 &&
             configuredMaxPages <= 5 ? configuredMaxPages : 2,
+          expectedSignaturesByWallet,
           fetcher
         })
       : null;
