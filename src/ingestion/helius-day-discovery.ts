@@ -12,7 +12,7 @@ export interface HistoricalLaunchDiscovery {
 }
 
 export interface HistoricalDayDiscoveryResult {
-  status: "SAMPLE_CAP_REACHED" | "DAY_EXHAUSTED" | "BUDGET_EXHAUSTED" | "INCOMPLETE";
+  status: "DAY_EXHAUSTED" | "BUDGET_EXHAUSTED" | "INCOMPLETE";
   startTime: number;
   endTime: number;
   launches: HistoricalLaunchDiscovery[];
@@ -37,8 +37,9 @@ export interface HistoricalDayDiscoveryConfig {
  * Discover Pump.fun CreateEvents in a bounded historical interval using only
  * standard Helius RPC. Every RPC call is counted as one Free-plan credit.
  *
- * The sample is newest-first: reaching maxLaunches is explicitly a sample,
- * never proof that the entire day was scanned. Missing transaction data,
+ * The scanner walks newest-to-oldest but retains the earliest maxLaunches
+ * launches. DAY_EXHAUSTED proves the full requested interval was traversed;
+ * budget exhaustion never returns a complete day sample. Missing transaction data,
  * pagination anomalies and decoder failures stop the scan as INCOMPLETE.
  */
 export async function discoverPumpLaunchesInTimeRange(
@@ -181,10 +182,9 @@ export async function discoverPumpLaunchesInTimeRange(
           if (eventTime < startTime || eventTime >= endTime ||
               !ADDRESS.test(event.mint) || !ADDRESS.test(event.bondingCurve)) continue;
           launches.push({ signature: item.signature, slot: item.slot, blockTime: item.blockTime, event });
-          if (launches.length >= config.maxLaunches) {
-            return result("SAMPLE_CAP_REACHED", null, launches, pagesScanned, signaturesScanned,
-              transactionFetches, creditsUsed, item.signature);
-          }
+          launches.sort((a, b) => a.blockTime - b.blockTime ||
+            Number(a.event.timestamp - b.event.timestamp) || a.signature.localeCompare(b.signature));
+          if (launches.length > config.maxLaunches) launches.pop();
         }
       }
       const oldest = parsed[parsed.length - 1]!;
