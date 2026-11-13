@@ -44,7 +44,9 @@ This document is the operational checklist for reaching the first verified simul
 - [x] Wallet evidence distinguishes full SOL-transfer history from full wallet transaction history.
 - [ ] Production Cloudflare Worker does not yet have `FULL_WALLET_HISTORY_ENABLED`; PR #77 now sets it to `true` with `FULL_WALLET_HISTORY_MAX_PAGES=2` for the next deployment. Collection is bounded to at most 16 wallets and 2 pages per wallet; a candidate is refreshed at most once per minute, normally every 10 minutes or earlier when its observed wallet set changes. This will consume Helius credits after deployment, so the PR remains unmerged pending review of that bounded usage.
 - [x] Historical risk evidence is replayed as a timestamped timeline; later evidence cannot clear an earlier candidate and incomplete refreshes revoke prior clearance.
-- [ ] Connect complete buyer-set provenance from fully decoded launch-window events to wallet-history collection.
+- [x] Worker derives each requested wallet's expected create/trade signatures from the fully decoded launch-window transaction set; full-history collection requires those signatures to appear in the wallet's own paginated history.
+- [x] Full wallet transaction-history pages reject duplicate/malformed records, invalid/repeated cursors, newest-to-oldest ordering violations, and page-cap truncation.
+- [ ] Confirm live full transaction-history collection completes for every wallet used in a real candidate's risk decision; the production collector remains disabled pending a reviewed Helius credit budget.
 - [ ] Prove complete transaction history for every wallet used in the candidate's risk decision; sampled signatures are not sufficient.
 - [ ] Connect complete holder census and wallet evidence to the same candidate-time strategy evaluation.
 - [ ] Verify common-funder, coordinated-wallet, and concentration rules against realistic fixtures and persisted historical data.
