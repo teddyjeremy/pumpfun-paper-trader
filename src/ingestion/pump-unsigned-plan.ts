@@ -91,11 +91,18 @@ function finishPlan(input: {
   );
   const instructions = [...prerequisiteCreates, ...input.venueInstructions];
   const blockers = [...input.accountPrerequisites.blockers];
-  removeBlocker(blockers, "USER_BASE_ATA_CREATION_INSTRUCTIONS_AND_RENT_RESERVE_REQUIRED");
-  removeBlocker(blockers, "MISSING_ATAS_REQUIRE_IDEMPOTENT_CREATE_INSTRUCTIONS");
   if (input.accountPrerequisites.rentEstimate.allNewAtaRentKnown) {
+    removeBlocker(blockers, "USER_BASE_ATA_CREATION_INSTRUCTIONS_AND_RENT_RESERVE_REQUIRED");
+    removeBlocker(blockers, "MISSING_ATAS_REQUIRE_IDEMPOTENT_CREATE_INSTRUCTIONS");
+    removeBlocker(blockers, "USER_BASE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED");
+    removeBlocker(blockers, "USER_QUOTE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED");
+    removeBlocker(blockers, "BUYBACK_QUOTE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED");
     removeBlocker(blockers, "ATA_RENT_LAYOUT_OR_AMOUNT_UNSUPPORTED");
-    blockers.push("ATA_RENT_RESERVE_NOT_YET_RECORDED_IN_PAPER_PORTFOLIO");
+    if ((input.accountPrerequisites.rentEstimate.newAtaRentReserveLamports ?? 0) > 0) {
+      blockers.push("ATA_RENT_RESERVE_NOT_YET_RECORDED_IN_PAPER_PORTFOLIO");
+    }
+  } else {
+    blockers.push("ATA_RENT_LAYOUT_OR_AMOUNT_UNSUPPORTED");
   }
   if (input.feeEvidence.status === "AVAILABLE") {
     removeBlocker(blockers, "EXACT_UNSIGNED_TRANSACTION_FEE_MESSAGE_NOT_ATTACHED");
