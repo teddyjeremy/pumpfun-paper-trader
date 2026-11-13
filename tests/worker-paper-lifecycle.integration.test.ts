@@ -119,6 +119,61 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     expect(recovered.reservedAccountRentUsd).toBe(0);
   });
 
+  it("serializes concurrent entry/exit retries into one transition per quote", async () => {
+    const storage = new MemoryDurableStorage();
+    const sessionId = "worker-lifecycle-idempotency-session";
+    const startedAt = new Date().toISOString();
+    await storage.put("active_audit_session_id", sessionId);
+    await storage.put("enabled", true);
+    await storage.put("audit_session_ids", [sessionId]);
+    await storage.put(`audit_session:${sessionId}`, {
+      sessionId, startedAt, stoppedAt: null, strategyVersion: "strict-v1",
+      eventCount: 1, initialBankrollUsd: 2.7, topUpAmountUsd: 2.7,
+      topUpThresholdUsd: 1, topUpCount: 0, totalTopUpsUsd: 0
+    });
+    await storage.put(`audit_events:${sessionId}:00000000`, [{
+      sessionId, sequence: 1, eventId: `session-started:${sessionId}`,
+      kind: "SESSION_STARTED", occurredAt: startedAt, mint: null,
+      strategyVersion: "strict-v1", data: {}
+    }]);
+    await storage.put(`paper_portfolio:${sessionId}`, createPaperPortfolio(2.7));
+
+    const worker = new PumpFunCoordinator(context(storage) as never, {} as never);
+    const mint = "11111111111111111111111111111111";
+    const entryAt = new Date().toISOString();
+    const buyQuote = quote(mint, "BUY", entryAt);
+    const initialSellQuote = quote(mint, "SELL", entryAt, "1000000", 1.05);
+    const entryInput = {
+      mint, positionId: "worker-idempotent-position",
+      buyQuote, sellQuote: initialSellQuote, rentReserveUsd: 0.2
+    };
+    const entries = await Promise.all([
+      worker.recordPaperEntry(entryInput) as Promise<{ status: string }>,
+      worker.recordPaperEntry(entryInput) as Promise<{ status: string }>
+    ]);
+    expect(entries.filter(result => result.status === "APPLIED")).toHaveLength(1);
+    expect(entries.filter(result => result.status === "DUPLICATE")).toHaveLength(1);
+
+    const sellQuote = quote(mint, "SELL", new Date().toISOString(), "1000000", 1.2);
+    const exitInput = {
+      positionId: "worker-idempotent-position", sellQuote, exitReason: "TEST_EXIT"
+    };
+    const exits = await Promise.all([
+      worker.recordPaperExit(exitInput) as Promise<{ status: string }>,
+      worker.recordPaperExit(exitInput) as Promise<{ status: string }>
+    ]);
+    expect(exits.filter(result => result.status === "APPLIED")).toHaveLength(1);
+    expect(exits.filter(result => result.status === "DUPLICATE")).toHaveLength(1);
+
+    const portfolio = await worker.getPaperPortfolio() as {
+      positions: Array<{ status: string }>;
+    };
+    expect(portfolio.positions).toHaveLength(1);
+    expect(portfolio.positions[0]?.status).toBe("CLOSED");
+    const metadata = await storage.get<{ eventCount: number }>(`audit_session:${sessionId}`);
+    expect(metadata?.eventCount).toBe(3);
+  });
+
   it("clears a WebSocket gap only when its full launch-window interval is decoded and Neon-acknowledged", async () => {
     const storage = new MemoryDurableStorage();
     const sessionId = "worker-gap-recovery-session";
