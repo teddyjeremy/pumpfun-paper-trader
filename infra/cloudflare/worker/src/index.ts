@@ -2518,10 +2518,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         if (Number.isSafeInteger(record.id) && record.error) {
           const failed = this.heliusState.subscriptions.find(item => item.requestId === record.id);
           if (failed) {
-            this.heliusState = {
-              ...this.heliusState,
-              incompleteMints: [...new Set([...this.heliusState.incompleteMints, failed.mint])].slice(-10)
-            };
+            this.heliusState = recordHeliusCoverageGap(
+              this.heliusState, failed.mint, new Date().toISOString()
+            );
             this.status.incompleteHeliusTransactions += 1;
             this.auditInBackground("DATA_GAP", failed?.mint ?? null, {
               provider: "helius", reason: "SUBSCRIPTION_REJECTED", requestId: record.id,
