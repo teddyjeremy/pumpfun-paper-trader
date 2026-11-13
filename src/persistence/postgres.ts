@@ -778,8 +778,11 @@ export async function persistHeliusBackfillArchive(input: HeliusBackfillArchiveI
       if (transaction.source === "HISTORICAL_BACKFILL") {
         await client.query(
           `UPDATE helius_backfill_jobs SET verified_transaction_count=(
-             SELECT COUNT(*)::int FROM helius_transaction_observations
-             WHERE session_id=$1 AND mint=$2 AND observation_source='HISTORICAL_BACKFILL'
+             SELECT COUNT(*)::int FROM helius_transaction_observations t
+             WHERE t.session_id=$1 AND t.mint=$2 AND t.observation_source='HISTORICAL_BACKFILL'
+               AND t.signature IN (
+                 SELECT item->>'signature' FROM jsonb_array_elements(helius_backfill_jobs.signature_state) item
+               )
            ) WHERE session_id=$1 AND mint=$2`,
           [sessionId,mint]
         );
@@ -820,7 +823,10 @@ export async function getHeliusBackfillReplayDataset(sessionId: string): Promise
          j.decoded_complete,j.decoded_reason,j.signature_count,j.verified_transaction_count,
          COALESCE(
            json_agg(t.raw_observation ORDER BY t.slot ASC,t.signature ASC)
-             FILTER (WHERE t.signature IS NOT NULL AND t.observation_source='HISTORICAL_BACKFILL'),
+             FILTER (WHERE t.signature IS NOT NULL AND t.observation_source='HISTORICAL_BACKFILL'
+               AND t.signature IN (
+                 SELECT item->>'signature' FROM jsonb_array_elements(j.signature_state) item
+               )),
            '[]'::json
          ) AS transactions
        FROM helius_backfill_jobs j
