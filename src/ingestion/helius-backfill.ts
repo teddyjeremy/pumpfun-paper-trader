@@ -245,6 +245,8 @@ export function applyAddressSignaturesPage(
     pagesScanned: current.pagesScanned + 1,
     scannedCount,
     before: last.signature,
+    lastPageSlot: last.slot,
+    lastPageBlockTime: last.blockTime,
     status: "PAGING",
     reason: null
   };
