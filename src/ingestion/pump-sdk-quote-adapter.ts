@@ -401,9 +401,10 @@ export async function fetchPumpSwapSdkQuote(input: {
     },
     config: input.config
   });
-  return input.side === "BUY"
+  const quote = input.side === "BUY"
     ? quotePumpSwapBuyFromSnapshot(snapshot, input.amountBaseUnits)
     : quotePumpSwapSellFromSnapshot(snapshot, input.amountBaseUnits);
+  return { ...quote, snapshot };
 }
 
 
