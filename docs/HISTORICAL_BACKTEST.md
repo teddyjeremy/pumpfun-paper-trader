@@ -54,3 +54,10 @@ This is a candidate-selection and entry-pattern dataset. It can tell us which la
 The top-30% activity selection introduces survivorship/activity bias. Do not use it to estimate how often all launches succeed. For strategy evaluation, preserve rejected and incomplete counts and later add a separately sampled control group, full timestamped wallet/holder evidence, fee-inclusive executable quote reconstruction, and verified entry/exit lifecycle replay.
 
 The separate four-hour forward paper session remains blocked until the Worker-to-Neon ingestion, lease, restart recovery, persisted entry/exit and dashboard acceptance checks in `PAPER_TRADING_READINESS.md` pass. No real-wallet signing or live transaction submission is part of this workflow.
+
+
+## Dashboard publication
+
+After ranking (or after a bounded/partial run), the workflow idempotently publishes the date summary and up to 100 discovered launch rows to Neon using the GitHub Actions `DATABASE_URL` secret. The dashboard's **Historical launch research** panel reads those rows and shows discovery/screening counts, the selected shortlist, replay status, first-30-second buyers, price movement and observed real SOL reserves. Raw per-coin JSON and checkpoints remain in the GitHub Actions artifact as the authoritative detailed dataset; the dashboard is a searchable summary, not a replacement for the artifact.
+
+The Neon schema must be migrated through `0010_historical_backtest_dashboard` before the replay workflow is run. The historical workflow validates `DATABASE_URL` before spending Helius credits and fails closed if the publishing credential is absent.
