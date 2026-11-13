@@ -131,7 +131,9 @@ export async function inspectPumpCurveV3InstructionPrerequisites(input: {
   }
   if (rentEstimate.allNewAtaRentKnown) removeBlocker(blockers, "ATA_RENT_AND_VIRTUAL_PAYER_BALANCE_NOT_VERIFIED");
   else blockers.push("ATA_RENT_LAYOUT_OR_AMOUNT_UNSUPPORTED");
-  removeBlocker(blockers, "BUYBACK_FEE_RECIPIENT_ACCOUNT_EXISTENCE_AND_STATE_NOT_VERIFIED");
+  // The curve builder's buyback recipient is a wallet account for native-SOL
+  // curves, not an ATA. This inspector has not fetched or validated that wallet
+  // account, so retain the blocker until a dedicated account-state check exists.
   if (volumeAccumulator.state === "PRESENT_AND_VERIFIED") {
     removeBlocker(blockers, "USER_VOLUME_ACCUMULATOR_STATE_AND_RENT_NOT_VERIFIED");
   } else if (volumeAccumulator.minimumRentLamports !== null) {
