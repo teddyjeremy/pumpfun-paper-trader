@@ -144,8 +144,7 @@ export async function collectCompleteWalletFundingEvidence(
 
     if (!walletComplete) incomplete = true;
     if (seenSignatures.size === 0) {
-      warnings.push(`No verifiable incoming SOL transfer history was returned for wallet ${wallet}.`);
-      incomplete = true;
+      warnings.push(`No incoming SOL transfers were found for wallet ${wallet}; the provider reported no remaining pages.`);
     }
     funderCounts.set(wallet, counts);
   }
