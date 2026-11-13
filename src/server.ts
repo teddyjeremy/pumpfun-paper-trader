@@ -280,7 +280,8 @@ app.get("/api/strategy/replay", async (request, reply) => {
           if (!Number.isSafeInteger(Math.floor(observedAt)) || observedAt < 0) continue;
           const requested = Array.isArray(funding?.requestedWallets) ? funding.requestedWallets : [];
           const covered = Array.isArray(funding?.walletsCovered) ? funding.walletsCovered : [];
-          const complete = funding?.status === "OBSERVED" && funding.dataComplete === true &&
+          const complete = funding?.coverage === "FULL_WALLET_HISTORY" &&
+            funding?.status === "OBSERVED" && funding.dataComplete === true &&
             funding.walletSetComplete === true && requested.length > 0 &&
             requested.length === covered.length &&
             requested.every(wallet => typeof wallet === "string" && covered.includes(wallet));
