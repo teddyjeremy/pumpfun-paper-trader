@@ -854,10 +854,13 @@ export async function persistHeliusGapRecoveryArchive(input: HeliusGapRecoveryAr
     const item = gap.signatures[i]!;
     if (!signaturePattern.test(item.signature) || seen.has(item.signature) ||
         !Number.isSafeInteger(item.slot) || item.slot < 0 ||
-        !(item.blockTime === null || (Number.isSafeInteger(item.blockTime) && item.blockTime >= 0))) {
+        !(item.blockTime === null || (Number.isSafeInteger(item.blockTime) && item.blockTime >= 0)) ||
+        !(item.err === null || (typeof item.err === "object" && !Array.isArray(item.err)))) {
       throw new Error("Helius gap archive contains an invalid or duplicate signature record.");
     }
-    if (i > 0 && item.slot > gap.signatures[i - 1]!.slot) {
+    if (i > 0 && (item.slot > gap.signatures[i - 1]!.slot ||
+        (item.blockTime !== null && gap.signatures[i - 1]!.blockTime !== null &&
+          item.blockTime > gap.signatures[i - 1]!.blockTime!))) {
       throw new Error("Helius gap signatures must remain newest-to-oldest.");
     }
     seen.add(item.signature);
@@ -869,15 +872,21 @@ export async function persistHeliusGapRecoveryArchive(input: HeliusGapRecoveryAr
   }
   const verified = new Set(gap.verifiedSignatures);
   const failed = new Set(gap.failedSignatures);
+  const decodedPrefix = new Set(gap.signatures.slice(0, gap.decodeCursor).map(item => item.signature));
   if (verified.size !== gap.verifiedSignatures.length || failed.size !== gap.failedSignatures.length ||
-      [...verified, ...failed].some(signature => !seen.has(signature)) ||
+      [...verified, ...failed].some(signature => !decodedPrefix.has(signature)) ||
       [...verified].some(signature => failed.has(signature)) ||
-      verified.size + failed.size > gap.decodeCursor) {
-    throw new Error("Helius gap decode outcomes do not match the persisted cursor.");
+      verified.size + failed.size !== gap.decodeCursor ||
+      gap.signatures.some((item, index) => index < gap.decodeCursor
+        ? (item.err === null ? !verified.has(item.signature) : !failed.has(item.signature))
+        : verified.has(item.signature) || failed.has(item.signature))) {
+    throw new Error("Helius gap decode outcomes do not match the persisted cursor or transaction status.");
   }
   if (transaction) {
     const evidence = gap.signatures.find(item => item.signature === transaction.signature);
     if (!evidence || evidence.slot !== transaction.slot || !verified.has(transaction.signature) ||
+        transaction.provider !== "helius" ||
+        (transaction.commitment !== "confirmed" && transaction.commitment !== "finalized") ||
         !Number.isFinite(Date.parse(transaction.receivedAt)) ||
         !Array.isArray(transaction.createEvents) || !Array.isArray(transaction.tradeEvents)) {
       throw new Error("Decoded Helius gap transaction does not match verified signature evidence.");
