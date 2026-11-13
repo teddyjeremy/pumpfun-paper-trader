@@ -39,6 +39,21 @@ describe("Helius same-slot account snapshots", () => {
     expect(result.accounts[2]).toBeNull();
   });
 
+  it("preserves lamports and executable metadata for empty-data wallet accounts", async () => {
+    const result = await fetchHeliusMultipleAccounts(["recipient"], {
+      apiKey: "test", now: () => Date.parse("2026-11-12T12:00:00.000Z"),
+      fetcher: async () => response({
+        result: { context: { slot: 456 }, value: [{
+          owner: "11111111111111111111111111111111",
+          data: ["", "base64"], lamports: 1_000, executable: false
+        }] }
+      })
+    });
+    expect(result.accounts[0]).toMatchObject({
+      address: "recipient", lamports: 1_000, executable: false, data: new Uint8Array()
+    });
+  });
+
   it("rejects missing, duplicate or excessive account addresses", async () => {
     await expect(fetchHeliusMultipleAccounts([], { apiKey: "test" })).rejects.toThrow(/between 1 and 100/);
     await expect(fetchHeliusMultipleAccounts(["same", "same"], { apiKey: "test" })).rejects.toThrow(/unique/);
