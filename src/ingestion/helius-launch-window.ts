@@ -18,6 +18,7 @@ export interface HistoricalLaunchWindowResult {
   state: ReturnType<typeof createHistoricalBackfillState>;
   transactions: VerifiedPumpTransaction[];
   failedSignatures: string[];
+  ignoredSignatures: string[];
   creditsUsed: number;
   reason: string | null;
 }
@@ -75,8 +76,9 @@ export async function collectHistoricalLaunchWindow(
 
   const transactions: VerifiedPumpTransaction[] = [];
   const failedSignatures: string[] = [];
+  const ignoredSignatures: string[] = [];
   const finish = (status: HistoricalLaunchWindowResult["status"], reason: string | null) => ({
-    status, mint: input.mint, state, transactions, failedSignatures, creditsUsed, reason
+    status, mint: input.mint, state, transactions, failedSignatures, ignoredSignatures, creditsUsed, reason
   });
 
   while (state.status !== "COMPLETE" && state.status !== "INCOMPLETE") {
@@ -106,9 +108,16 @@ export async function collectHistoricalLaunchWindow(
     if (budgetExhausted) {
       return finish("BUDGET_EXHAUSTED", "Helius credit ceiling reached during transaction decoding.");
     }
+    if (fetched.status === "NOT_RELEVANT") {
+      // A successfully fetched and decoded transaction that does not contain
+      // this mint is a terminal non-match, not a missing transaction.
+      ignoredSignatures.push(signatureInfo.signature);
+      continue;
+    }
     if (fetched.status !== "VERIFIED") {
       return finish("INCOMPLETE", fetched.status === "DATA_INCOMPLETE"
-        ? fetched.reason : "A successful bonding-curve signature did not decode to the expected mint.");
+        ? `Signature ${signatureInfo.signature.slice(0, 12)}…: ${fetched.reason}`
+        : `Signature ${signatureInfo.signature.slice(0, 12)}… did not verify as a successful Pump transaction.`);
     }
     if (fetched.transaction.slot !== signatureInfo.slot ||
         fetched.transaction.blockTime !== signatureInfo.blockTime) {
@@ -117,7 +126,7 @@ export async function collectHistoricalLaunchWindow(
     transactions.push(fetched.transaction);
   }
 
-  if (transactions.length + failedSignatures.length !== state.signatures.length ||
+  if (transactions.length + failedSignatures.length + ignoredSignatures.length !== state.signatures.length ||
       !transactions.some(transaction => transaction.signature === input.createSignature &&
         transaction.createEvents.some(event => event.mint === input.mint))) {
     return finish("INCOMPLETE", "Launch-window signatures do not reconcile to verified transactions and confirmed failures.");
