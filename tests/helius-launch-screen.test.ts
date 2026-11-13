@@ -4,8 +4,9 @@ import { screenHistoricalLaunchActivity } from "../src/ingestion/helius-launch-s
 const mint = "1".repeat(32);
 const curve = "2".repeat(32);
 const create = "5".repeat(88);
+const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const rows = (count: number) => Array.from({ length: count }, (_, index) => ({
-  signature: String(index + 10).padStart(88, "6"),
+  signature: "6".repeat(86) + alphabet[Math.floor(index / 58)] + alphabet[index % 58],
   slot: 1000 - index,
   blockTime: 10_000 - index * 10,
   err: null
@@ -14,7 +15,7 @@ const response = (result: unknown) => Response.json({ jsonrpc: "2.0", id: "test"
 
 describe("cheap historical launch activity screening", () => {
   it("counts successful curve activity and distinct time buckets without fetching transactions", async () => {
-    const fetcher = vi.fn(async () => response([
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => response([
       ...rows(8),
       { signature: create, slot: 900, blockTime: 9_900, err: null }
     ]));
