@@ -335,6 +335,8 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       signatures: [],
       pagesScanned: 0,
       scannedCount: 0,
+      lastPageSlot: null,
+      lastPageBlockTime: null,
       status: "INCOMPLETE" as const,
       reason: "Verified launch block time is unavailable."
     };
