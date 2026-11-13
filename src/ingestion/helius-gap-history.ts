@@ -18,8 +18,12 @@ export async function fetchHeliusGapAddressHistory(
   bondingCurve: string,
   gap: HeliusCoverageGap,
   config: HeliusRpcConfig,
-  fetcher: typeof fetch = config.fetcher ?? fetch
+  fetcher: typeof fetch = config.fetcher ?? fetch,
+  pageSize = PAGE_SIZE
 ): Promise<HeliusGapHistoryResult> {
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > PAGE_SIZE) {
+    return { complete: false, signatures: [], pagesScanned: 0, reason: "Gap-history page size is outside the supported range." };
+  }
   if (!gap.startSignature || !gap.endSignature ||
       !Number.isSafeInteger(gap.startSlot) || !Number.isSafeInteger(gap.endSlot) ||
       !gap.endedAt) {
@@ -37,7 +41,7 @@ export async function fetchHeliusGapAddressHistory(
       response = await fetcher(buildHeliusRpcUrl(config.apiKey), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(buildAddressSignaturesRequest(bondingCurve, before, PAGE_SIZE))
+        body: JSON.stringify(buildAddressSignaturesRequest(bondingCurve, before, pageSize))
       });
     } catch {
       return { complete: false, signatures: records, pagesScanned: pageNumber, reason: "Helius gap-history request failed." };
@@ -116,7 +120,7 @@ export async function fetchHeliusGapAddressHistory(
 
     previousPageOldest = oldest;
     before = oldest.signature;
-    if (page.length < PAGE_SIZE) {
+    if (page.length < pageSize) {
       return { complete: false, signatures: records, pagesScanned: pageNumber + 1, reason: "Address history ended before both gap anchors were found." };
     }
   }
