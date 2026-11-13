@@ -690,11 +690,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     await this.flushAllHeliusBackfillArchivesToPostgres();
     if (this.status.enabled && this.postgresLeaseHeld) {
       const now = Date.now();
+      const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
+      const hasOpenPositions = Boolean(portfolio?.positions.some(position => position.status !== "CLOSED"));
+      const nextCycleDelayMs = hasOpenPositions ? 5_000 : 15_000;
       const pendingRetryAt = this.heliusState.queue
         .map(item => item.retryAfterAt ? Date.parse(item.retryAfterAt) : Number.NaN)
         .filter(at => Number.isFinite(at) && at > now)
         .reduce((earliest, at) => earliest === null ? at : Math.min(earliest, at), null as number | null);
-      await this.ctx.storage.setAlarm(Math.min(now + 15_000, pendingRetryAt ?? Number.POSITIVE_INFINITY));
+      await this.ctx.storage.setAlarm(Math.min(now + nextCycleDelayMs, pendingRetryAt ?? Number.POSITIVE_INFINITY));
     }
   }
 
