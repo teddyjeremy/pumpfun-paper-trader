@@ -7,6 +7,10 @@ on:
       - ".github/workflows/historical-backtest.yml"
       - "scripts/backtest-helius-day.ts"
       - "src/ingestion/helius-parsed-launch-discovery.ts"
+      - "src/ingestion/helius-launch-window.ts"
+      - "src/ingestion/pump-events.ts"
+      - "scripts/backtest-helius-batch.ts"
+      - "tests/helius-launch-window.test.ts"
   workflow_dispatch:
     inputs:
       date:

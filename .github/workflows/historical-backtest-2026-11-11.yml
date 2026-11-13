@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/historical-backtest-2026-11-11.yml"
+      - ".github/workflows/historical-backtest.yml"
       - "scripts/backtest-helius-batch.ts"
       - "src/ingestion/helius-launch-window.ts"
       - "src/ingestion/pump-events.ts"
