@@ -132,14 +132,14 @@ for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex 
   const index = selectedLaunchIndexes[candidateIndex]!;
   const launch = discovery.launches[index]!;
   const remaining = maxCredits - checkpoint.cumulativeCreditsUsed;
-  // A coin is an atomic work unit: at most seven 100-signature pages plus
-  // 700 raw transaction fetches. Reserve the full bound before starting it.
-  const maxCreditsPerCoin = 707;
+  // A coin is an atomic work unit: at most ten 100-signature pages plus
+  // 1,000 raw transaction fetches. Reserve the full bound before starting it.
+  const maxCreditsPerCoin = 1_010;
   if (remaining < maxCreditsPerCoin) { budgetStopped = true; break; }
   const collected = await collectHistoricalLaunchWindow({
     mint: launch.event.mint, bondingCurve: launch.event.bondingCurve,
     createSignature: launch.signature, launchBlockTime: launch.blockTime,
-    horizonSeconds: 600, maxSignatures: 700
+    horizonSeconds: 600, maxSignatures: 1_000
   }, { apiKey, maxCredits: remaining, requestIntervalMs: 1_000 });
   checkpoint.cumulativeCreditsUsed += collected.creditsUsed;
   const replay = collected.status === "COMPLETE"
