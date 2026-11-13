@@ -81,6 +81,39 @@ describe("bounded historical Pump launch discovery", () => {
     expect(result.reason).toMatch(/ceiling/);
   });
 
+  it("samples launches across the full day instead of retaining only the earliest launches", async () => {
+    const newerSignature = "8".repeat(88);
+    const olderSignature = "7".repeat(88);
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.method === "getSignaturesForAddress") {
+        return rpcResult(body.params[1].before
+          ? []
+          : [
+              { signature: newerSignature, slot: 900, blockTime: 900, err: null },
+              { signature: olderSignature, slot: 100, blockTime: 100, err: null }
+            ]);
+      }
+      const signature = body.params[0];
+      const isNewer = signature === newerSignature;
+      return rpcResult({
+        slot: isNewer ? 900 : 100, blockTime: isNewer ? 900 : 100,
+        transaction: { signatures: [signature] },
+        meta: { err: null, logMessages: [
+          `Program ${PUMP_FUN_PROGRAM_ID} invoke [1]`,
+          createLog(isNewer ? 900 : 100)
+        ] }
+      });
+    });
+    const result = await discoverPumpLaunchesInTimeRange(0, 1_000, {
+      apiKey: "test", fetcher, maxCredits: 10, maxLaunches: 2,
+      pageSize: 2, requestIntervalMs: 0
+    });
+    expect(result.status).toBe("DAY_EXHAUSTED");
+    expect(result.launches.map(item => item.blockTime)).toEqual([100, 900]);
+    expect(result.launches).toHaveLength(2);
+  });
+
   it("resumes from a durable cursor without re-scanning prior pages", async () => {
     const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
       rpcResult([{ signature: "7".repeat(88), slot: 899, blockTime: 1_699, err: null }]));
