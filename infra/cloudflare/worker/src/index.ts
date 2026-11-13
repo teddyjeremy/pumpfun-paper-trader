@@ -1169,6 +1169,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       throw new Error("Buy amount must be a positive u64 quote-token amount.");
     }
 
+    // Build the expensive candidate feature snapshot before starting the
+    // short-lived executable quote window. Reuse it for the final audit so
+    // quote validation is followed by evaluation, not another RPC-heavy scan.
+    const featureReport = await this.listTradeFlows();
     const requestId = crypto.randomUUID();
     const computeUnitLimit = 1_400_000;
     const config = { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const };
@@ -1211,7 +1215,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       // Re-evaluate the candidate with this fresh quote evidence. This only
       // updates audit rules; the quote remains explicitly unauthorized.
       try {
-        await this.recordStrategyAudit(`round-trip:${requestId}`);
+        await this.recordStrategyAudit(`round-trip:${requestId}`, featureReport);
       } catch {
         await this.appendAudit("ERROR", input.mint, {
           requestId, stage: "STRATEGY_REEVALUATION_AFTER_QUOTE",
@@ -1249,10 +1253,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return sessions.filter((item): item is AuditSessionMeta => item !== undefined);
   }
 
-  private async recordStrategyAudit(triggerSignature: string): Promise<void> {
+  private async recordStrategyAudit(triggerSignature: string, precomputedReport?: unknown): Promise<void> {
     const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
     if (monitoredMints.length === 0) return;
-    const report = await this.listTradeFlows() as {
+    const report = (precomputedReport ?? await this.listTradeFlows()) as {
       solUsdPrice?: Awaited<ReturnType<typeof fetchSolUsdPrice>>;
       flows: Array<{ mint: string; quoteMint: string | null; microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE"; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
       priceVolumeProfiles: Array<{ mint:string; quoteMint:string|null; baselinePrice:number|null; reclaimTime:number|null; buckets:Array<{closePrice:number;highPrice:number;endTime:number}>; impulsePriceChangePct:number|null; pullbackPct:number|null; reclaimDetected:boolean; reclaimAbovePreviousFiveSecondHighPct:number|null; pullbackVolumeVsImpulsePct:number|null; reclaimVolumeVsPullbackPct:number|null; dataComplete:boolean; microTradeFilterStatus:"APPLIED"|"UNAVAILABLE"|"UNSUPPORTED_QUOTE" }>;
