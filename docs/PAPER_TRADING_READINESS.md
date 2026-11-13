@@ -13,6 +13,7 @@ This document is the operational checklist for reaching the first verified simul
 ### 1. CI and release integrity
 
 - [x] PR head `690d9e89d6e3d6284308281d8bc9a23addde19e6` passed [GitHub CI run 43423726899](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43423726899): `npm run check` and Cloudflare Worker bundle validation.
+- [x] Historical pagination, PostgreSQL scan-provenance migration, decode-completion revocation, and current-window replay filtering passed [GitHub CI run 43428197546](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43428197546): TypeScript checks, PostgreSQL-backed integration tests, full test suite, build, and Cloudflare Worker bundle validation.
 - [x] Production dashboard deployment `dpl_BARieVKofhUX76xk1JpT3LUqjyVT` is READY at [pumpfun-paper-trader-six.vercel.app](https://pumpfun-paper-trader-six.vercel.app), deployed from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
 - [x] Production Worker deployment succeeded in [Cloudflare deployment workflow 43378493964](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43378493964); deployed version is `1dac036e-76c4-4ff6-90bc-37345d114c3b` from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
 - [ ] Production Worker smoke health and a complete simulated entry/exit lifecycle remain unverified. The deployed main-branch code still reports `tradingReady=false`; PR #77 is not deployed.
