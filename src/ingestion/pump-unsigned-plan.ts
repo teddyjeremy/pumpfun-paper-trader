@@ -17,6 +17,7 @@ import {
 } from "./pump-instruction-prerequisites.js";
 import type { VerifiedPumpQuoteSnapshot } from "./pump-quote-snapshot.js";
 import type { NonSigningVirtualTraderIdentity } from "./virtual-trader-identity.js";
+import { buildPumpUserVolumeAccumulatorInitInstruction } from "./pump-sdk-runtime.js";
 
 export interface PumpUnsignedExecutionPlan {
   provider: "pump-sdk-4.3.1";
@@ -157,7 +158,14 @@ export async function buildPumpCurveV3UnsignedPlan(input: {
   const prerequisiteCreates = dedupePrerequisiteAtaCreates(
     accountPrerequisites.ataSnapshot.createInstructions, [built.instruction]
   );
-  const instructions = [...prerequisiteCreates, built.instruction];
+  const accumulatorInit = accountPrerequisites.volumeAccumulator?.state === "MISSING_INIT_IF_NEEDED"
+    ? await buildPumpUserVolumeAccumulatorInitInstruction({ payer: built.user, user: built.user })
+    : null;
+  const venueInstructions = [
+    ...(accumulatorInit ? [accumulatorInit] : []),
+    built.instruction
+  ];
+  const instructions = [...prerequisiteCreates, ...venueInstructions];
   const feeEvidence = await attachExactFees({
     apiKey: input.apiKey, user: built.user, recentBlockhash: input.recentBlockhash,
     instructions, computeUnitLimit: input.computeUnitLimit,
@@ -166,7 +174,7 @@ export async function buildPumpCurveV3UnsignedPlan(input: {
   });
   const plan = finishPlan({
     venue: "PUMP_CURVE", side: input.side, mint: built.mint, user: built.user,
-    venueInstructions: [built.instruction],
+    venueInstructions,
     requiredAccountAddressesToVerify: built.requiredAccountAddressesToVerify,
     accountPrerequisites, feeEvidence
   });
