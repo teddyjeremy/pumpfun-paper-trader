@@ -100,6 +100,7 @@ interface Env {
   FULL_WALLET_HISTORY_ENABLED?: string;
   FULL_WALLET_HISTORY_MAX_PAGES?: string;
   REVIEWED_VOLUME_THRESHOLDS_JSON?: string;
+  PAPER_OBSERVATION_PAUSED?: string;
 }
 
 interface WalletLinkEvidenceSnapshot {
@@ -130,6 +131,7 @@ interface CoordinatorStatus {
   subscriptionsSent: boolean;
   enabled: boolean;
   tradingReady: boolean;
+  observationPaused: boolean;
   readinessBlockers: string[];
   quoteSdkModules: { curve: boolean; pumpSwap: boolean };
   blocker: string;
@@ -166,6 +168,7 @@ const INITIAL_STATUS: CoordinatorStatus = {
   subscriptionsSent: false,
   enabled: false,
   tradingReady: false,
+  observationPaused: false,
   readinessBlockers: ["Coordinator is stopped.", "No active paper session."],
   quoteSdkModules: officialPumpSdkModulesAvailable(),
   blocker: "Coordinator is stopped; runtime paper-trading readiness has not been established.",
@@ -232,6 +235,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
   private readonly env: Env;
 
+
+  private get observationPaused(): boolean {
+    return this.env.PAPER_OBSERVATION_PAUSED === "true";
+  }
 
   private get postgresIngestConfigured(): boolean {
     return Boolean(this.env.PAPER_EVENT_INGEST_URL && (this.env.PAPER_EVENT_INGEST_TOKEN_V2 || this.env.PAPER_EVENT_INGEST_TOKEN));
