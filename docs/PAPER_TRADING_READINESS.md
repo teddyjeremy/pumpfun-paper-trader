@@ -134,6 +134,8 @@ Until these items pass, dynamic exhaustion remains disabled. Protective exits st
 
 ### 8. Neon persistence and recovery
 
+- [x] Implement independent Helius WebSocket-gap history scans with durable cursors, per-signature verification, and Neon-acknowledged transaction archival. Recovery remains fail-closed until both boundary anchors, every terminal transaction outcome, and every successful transaction archive are proven.
+- [ ] Verify an actual production WebSocket interruption is scanned, decoded, archived to Neon, and only then marked recovered.
 - [x] Database migrations 0001–0007 have been applied in the configured environment (deployment state still requires verification).
 - [ ] Verify production connection and migration version.
 - Production Vercel environment contains `DATABASE_URL` and `PAPER_EVENT_INGEST_TOKEN`; Cloudflare has `PAPER_EVENT_INGEST_URL` pointed at the dashboard alias and a `PAPER_EVENT_INGEST_TOKEN` secret binding. The secret values are write-only, so matching and successful event ingestion still need an end-to-end acknowledgement.
