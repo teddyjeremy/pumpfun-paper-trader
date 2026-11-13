@@ -308,8 +308,11 @@ export async function fetchCompleteHolderConcentration(
         shareBps: toCeilingBps(account.amount, second.supply)
       });
     }
-    if (positiveAccounts.length === 0 || totalBalances > second.supply) {
-      return { status: "DATA_INCOMPLETE", mint, reason: "Full holder-census balances are empty or exceed verified token supply." };
+    if (positiveAccounts.length === 0 || totalBalances !== second.supply) {
+      return {
+        status: "DATA_INCOMPLETE", mint,
+        reason: "Full holder-census balances do not reconcile exactly to the verified token supply."
+      };
     }
     const largestOwner = [...ownerAmounts.values()].reduce((max, amount) => amount > max ? amount : max, 0n);
     const largestOwnerShareBps = toCeilingBps(largestOwner, second.supply);
