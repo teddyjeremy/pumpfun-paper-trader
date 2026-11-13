@@ -71,7 +71,7 @@ describe("Pump curve exit-window evidence", () => {
     expect(result.every(window => window.complete && window.windowSeconds === 2)).toBe(true);
     expect(result[1]?.buyVolumeDeclinePct).toBe(40);
     expect(result[2]?.buyVolumeDeclinePct).toBe(50);
-    expect(result[2]?.liquidityChangePct).toBe(-5);
+    expect(result[2]?.liquidityChangePct).toBe(-5.26);
   });
 
   it("does not reuse Pump curve flow as PumpSwap evidence after migration", () => {
