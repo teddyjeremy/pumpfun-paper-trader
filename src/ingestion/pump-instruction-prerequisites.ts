@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import { PublicKey } from "@solana/web3.js";
 import { fetchHeliusMultipleAccounts, type HeliusAccountReadConfig } from "./helius-accounts.js";
 import { buildHeliusRpcUrl } from "./helius.js";
@@ -53,7 +52,7 @@ async function inspectPumpUserVolumeAccumulator(input: {
   if (account) {
     if (account.address !== input.address || account.slot !== snapshot.slot ||
         account.observedAt !== snapshot.observedAt || account.owner !== PUMP_PROGRAM_ID ||
-        Buffer.from(account.data, "base64").length !== 137) {
+        account.data.length !== 137) {
       throw new Error("Pump user volume accumulator has an unexpected owner, size or snapshot context.");
     }
     return {
