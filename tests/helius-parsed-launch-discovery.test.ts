@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  fetchPumpCreateScanPage, fetchVerifiedParsedLaunch,
+  fetchPumpCreateScanPage, fetchVerifiedParsedLaunch, fetchFirstVerifiedParsedLaunch,
   canContinueParsedLaunchBucket, findFirstResumableParsedLaunchBucket, canMarkParsedLaunchBucketEmpty
 } from "../src/ingestion/helius-parsed-launch-discovery.js";
 import { PUMP_FUN_PROGRAM_ID } from "../src/ingestion/helius.js";
@@ -72,6 +72,15 @@ describe("Helius Parsed Events historical launch discovery", () => {
     ], 5)).toBe(2);
   });
 
+  it("retries one incomplete bucket from the start when its selected Create transaction was unavailable", () => {
+    expect(findFirstResumableParsedLaunchBucket([
+      { status: "INCOMPLETE", paginationToken: null, pagesScanned: 6, hasUnverifiedMatch: true }
+    ], 20)).toBe(0);
+    expect(findFirstResumableParsedLaunchBucket([
+      { status: "INCOMPLETE", paginationToken: null, pagesScanned: 6, hasUnverifiedMatch: true, rescanAttempts: 1 }
+    ], 20)).toBeNull();
+  });
+
   it("requests only Pump create instructions inside the exact time bucket", async () => {
     const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => json({
       data: [{ signature, slot: 900, blockTime: 1_800 }],
@@ -90,6 +99,7 @@ describe("Helius Parsed Events historical launch discovery", () => {
     expect(body.match.programs[0].instructions).toEqual(["create", "create_v2"]);
     expect(body.time).toEqual({ gte: 1_700, lt: 1_900 });
     expect(body.budget.maxScannedTransactions).toBe(10_000);
+    expect(body.limit).toBe(10);
   });
 
   it("accepts the observed 21-credit maximum and rejects higher scan charges", async () => {
@@ -139,6 +149,30 @@ describe("Helius Parsed Events historical launch discovery", () => {
     }, { startTime: 1_700, endTime: 1_900 }, { apiKey: "test", fetcher });
     expect(launch).toMatchObject({ signature, slot: 900, blockTime: 1_800 });
     expect(launch.event.mint).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+  });
+
+  it("tries the next signature in a scan page when the first raw transaction is unavailable", async () => {
+    const secondSignature = "6".repeat(88);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ result: null }))
+      .mockResolvedValueOnce(json({
+        result: {
+          slot: 900, blockTime: 1_800,
+          transaction: { signatures: [secondSignature] },
+          meta: { err: null, logMessages: [
+            `Program ${PUMP_FUN_PROGRAM_ID} invoke [1]`,
+            createLog(1_800),
+            opaqueTradeLogWithUnverifiedLayout()
+          ] }
+        }
+      }));
+    const result = await fetchFirstVerifiedParsedLaunch([
+      { signature, slot: 900, blockTime: 1_800 },
+      { signature: secondSignature, slot: 900, blockTime: 1_800 }
+    ], { startTime: 1_700, endTime: 1_900 }, { apiKey: "test", fetcher });
+    expect(result.attempts).toBe(2);
+    expect(result.reason).toBeNull();
+    expect(result.launch?.signature).toBe(secondSignature);
   });
 
   it("does not fall back to an unbounded crawl when Parsed Events is unavailable", async () => {
