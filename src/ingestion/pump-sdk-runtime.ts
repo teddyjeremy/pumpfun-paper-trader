@@ -1,3 +1,4 @@
+import { PublicKey } from "@solana/web3.js";
 import {
   OnlinePumpSdk,
   PUMP_SDK,
@@ -81,6 +82,21 @@ export function officialPumpSdkMethodSurface(): {
     pumpSwapStatic: methodNames(PUMP_AMM_SDK),
     pumpSwapOnline: methodNames(OnlinePumpAmmSdk.prototype)
   };
+}
+
+
+/** Build the official Pump user-volume accumulator initializer offline. */
+export async function buildPumpUserVolumeAccumulatorInitInstruction(input: {
+  payer: string;
+  user: string;
+}) {
+  if (!hasMethod(PUMP_SDK, "initUserVolumeAccumulator")) {
+    throw new Error("Pinned Pump SDK does not expose initUserVolumeAccumulator.");
+  }
+  return await PUMP_SDK.initUserVolumeAccumulator({
+    payer: new PublicKey(input.payer),
+    user: new PublicKey(input.user)
+  });
 }
 
 /**
