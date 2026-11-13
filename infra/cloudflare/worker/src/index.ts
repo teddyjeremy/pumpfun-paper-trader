@@ -33,7 +33,7 @@ import {
 import {
   emptyHeliusMonitorState, enqueueHeliusNotification, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, confirmHeliusSubscription, takeHeliusWork, resetHeliusSubscriptionIds,
-  recordHeliusCoverageGap,
+  recordHeliusCoverageGap, recordHeliusNotificationBoundary,
   retryHeliusSignatureWork,
   type HeliusMonitorState,
   type HeliusSignatureWork,
@@ -2536,6 +2536,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const params = record.params as Record<string, unknown> | undefined;
         const subscriptionId = params?.subscription;
         if (!Number.isSafeInteger(subscriptionId)) { this.markHeliusIncomplete(); return; }
+        this.heliusState = recordHeliusNotificationBoundary(
+          this.heliusState, subscriptionId as number,
+          notification.signature, notification.slot, new Date().toISOString()
+        );
         const result = enqueueHeliusNotification(this.heliusState, {
           subscriptionId: subscriptionId as number,
           signature: notification.signature,
