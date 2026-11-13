@@ -601,23 +601,24 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const consecutiveFlowWindows = latestFlowWindows.length === 3 &&
           latestFlowWindows[1]!.startTime === latestFlowWindows[0]!.startTime + 1 &&
           latestFlowWindows[2]!.startTime === latestFlowWindows[1]!.startTime + 1;
-        const exitWindowSamples = quoteMint && marketState.status !== "EXIT_BLOCKED" &&
-          marketState.status !== "UNVERIFIED" && marketState.status !== "MIGRATION_PENDING"
+        // PumpTradeEvent currently provides Pump bonding-curve observations;
+        // do not relabel those historical events as PumpSwap after migration.
+        const exitWindowSamples = quoteMint && marketState.status === "LIVE_CURVE"
           ? latestFlowWindows.map(window => {
               const events = this.verifiedTransactions.flatMap(transaction => transaction.tradeEvents)
                 .filter(event => event.mint === position.mint && event.quoteMint === quoteMint &&
                   Number(event.timestamp) >= window.startTime && Number(event.timestamp) < window.endTime)
                 .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
               const priceOf = (event: (typeof events)[number] | undefined): number | null => {
-                if (!event || event.virtualSolReserves <= 0n || event.virtualTokenReserves <= 0n) return null;
-                const scaled = (event.virtualSolReserves * 1_000_000_000_000n) / event.virtualTokenReserves;
+                if (!event || event.virtualQuoteReserves <= 0n || event.virtualTokenReserves <= 0n) return null;
+                const scaled = (event.virtualQuoteReserves * 1_000_000_000_000n) / event.virtualTokenReserves;
                 const price = Number(scaled) / 1_000_000_000_000;
                 return Number.isFinite(price) && price > 0 ? price : null;
               };
               return {
                 mint: position.mint,
-                marketPhase: marketState.status === "LIVE_CURVE" ? "bonding_curve" as const : "migrated_market" as const,
-                venue: marketState.status === "LIVE_CURVE" ? "pump_curve" as const : "pumpswap" as const,
+                marketPhase: "bonding_curve" as const,
+                venue: "pump_curve" as const,
                 quoteMint,
                 endedAtMs: window.endTime * 1_000,
                 windowSeconds: 2 as const,
@@ -628,9 +629,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
                 uniqueSellers: window.uniqueSellers,
                 startPriceQuotePerToken: priceOf(events[0]),
                 endPriceQuotePerToken: priceOf(events[events.length - 1]),
-                // The current trade-event feed does not provide a complete,
-                // comparable liquidity/holder-distribution time series.
-                quoteLiquidityBaseUnits: null,
+                // Real quote reserves are available on verified Pump curve
+                // trade events; holder-distribution time series is not.
+                quoteLiquidityBaseUnits: events.at(-1)?.realQuoteReserves.toString() ?? null,
                 largeHolderDistributionDetected: null
               };
             })
