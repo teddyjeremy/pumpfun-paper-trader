@@ -16,7 +16,7 @@ function positiveInteger(name: string, fallback: number, maximum: number): numbe
 
 const date = option("date", "");
 const offsetMinutes = Number(option("utc-offset-minutes", "180"));
-const maxCredits = positiveInteger("max-credits", 100_000, 100_000);
+const maxCredits = positiveInteger("max-credits", 40_000, 100_000);
 const maxLaunches = positiveInteger("max-launches", 100, 100);
 const pageSize = positiveInteger("page-size", 1_000, 1_000);
 const apiKey = process.env.HELIUS_API_KEY ?? "";
