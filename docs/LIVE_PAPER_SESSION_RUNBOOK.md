@@ -21,7 +21,7 @@ A four-hour run is an operational observation window, not proof of profitability
    - Vercel: `DATABASE_URL`, `PAPER_EVENT_INGEST_TOKEN`
    - Reviewed calibration: `REVIEWED_VOLUME_THRESHOLDS_JSON` only after a real, complete replay has been independently reviewed and approved. Do not fabricate this payload.
 6. Verify the Neon migration version and that the dashboard read path can query session, position, quote and trade projections.
-7. Run `npm run smoke:ingestion` only from an authorized environment containing `PAPER_WORKER_URL`, `PAPER_WORKER_CONTROL_TOKEN`, `PAPER_EVENT_INGEST_URL`, and `PAPER_EVENT_INGEST_TOKEN`. This smoke test only checks health and acquires/heartbeats/releases a unique short-lived lease; it creates no trades.
+7. Run `npm run smoke:ingestion` only from an authorized environment containing `PAPER_WORKER_URL`, `PAPER_WORKER_CONTROL_TOKEN`, and `PAPER_EVENT_INGEST_URL`. The authenticated Worker smoke endpoint uses the Worker's own ingestion secret to acquire/heartbeat its fenced Neon lease, persist a uniquely tagged `SESSION_STARTED`/`SESSION_STOPPED` audit-only session, and replay the same events to prove idempotency. It does not start market streams or create positions, quotes, fills, or transactions. The tagged smoke session remains in Neon for audit.
 8. Require all checks to pass. HTTP 401/403/503, lease contention, missing migrations, unknown runtime state, or a secret mismatch is a stop condition.
 
 ## Phase 1 — paper-only lifecycle acceptance
