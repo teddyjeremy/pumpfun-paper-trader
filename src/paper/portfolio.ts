@@ -146,7 +146,9 @@ function applyEquityAndTopUp(state: PaperPortfolioState, equity: number, occurre
     growthEquity({ ...state, bankroll: topped.state }));
   const limits = capacityForEquity(highWaterEquityUsd);
   return {
-    bankroll: topped.state, availableCashUsd: cash, highWaterEquityUsd,
+    bankroll: topped.state, availableCashUsd: cash,
+    reservedAccountRentUsd: state.reservedAccountRentUsd ?? 0,
+    highWaterEquityUsd,
     positionSizeUsd: limits.stake, maxConcurrentPositions: limits.slots
   };
 }
