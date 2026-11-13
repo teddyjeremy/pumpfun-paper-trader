@@ -1070,6 +1070,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async recordPaperEntry(input: {
     mint: string; positionId: string; buyQuote: ExecutablePaperQuote; sellQuote: ExecutablePaperQuote;
+    rentReserveUsd: number;
   }): Promise<unknown> {
     await this.hydrate();
     const sessionId = this.activeSessionId;
@@ -1546,9 +1547,36 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           result?: {
             buyQuote?: ExecutablePaperQuote;
             initialSellQuote?: ExecutablePaperQuote;
+            solUsdPriceUsd?: number;
+            exactFeeEvidence?: {
+              buy?: { planEvidence?: { rentReserveLamports: number | null } };
+              sell?: { planEvidence?: { rentReserveLamports: number | null } };
+            };
           };
         }).result;
         if (quoteResult?.buyQuote && quoteResult.initialSellQuote) {
+          const buyRentLamports = quoteResult.exactFeeEvidence?.buy?.planEvidence?.rentReserveLamports;
+          const sellRentLamports = quoteResult.exactFeeEvidence?.sell?.planEvidence?.rentReserveLamports;
+          const solUsdPriceUsd = quoteResult.solUsdPriceUsd;
+          if (buyRentLamports === null || buyRentLamports === undefined ||
+              sellRentLamports === null || sellRentLamports === undefined ||
+              !Number.isSafeInteger(buyRentLamports) || buyRentLamports < 0 ||
+              !Number.isSafeInteger(sellRentLamports) || sellRentLamports < 0 ||
+              !Number.isFinite(solUsdPriceUsd) || solUsdPriceUsd! <= 0) {
+            await this.appendAudit("ERROR", mint, {
+              triggerSignature, stage: "PAPER_RENT_RESERVE",
+              reason: "Both unsigned plans must provide verified rent lamports and a fresh SOL/USD reference."
+            }, `paper-rent-reserve-error:${triggerSignature}:${mint}`);
+            return;
+          }
+          // Buy and sell plans refer to the same virtual trader accounts. Use
+          // the larger snapshot requirement, not their sum, to avoid double
+          // reserving rent for the same ATAs and volume accumulator.
+          const rentReserveLamports = Math.max(buyRentLamports, sellRentLamports);
+          const rentReserveUsd = rentReserveLamports / 1_000_000_000 * solUsdPriceUsd!;
+          if (!Number.isFinite(rentReserveUsd) || rentReserveUsd < 0) {
+            throw new Error("Converted refundable rent reserve is invalid.");
+          }
           const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
           if (portfolio && !portfolio.enteredMints.includes(mint)) {
             try {
@@ -1556,7 +1584,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
                 mint,
                 positionId: `paper-entry:${this.activeSessionId}:${mint}:${quoteResult.buyQuote.quoteId}`,
                 buyQuote: quoteResult.buyQuote,
-                sellQuote: quoteResult.initialSellQuote
+                sellQuote: quoteResult.initialSellQuote,
+                rentReserveUsd
               });
               const committedSessionId = this.activeSessionId;
               if (committedSessionId) {
