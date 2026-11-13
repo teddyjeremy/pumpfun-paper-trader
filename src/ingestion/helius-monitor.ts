@@ -226,13 +226,21 @@ export function recordHeliusNotificationBoundary(
       !Number.isSafeInteger(slot) || slot < 0 || !Number.isFinite(Date.parse(now))) return state;
   const subscription = state.subscriptions.find(item => item.subscriptionId === subscriptionId);
   if (!subscription) return state;
-  let anchoredGap = false;
-  const coverageGaps = state.coverageGaps.map(gap => {
-    if (gap.mint !== subscription.mint || gap.endedAt === null ||
-        gap.endSignature !== null || anchoredGap || Date.parse(now) < Date.parse(gap.endedAt)) return gap;
-    anchoredGap = true;
-    return { ...gap, endSignature: signature, endSlot: slot };
-  });
+  // Anchor only the gap closed by this subscription acknowledgement. If a
+  // reconnect ended without any notification before another interruption,
+  // the earlier gap must remain unanchored rather than borrowing a later event.
+  let targetGapIndex = -1;
+  for (let index = state.coverageGaps.length - 1; index >= 0; index -= 1) {
+    const gap = state.coverageGaps[index]!;
+    if (gap.mint === subscription.mint && gap.endedAt !== null &&
+        gap.endedAt === subscription.subscribedAt && gap.endSignature === null) {
+      targetGapIndex = index;
+      break;
+    }
+  }
+  const coverageGaps = state.coverageGaps.map((gap, index) =>
+    index === targetGapIndex ? { ...gap, endSignature: signature, endSlot: slot } : gap
+  );
   return {
     ...state,
     coverageGaps,
