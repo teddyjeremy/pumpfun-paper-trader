@@ -120,6 +120,7 @@ if (artifact.status === "SAMPLE_COMPLETE") {
 
 let lastRequestAt = 0;
 let budgetStopped = false;
+let fatalScanError = false;
 for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
   const start = startTime + Math.floor(index * (endTime - startTime) / maxLaunches);
   const end = startTime + Math.floor((index + 1) * (endTime - startTime) / maxLaunches);
@@ -153,12 +154,15 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
         startTime: start, endTime: end, paginationToken: bucket.paginationToken
       }, { apiKey, maxScannedTransactions: 10_000 });
     } catch (error) {
-      bucket.status = "INCOMPLETE";
+      bucket.status = "RUNNING";
       bucket.reason = error instanceof Error ? error.message : "Parsed Events scan failed.";
       artifact.buckets[index] = bucket;
-      artifact.nextBucketIndex = index + 1;
+      artifact.nextBucketIndex = index;
       artifact.status = "INCOMPLETE";
       artifact.reason = bucket.reason;
+      artifact.updatedAt = new Date().toISOString();
+      await save(path, artifact);
+      fatalScanError = true;
       break;
     }
     lastRequestAt = Date.now();
@@ -243,7 +247,7 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
     artifact.updatedAt = new Date().toISOString();
     await save(path, artifact);
   }
-  if (budgetStopped) break;
+  if (budgetStopped || fatalScanError) break;
   if (bucket.status === "INCOMPLETE") continue;
 }
 if (!budgetStopped && artifact.nextBucketIndex >= maxLaunches) {
