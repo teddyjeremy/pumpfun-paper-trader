@@ -15,7 +15,7 @@ type Discovery = {
 };
 type Screening = { date: string; status: string; creditsUsed: number; selectedLaunchIndexes: number[]; results: Array<{ index: number; result: HistoricalLaunchActivityScreenResult }> };
 type Checkpoint = {
-  schemaVersion: 2; date: string; discoveryLaunchCount: number;
+  schemaVersion: 3; date: string; discoveryLaunchCount: number;
   discoveryCredits: number; screeningCredits: number; totalCreditCeiling: number;
   selectedLaunchIndexes: number[]; nextCandidateIndex: number;
   completedMints: string[]; incompleteMints: string[];
@@ -65,8 +65,9 @@ if (new Set(discovery.launches.map(row => row.event.mint)).size !== discovery.la
 
 const screening = JSON.parse(await readFile(screeningPath, "utf8")) as Screening;
 if (screening.date !== date || screening.status !== "COMPLETE" ||
-    !Number.isSafeInteger((screening as Screening & { creditsUsed?: number }).creditsUsed) ||
-    ((screening as Screening & { creditsUsed?: number }).creditsUsed ?? maxCredits) < 0 ||
+    !Number.isSafeInteger(screening.creditsUsed) || screening.creditsUsed < 0 || screening.creditsUsed > 500 ||
+    screening.nextIndex !== discovery.launches.length ||
+    !Array.isArray(screening.results) || screening.results.length !== discovery.launches.length ||
     !Array.isArray(screening.selectedLaunchIndexes) ||
     screening.selectedLaunchIndexes.length > Math.floor(discovery.launches.length * 0.3) ||
     screening.selectedLaunchIndexes.some(index => !Number.isSafeInteger(index) || index < 0 || index >= discovery.launches.length) ||
@@ -81,7 +82,7 @@ if (selectedLaunchIndexes.length === 0) {
 let checkpoint: Checkpoint;
 try {
   checkpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as Checkpoint;
-  if (checkpoint.schemaVersion !== 2 || checkpoint.date !== date ||
+  if (checkpoint.schemaVersion !== 3 || checkpoint.date !== date ||
       checkpoint.discoveryLaunchCount !== discovery.launches.length ||
       checkpoint.discoveryCredits !== discovery.creditsUsed ||
       checkpoint.screeningCredits !== screening.creditsUsed ||
@@ -95,7 +96,7 @@ try {
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   checkpoint = {
-    schemaVersion: 2, date, discoveryLaunchCount: discovery.launches.length,
+    schemaVersion: 3, date, discoveryLaunchCount: discovery.launches.length,
     discoveryCredits: discovery.creditsUsed, screeningCredits: screening.creditsUsed, totalCreditCeiling: maxCredits,
     selectedLaunchIndexes, nextCandidateIndex: 0, completedMints: [], incompleteMints: [],
     marketPatternMints: [], noSetupMints: [],
