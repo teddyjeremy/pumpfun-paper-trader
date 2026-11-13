@@ -168,12 +168,15 @@ Do not rotate the shared ingestion token without coordinated authorization to up
 
 ## Historical backtest tooling
 
-- [x] Add a bounded standard-RPC discovery runner for a specified local calendar day, with per-request credit accounting and a hard launch sample cap.
-- [x] Require full-day pagination completion before selecting the earliest 100 launches; partial scans are not treated as a representative first-100 sample.
-- [x] Add a per-launch 10-minute bonding-curve history collector with signature/slot/block-time reconciliation and a shared credit ceiling.
-- [x] Add a replay command that runs the existing historical entry-pattern engine and preserves incomplete/risk-not-cleared outcomes.
-- [ ] Run the November 12, 2026 dataset with the configured Helius key, inspect actual credit consumption and archive the resulting artifacts. The scripts require operator execution with HELIUS_API_KEY; no API key is committed or exposed.
-- [ ] Add complete historical wallet/holder evidence and verified fee-inclusive entry/exit execution evidence before using the replay to estimate profitability.
+- [x] Replace the expensive legacy full-day standard-RPC crawl in the workflow with Helius Parsed Events Scan filtered to Pump `create`/`create_v2` and exact time buckets. The old standard-RPC discovery is retained only as legacy tooling and is not an automatic fallback.
+- [x] Require all 100 time buckets to finish as explicitly `FOUND` or `EMPTY`; capped or failed buckets remain `INCOMPLETE` and resumable.
+- [x] Add the cheap one-page bonding-curve activity screen; deep replay is limited to the top 30% of screened launches (maximum 30 from 100).
+- [x] Process deep replay one coin at a time, save a separate mint-keyed coin artifact, and checkpoint the next candidate after each completed coin. Reserve per-coin credits before starting so a budget stop does not publish a partial coin as complete.
+- [x] Enforce the shared 30,000-credit ceiling including the 16,778-credit legacy sunk spend, with 5,000 for new discovery and 500 for screening.
+- [x] Rank only selected coins belonging to the matching date/discovery/screen/replay checkpoint; unrelated or stale files are excluded.
+- [ ] Manually dispatch the November 12, 2026 workflow with previous run ID `43442196641`, then inspect the Parsed Events Scan access result, actual credit ledger, candidate shortlist and per-coin artifacts. The workflow has not yet been run with the replacement discovery.
+- [ ] Build complete historical wallet/holder evidence and verified fee-inclusive entry/exit execution evidence before using replay to estimate profitability.
+- [ ] Use a separate control sample of rejected/low-activity launches before making population-wide claims; the top-30% shortlist is activity-biased and is for triage only.
 
 ## First-paper-trade acceptance test
 
