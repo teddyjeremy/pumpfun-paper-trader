@@ -53,6 +53,7 @@ export async function collectCompleteWalletFundingEvidence(
   }
   if (!walletSetComplete) {
     warnings.push("The supplied wallet set exceeds the bounded eight-wallet collection limit or contains duplicate wallet entries.");
+    return result(mint, "DATA_INCOMPLETE", false, false, uniqueWallets.length, 0, 0, 0, warnings);
   }
 
   const fetcher = config.fetcher ?? fetch;
