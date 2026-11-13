@@ -2975,10 +2975,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       item.endedAt !== null && item.recoveredAt == null
     );
     for (const gap of gaps) {
-      const subscription = this.heliusState.subscriptions.find(item => item.mint === gap.mint);
-      if (!subscription?.bondingCurve) continue;
       const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
       const saved = await this.ctx.storage.get<{
+        bondingCurve: string;
         status: "SCANNING" | "SCANNED" | "INCOMPLETE";
         resume?: HeliusGapHistoryResume;
         signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
@@ -3000,7 +2999,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         return fetch(input, init);
       };
       const result = await fetchHeliusGapAddressHistory(
-        subscription.bondingCurve,
+        saved?.bondingCurve ?? this.heliusState.subscriptions.find(item => item.mint === gap.mint)?.bondingCurve ?? "",
         gap,
         { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed", fetcher: throttledFetcher },
         throttledFetcher,
@@ -3009,6 +3008,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       );
       const retryFromSavedBoundary = !result.complete && !result.resume && saved?.resume;
       const next = {
+        bondingCurve: subscription.bondingCurve,
         status: result.complete ? "SCANNED" as const : "SCANNING" as const,
         ...(result.resume ? { resume: result.resume } :
           retryFromSavedBoundary ? { resume: saved.resume } : {}),
@@ -3048,10 +3048,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (!sessionId || !this.status.enabled) return;
     for (const gap of this.heliusState.coverageGaps) {
       if (gap.endedAt === null || gap.recoveredAt != null) continue;
-      const subscription = this.heliusState.subscriptions.find(item => item.mint === gap.mint);
-      if (!subscription?.bondingCurve) continue;
       const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
       const scan = await this.ctx.storage.get<{
+        bondingCurve: string;
         status: "SCANNING" | "SCANNED" | "INCOMPLETE";
         signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
       }>(key);
@@ -3166,7 +3165,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const completeDecode = cursor === scan.signatures.length &&
         verifiedSignatures.length + failedSignatures.length === scan.signatures.length;
       const state = {
-        bondingCurve: this.heliusState.subscriptions.find(item => item.mint === gap.mint)?.bondingCurve ?? "",
+        bondingCurve: scan.bondingCurve,
         startedAt: gap.startedAt,
         endedAt: gap.endedAt,
         startSignature: gap.startSignature,
