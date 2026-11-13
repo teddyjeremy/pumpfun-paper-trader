@@ -399,6 +399,9 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     await ledgerPersistence!.persistHeliusGapRecoveryArchive({
       sessionId, mint: gapMint, gap: baseGap
     });
+    await expect(ledgerPersistence!.persistHeliusGapRecoveryArchive({
+      sessionId, mint: gapMint, gap: { ...baseGap, status: "ARCHIVED" }
+    })).rejects.toThrow(/cannot be marked archived/);
     await ledgerPersistence!.persistHeliusGapRecoveryArchive({
       sessionId, mint: gapMint, gap: baseGap, transaction
     });
