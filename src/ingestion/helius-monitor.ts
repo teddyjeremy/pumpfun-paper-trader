@@ -22,6 +22,9 @@ export interface HeliusCandidateSubscription {
   mint: string;
   bondingCurve: string;
   subscribedAt: string | null;
+  lastNotificationAt?: string | null;
+  lastSignature?: string | null;
+  lastSlot?: number | null;
 }
 
 export interface HeliusSignatureWork {
@@ -38,6 +41,10 @@ export interface HeliusCoverageGap {
   mint: string;
   startedAt: string;
   endedAt: string | null;
+  startSignature: string | null;
+  startSlot: number | null;
+  endSignature: string | null;
+  endSlot: number | null;
 }
 
 export interface HeliusMonitorState {
@@ -177,7 +184,12 @@ export function recordHeliusCoverageGap(
   return {
     ...state,
     incompleteMints: [...new Set([...state.incompleteMints, mint])].slice(-MAX_HELIUS_CANDIDATES),
-    coverageGaps: [...state.coverageGaps, { mint, startedAt, endedAt: null }].slice(-100)
+    coverageGaps: [...state.coverageGaps, {
+      mint, startedAt, endedAt: null,
+      startSignature: subscription?.lastSignature ?? null,
+      startSlot: subscription?.lastSlot ?? null,
+      endSignature: null, endSlot: null
+    }].slice(-100)
   };
 }
 
@@ -195,6 +207,39 @@ export function closeHeliusCoverageGap(
     return { ...gap, endedAt: now };
   });
   return { ...state, coverageGaps };
+}
+
+
+/**
+ * Preserve the signature immediately before and after an interruption. These
+ * anchors let a later address-history scan prove that it traversed the entire
+ * interval; timestamps alone are not sufficient pagination boundaries.
+ */
+export function recordHeliusNotificationBoundary(
+  state: HeliusMonitorState,
+  subscriptionId: number,
+  signature: string,
+  slot: number,
+  now = new Date().toISOString()
+): HeliusMonitorState {
+  if (!Number.isSafeInteger(subscriptionId) || !SIGNATURE.test(signature) ||
+      !Number.isSafeInteger(slot) || slot < 0 || !Number.isFinite(Date.parse(now))) return state;
+  const subscription = state.subscriptions.find(item => item.subscriptionId === subscriptionId);
+  if (!subscription) return state;
+  let anchoredGap = false;
+  const coverageGaps = state.coverageGaps.map(gap => {
+    if (gap.mint !== subscription.mint || gap.endedAt === null ||
+        gap.endSignature !== null || anchoredGap || Date.parse(now) < Date.parse(gap.endedAt)) return gap;
+    anchoredGap = true;
+    return { ...gap, endSignature: signature, endSlot: slot };
+  });
+  return {
+    ...state,
+    coverageGaps,
+    subscriptions: state.subscriptions.map(item => item.subscriptionId === subscriptionId
+      ? { ...item, lastNotificationAt: now, lastSignature: signature, lastSlot: slot }
+      : item)
+  };
 }
 
 export function confirmHeliusSubscription(
