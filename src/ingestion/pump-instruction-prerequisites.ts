@@ -43,6 +43,13 @@ async function inspectPumpUserVolumeAccumulator(input: {
   address: string;
   config: HeliusAccountReadConfig;
 }): Promise<PumpUserVolumeAccumulatorPrerequisite> {
+  const expectedAddress = PublicKey.findProgramAddressSync(
+    [Buffer.from("user_volume_accumulator"), new PublicKey(input.user).toBuffer()],
+    new PublicKey(PUMP_PROGRAM_ID)
+  )[0].toBase58();
+  if (input.address !== expectedAddress) {
+    throw new Error("Pump user volume accumulator address does not match the canonical user PDA.");
+  }
   const snapshot = await fetchHeliusMultipleAccounts([input.address], input.config);
   const nowMs = (input.config.now ?? Date.now)();
   const observedMs = Date.parse(snapshot.observedAt);
