@@ -1303,7 +1303,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   /**
    * Audited round-trip quote validation for a candidate. It checks a fresh
    * buy, exact-output sellability, and exact unsigned-message fee evidence.
-   * It deliberately does not authorize or create a paper position.
+   * It validates quotes only; the later entry gate separately requires an
+   * explicitly authorized unsigned plan and durable portfolio prerequisites.
    */
   async requestExecutableRoundTripQuote(input: {
     mint: string;
@@ -1535,7 +1536,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           executableQuoteAvailable,
           hasBuyAndSellQuotes: Boolean(cachedQuote && typeof cachedQuote === "object" &&
             (cachedQuote as { result?: { buyQuote?: unknown; initialSellQuote?: unknown } }).result?.buyQuote &&
-            (cachedQuote as { result?: { buyQuote?: unknown; initialSellQuote?: unknown } }).result?.initialSellQuote)
+            (cachedQuote as { result?: { buyQuote?: unknown; initialSellQuote?: unknown } }).result?.initialSellQuote),
+          // Quote validity is not execution authorization. The unsigned plan
+          // must explicitly clear every account, rent, payer and portfolio gate.
+          unsignedPlanAuthorized: Boolean(cachedQuote && typeof cachedQuote === "object" &&
+            (cachedQuote as { result?: { paperEntryAuthorized?: boolean } }).result?.paperEntryAuthorized === true)
         }) && cachedQuote && typeof cachedQuote === "object") {
         const quoteResult = (cachedQuote as {
           result?: {
