@@ -54,7 +54,7 @@ import { assessHistoricalDecodeCoverage } from "../../../../src/ingestion/helius
 import { enqueueHistoricalBackfillSignatures } from "../../../../src/ingestion/helius-backfill-queue.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import { evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
-import { collectWalletFundingEvidence, type WalletFundingEvidenceResult } from "../../../../src/ingestion/wallet-link-collector.js";
+import { collectCompleteWalletFundingEvidence, type CompleteCompleteWalletFundingEvidenceResult } from "../../../../src/ingestion/complete-wallet-history.js";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
@@ -157,7 +157,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private heliusBucket = new TokenBucket(2, 2);
   private drainingHelius = false;
   private verifiedTransactions: Array<VerifiedPumpTransaction & { receivedAt?: string }> = [];
-  private walletLinkSnapshots: Record<string, WalletFundingEvidenceResult> = {};
+  private walletLinkSnapshots: Record<string, CompleteWalletFundingEvidenceResult> = {};
   private walletHoldingsByMint: Record<string, WalletHoldingEvidence[]> = {};
   private holderRiskSnapshots: Record<string, HolderConcentrationResult> = {};
   private riskEvidenceAttemptedAtByMint: Record<string, number> = {};
@@ -547,7 +547,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.ctx.storage.get<CoordinatorStatus>("status"),
       this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
       this.ctx.storage.get<boolean>("enabled"),
-      this.ctx.storage.get<Record<string, WalletFundingEvidenceResult>>("wallet_link_snapshots"),
+      this.ctx.storage.get<Record<string, CompleteWalletFundingEvidenceResult>>("wallet_link_snapshots"),
       this.ctx.storage.get<Record<string, WalletHoldingEvidence[]>>("wallet_holdings_by_mint"),
       this.ctx.storage.get<Record<string, HolderConcentrationResult>>("holder_risk_snapshots"),
       this.ctx.storage.get<Record<string, number>>("risk_evidence_attempted_at_by_mint"),
@@ -1374,8 +1374,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const rankedWallets = [...volumes.entries()].sort((a, b) =>
       a[1] === b[1] ? a[0].localeCompare(b[0]) : a[1] > b[1] ? -1 : 1
     ).map(([wallet]) => wallet);
-    const wallets = [...new Set([...(launch?.creator ? [launch.creator] : []), ...rankedWallets])].slice(0, 8);
-    const result = await collectWalletFundingEvidence(mint, wallets, {
+    const wallets = [...new Set([...(launch?.creator ? [launch.creator] : []), ...rankedWallets])];
+    const result = await collectCompleteWalletFundingEvidence(mint, wallets, {
       apiKey: this.env.HELIUS_API_KEY,
       fetcher: this.rateLimitedHeliusFetcher()
     });
@@ -1418,13 +1418,25 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const holder = this.holderRiskSnapshots[mint];
       const walletLinks = this.walletLinkSnapshots[mint];
       const holderObservedAt = holder?.status === "OBSERVED" ? Date.parse(holder.snapshot.observedAt) : Number.NaN;
-      const walletLinksObservedAt = walletLinks?.status === "OBSERVED" ? Date.parse(walletLinks.observedAt) : Number.NaN;
+      const walletLinksObservedAt = walletLinks?.observedAt ? Date.parse(walletLinks.observedAt) : Number.NaN;
+      const launch = this.verifiedTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
+      const currentWalletSet = [...new Set([
+        ...(launch?.creator ? [launch.creator] : []),
+        ...this.verifiedTransactions.flatMap(tx => tx.tradeEvents)
+          .filter(trade => trade.mint === mint && trade.quoteAmount > 0n)
+          .map(trade => trade.user)
+      ])].sort();
+      const previouslyRequestedWallets = [...(walletLinks?.requestedWallets ?? [])].sort();
+      const walletSetChanged = currentWalletSet.length !== previouslyRequestedWallets.length ||
+        currentWalletSet.some((wallet, index) => wallet !== previouslyRequestedWallets[index]);
       const holderNeedsRefresh = !holder || !Number.isFinite(holderObservedAt) ||
         holderObservedAt > now || now - holderObservedAt >= 120_000 ||
         (holder.status !== "OBSERVED" && now - lastAttempt >= 60_000);
+      // Parsed full SOL-transfer history costs more than ordinary RPC. Refresh
+      // it every ten minutes or when the observed wallet set changes, not every
+      // two-minute holder refresh. Incomplete results remain WATCH in between.
       const walletLinksNeedRefresh = !walletLinks || !Number.isFinite(walletLinksObservedAt) ||
-        walletLinksObservedAt > now || now - walletLinksObservedAt >= 120_000 ||
-        (walletLinks.status !== "OBSERVED" && now - lastAttempt >= 60_000);
+        walletLinksObservedAt > now || now - walletLinksObservedAt >= 600_000 || walletSetChanged;
 
       let evidenceType: "HOLDER_CONCENTRATION" | "WALLET_CLUSTER";
       if (holderNeedsRefresh) {
