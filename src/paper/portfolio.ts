@@ -244,7 +244,7 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   const equity = round(availableCashUsd + reservedAccountRentUsd + initialLiquidationValue);
   const adjusted = applyEquityAndTopUp({ ...state, availableCashUsd, reservedAccountRentUsd }, equity, input.occurredAt);
   return {
-    state: { ...state, ...adjusted, positions, enteredMints: [...state.enteredMints, input.mint] },
+    state: { ...state, ...adjusted, reservedAccountRentUsd, positions, enteredMints: [...state.enteredMints, input.mint] },
     position
   };
 }
@@ -350,5 +350,5 @@ export function closePaperPosition(state: PaperPortfolioState, input: {
 
   const equity = round(availableCashUsd + reservedAccountRentUsd);
   const adjusted = applyEquityAndTopUp({ ...state, availableCashUsd, reservedAccountRentUsd }, equity, input.closedAt);
-  return { state: { ...state, ...adjusted, positions }, position };
+  return { state: { ...state, ...adjusted, reservedAccountRentUsd, positions }, position };
 }
