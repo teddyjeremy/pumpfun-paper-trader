@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   fetchPumpCreateScanPage, fetchVerifiedParsedLaunch,
+  findFirstResumableParsedLaunchBucket, canContinueParsedLaunchBucket,
   type ParsedCreateScanPage, type VerifiedParsedLaunch
 } from "../src/ingestion/helius-parsed-launch-discovery.js";
 
@@ -112,6 +113,14 @@ try {
     buckets: [], launches: [], reason: null, updatedAt: new Date().toISOString()
   };
 }
+if (artifact.status === "INCOMPLETE") {
+  const resumableIndex = findFirstResumableParsedLaunchBucket(artifact.buckets, maxPagesPerBucket);
+  if (resumableIndex !== null) {
+    artifact.nextBucketIndex = Math.min(artifact.nextBucketIndex, resumableIndex);
+    artifact.status = "RUNNING";
+    artifact.reason = null;
+  }
+}
 if (artifact.status === "SAMPLE_COMPLETE") {
   if (artifact.buckets.length !== maxLaunches ||
       artifact.buckets.some((bucket, index) => bucket?.index !== index ||
@@ -137,7 +146,12 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
     paginationToken: null, pagesScanned: 0, scannedTransactions: 0,
     creditsUsed: 0, reason: null
   };
-  if (bucket.status === "FOUND" || bucket.status === "EMPTY") {
+  if (bucket.status === "FOUND" || bucket.status === "EMPTY" ||
+      (bucket.status === "INCOMPLETE" && !canContinueParsedLaunchBucket({
+        paginationToken: bucket.paginationToken,
+        pagesScanned: bucket.pagesScanned,
+        maxPagesPerBucket
+      }))) {
     artifact.nextBucketIndex = index + 1;
     continue;
   }
@@ -203,14 +217,33 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
         bucket.paginationToken = null;
         artifact.launches.push(verified);
       } catch (error) {
-        // The scan match is retained as incomplete evidence, never silently accepted.
+        // Do not discard the time bucket when one scan match cannot be fetched
+        // or decoded. Keep its provider cursor and try the next match, bounded
+        // by the existing per-bucket page and shared credit ceilings.
         artifact.creditsUsed += 1;
         bucket.creditsUsed += 1;
         artifact.transactionFetches += 1;
-        bucket.status = "INCOMPLETE";
         bucket.reason = error instanceof Error ? error.message : "Selected Create transaction failed verification.";
+        if (canContinueParsedLaunchBucket({
+          paginationToken: bucket.paginationToken,
+          pagesScanned: bucket.pagesScanned,
+          maxPagesPerBucket
+        })) {
+          bucket.status = "RUNNING";
+          artifact.buckets[index] = bucket;
+          artifact.nextBucketIndex = index;
+          artifact.updatedAt = new Date().toISOString();
+          await save(path, artifact);
+          continue;
+        }
+        bucket.status = "INCOMPLETE";
         artifact.status = "INCOMPLETE";
         artifact.reason = bucket.reason;
+        artifact.buckets[index] = bucket;
+        artifact.nextBucketIndex = index + 1;
+        artifact.updatedAt = new Date().toISOString();
+        await save(path, artifact);
+        break;
       }
       artifact.buckets[index] = bucket;
       artifact.nextBucketIndex = index + 1;
