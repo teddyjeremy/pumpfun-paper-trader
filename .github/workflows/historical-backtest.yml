@@ -51,10 +51,11 @@ jobs:
 
       - name: Discover the complete day (first run only)
         run: |
-          if [ ! -f "artifacts/pump-launch-discovery-$BACKTEST_DATE.json" ]; then
+          DISCOVERY="artifacts/pump-launch-discovery-$BACKTEST_DATE.json"
+          if [ ! -f "$DISCOVERY" ] || ! node -e 'const d=require("./"+process.argv[1]); process.exit(d.status === "DAY_EXHAUSTED" ? 0 : 1)' "$DISCOVERY"; then
             npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=40000 --max-launches=100
           else
-            echo "Restored existing discovery artifact; skipping discovery."
+            echo "Restored complete discovery artifact; skipping discovery."
           fi
 
       - name: Screen launches using one signature page each (resumable)
