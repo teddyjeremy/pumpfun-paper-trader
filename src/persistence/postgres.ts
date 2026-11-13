@@ -927,8 +927,12 @@ export async function persistHeliusGapRecoveryArchive(input: HeliusGapRecoveryAr
           (session_id,mint,signature,slot,provider,commitment,observation_source,received_at,create_events,trade_events,raw_observation)
          VALUES ($1,$2,$3,$4,$5,$6,'GAP_RECOVERY',$7,$8::jsonb,$9::jsonb,$10::jsonb)
          ON CONFLICT (session_id,mint,signature) DO UPDATE SET
-           raw_observation=EXCLUDED.raw_observation
-         WHERE helius_transaction_observations.raw_observation=EXCLUDED.raw_observation
+           observation_source='GAP_RECOVERY',raw_observation=EXCLUDED.raw_observation
+         WHERE helius_transaction_observations.slot=EXCLUDED.slot
+           AND helius_transaction_observations.provider=EXCLUDED.provider
+           AND helius_transaction_observations.commitment=EXCLUDED.commitment
+           AND helius_transaction_observations.create_events=EXCLUDED.create_events
+           AND helius_transaction_observations.trade_events=EXCLUDED.trade_events
          RETURNING signature`,
         [sessionId,mint,transaction.signature,transaction.slot,transaction.provider,transaction.commitment,
           transaction.receivedAt,JSON.stringify(transaction.createEvents),JSON.stringify(transaction.tradeEvents),raw]
