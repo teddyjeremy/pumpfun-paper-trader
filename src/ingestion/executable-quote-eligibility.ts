@@ -43,7 +43,6 @@ export function getFreshExecutableQuoteCostPct(
       Date.parse(sell.expiresAt ?? "") < nowMs ||
       result.exactFeeEvidence?.buy?.status !== "AVAILABLE" ||
       result.exactFeeEvidence?.sell?.status !== "AVAILABLE" ||
-      economics?.meetsRoundTripCostLimit !== true ||
       typeof economics.roundTripCostPct !== "number" ||
       !Number.isFinite(economics.roundTripCostPct) ||
       economics.roundTripCostPct < 0) {
