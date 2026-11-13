@@ -78,6 +78,7 @@ import {
 } from "../../../../src/paper/exit-lifecycle.js";
 import { createUnverifiedMarketState } from "../../../../src/paper/pump-market-state.js";
 import { refreshPumpMarketStateFromHelius } from "../../../../src/ingestion/helius-pump-market.js";
+import { buildExitWindowObservations } from "../../../../src/strategy/exit-window-builder.js";
 import { buildExecutablePaperQuote } from "../../../../src/ingestion/executable-paper-quote.js";
 
 interface Env {
@@ -553,6 +554,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
     const openPositions = portfolio?.positions.filter(position => position.status !== "CLOSED") ?? [];
     if (openPositions.length === 0) return;
+    const flowReport = await this.listTradeFlows() as {
+      flows: Array<{
+        mint: string; quoteMint: string | null; dataComplete: boolean;
+        windows: Array<{
+          startTime: number; endTime: number; buyQuoteVolume: string;
+          sellQuoteVolume: string; uniqueBuyers: number; uniqueSellers: number;
+        }>;
+      }>;
+    };
 
     const config = { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const };
     const identity = await deriveNonSigningVirtualTraderIdentity();
@@ -581,6 +591,51 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           config
         });
         await this.ctx.storage.put(`paper_market_state:${sessionId}:${position.mint}`, marketState);
+        const quoteMint = marketState.status === "LIVE_CURVE"
+          ? marketState.curve?.quoteMint
+          : marketState.pool?.quoteMint;
+        const flow = flowReport.flows.find(item =>
+          item.mint === position.mint && item.quoteMint === quoteMint
+        );
+        const latestFlowWindows = flow?.windows.slice(-3) ?? [];
+        const consecutiveFlowWindows = latestFlowWindows.length === 3 &&
+          latestFlowWindows[1]!.startTime === latestFlowWindows[0]!.startTime + 1 &&
+          latestFlowWindows[2]!.startTime === latestFlowWindows[1]!.startTime + 1;
+        const exitWindowSamples = quoteMint && marketState.status !== "EXIT_BLOCKED" &&
+          marketState.status !== "UNVERIFIED" && marketState.status !== "MIGRATION_PENDING"
+          ? latestFlowWindows.map(window => {
+              const events = this.verifiedTransactions.flatMap(transaction => transaction.tradeEvents)
+                .filter(event => event.mint === position.mint && event.quoteMint === quoteMint &&
+                  Number(event.timestamp) >= window.startTime && Number(event.timestamp) < window.endTime)
+                .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+              const priceOf = (event: (typeof events)[number] | undefined): number | null => {
+                if (!event || event.virtualSolReserves <= 0n || event.virtualTokenReserves <= 0n) return null;
+                const scaled = (event.virtualSolReserves * 1_000_000_000_000n) / event.virtualTokenReserves;
+                const price = Number(scaled) / 1_000_000_000_000;
+                return Number.isFinite(price) && price > 0 ? price : null;
+              };
+              return {
+                mint: position.mint,
+                marketPhase: marketState.status === "LIVE_CURVE" ? "bonding_curve" as const : "migrated_market" as const,
+                venue: marketState.status === "LIVE_CURVE" ? "pump_curve" as const : "pumpswap" as const,
+                quoteMint,
+                endedAtMs: window.endTime * 1_000,
+                windowSeconds: 2 as const,
+                complete: Boolean(flow?.dataComplete && consecutiveFlowWindows),
+                buyQuoteVolumeBaseUnits: window.buyQuoteVolume,
+                sellQuoteVolumeBaseUnits: window.sellQuoteVolume,
+                uniqueBuyers: window.uniqueBuyers,
+                uniqueSellers: window.uniqueSellers,
+                startPriceQuotePerToken: priceOf(events[0]),
+                endPriceQuotePerToken: priceOf(events[events.length - 1]),
+                // The current trade-event feed does not provide a complete,
+                // comparable liquidity/holder-distribution time series.
+                quoteLiquidityBaseUnits: null,
+                largeHolderDistributionDetected: null
+              };
+            })
+          : [];
+        const exitWindows = buildExitWindowObservations(exitWindowSamples);
         if (marketState.status !== "LIVE_CURVE" &&
             marketState.status !== "MIGRATED_POOL_VERIFIED") {
           await this.appendAudit("ERROR", position.mint, {
@@ -596,7 +651,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
               mint: position.mint, poolAddress: marketState.pool!.poolAddress, config
             });
         const result = await executePaperExit({
-          position, marketState, windows: [],
+          position, marketState, windows: exitWindows,
           quoteSell: async ({ tokenAmountBaseUnits }) => {
             const quote = await quoteFetcher({
               side: "SELL", amountBaseUnits: tokenAmountBaseUnits
