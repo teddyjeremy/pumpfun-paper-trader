@@ -20,7 +20,7 @@ describe("Helius gap address-history scan", () => {
       const request = JSON.parse(String(init?.body));
       const before = request.params[1].before;
       return Response.json({ result: before
-        ? [row("1", 100), row("0", 99)]
+        ? [row("1", 100), row("5", 99)]
         : [row("4", 103), row("3", 102), row("2", 101)] });
     };
     const result = await fetchHeliusGapAddressHistory("11111111111111111111111111111111", gap,
