@@ -1176,6 +1176,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       buyAmountBaseUnits: input.buyAmountBaseUnits, computeUnitLimit,
       poolAddress: input.poolAddress ?? null
     }, `round-trip-quote-request:${requestId}`);
+    await this.ctx.storage.put(`executable_quote:${this.activeSessionId}:${input.mint}`, {
+      status: "PENDING", validatedAt: new Date().toISOString()
+    });
     try {
       const identity = await deriveNonSigningVirtualTraderIdentity();
       const fetchQuote = input.venue === "PUMP_CURVE"
@@ -1196,16 +1199,33 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         maxPriceImpactPct: 2,
         maximumRoundTripCostPct: 4
       });
+      const validatedAt = new Date().toISOString();
+      await this.ctx.storage.put(`executable_quote:${this.activeSessionId}:${input.mint}`, {
+        status: result.status, validatedAt, venue: input.venue, result
+      });
       await this.appendAudit("QUOTE_RESULT", input.mint, {
         requestId, status: result.status, venue: input.venue,
         paperEntryAuthorized: false, result
       }, `round-trip-quote-result:${requestId}`);
+      // Re-evaluate the candidate with this fresh quote evidence. This only
+      // updates audit rules; the quote remains explicitly unauthorized.
+      try {
+        await this.recordStrategyAudit(`round-trip:${requestId}`);
+      } catch {
+        await this.appendAudit("ERROR", input.mint, {
+          requestId, stage: "STRATEGY_REEVALUATION_AFTER_QUOTE",
+          message: "Quote validation succeeded but strategy audit refresh failed."
+        }, `round-trip-audit-error:${requestId}`);
+      }
       return result;
     } catch (error) {
       const rawReason = error instanceof Error ? error.message : "Round-trip quote validation failed.";
       const reason = this.env.HELIUS_API_KEY
         ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
         : rawReason;
+      await this.ctx.storage.put(`executable_quote:${this.activeSessionId}:${input.mint}`, {
+        status: "BLOCKED", validatedAt: new Date().toISOString(), reason
+      });
       await this.appendAudit("QUOTE_RESULT", input.mint, {
         requestId, status: "BLOCKED", paperEntryAuthorized: false, reason
       }, `round-trip-quote-result:${requestId}`);
@@ -1271,6 +1291,31 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         reclaimTimeSeconds: profile?.reclaimTime ?? null,
         previousCompletedHigh, nowSeconds, nextObservationPrices
       });
+      const cachedQuote = await this.ctx.storage.get<{
+        status: string; validatedAt: string; venue?: string;
+        result?: {
+          status?: string;
+          buyQuote?: { mint?: string; venue?: string; expiresAt?: string };
+          initialSellQuote?: { mint?: string; venue?: string; expiresAt?: string };
+          exactFeeEvidence?: { buy?: { status?: string }; sell?: { status?: string } };
+          economics?: { roundTripCostPct?: number; meetsRoundTripCostLimit?: boolean };
+        };
+      }>(`executable_quote:${this.activeSessionId}:${mint}`);
+      const quoteAgeMs = cachedQuote ? Date.now() - Date.parse(cachedQuote.validatedAt) : Number.POSITIVE_INFINITY;
+      const executableQuoteAvailable = Boolean(cachedQuote &&
+        cachedQuote.status === "QUOTES_VALIDATED" &&
+        Number.isFinite(quoteAgeMs) && quoteAgeMs >= 0 && quoteAgeMs <= 2_000 &&
+        cachedQuote.result?.status === "QUOTES_VALIDATED" &&
+        cachedQuote.result.buyQuote?.mint === mint &&
+        cachedQuote.result.initialSellQuote?.mint === mint &&
+        cachedQuote.result.buyQuote?.venue === cachedQuote.result.initialSellQuote?.venue &&
+        Date.parse(cachedQuote.result.buyQuote?.expiresAt ?? "") >= Date.now() &&
+        Date.parse(cachedQuote.result.initialSellQuote?.expiresAt ?? "") >= Date.now() &&
+        cachedQuote.result.exactFeeEvidence?.buy?.status === "AVAILABLE" &&
+        cachedQuote.result.exactFeeEvidence?.sell?.status === "AVAILABLE" &&
+        cachedQuote.result.economics?.meetsRoundTripCostLimit === true &&
+        typeof cachedQuote.result.economics.roundTripCostPct === "number" &&
+        Number.isFinite(cachedQuote.result.economics.roundTripCostPct));
       const evaluated = evaluateStrictStrategyAudit({
         candidateAgeSeconds: ageSeconds,
         profile: profile ? {
@@ -1293,7 +1338,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         walletClusterRiskStatus: walletRisk?.status ?? null,
         attributionConfidenceBps: confidence > 0 ? confidence : null,
         signalAgeSeconds: freshness.signalAgeSeconds, nextObservationConfirmed: freshness.nextObservationConfirmed,
-        executableQuoteAvailable: false
+        executableQuoteAvailable,
+        roundTripCostPct: executableQuoteAvailable
+          ? cachedQuote!.result!.economics!.roundTripCostPct! : null
       });
       await this.appendAudit("FEATURE_SNAPSHOT", mint, { triggerSignature, profile, flow, solUsdPrice: report.solUsdPrice ?? null },
         `features:${triggerSignature}:${mint}`);
