@@ -16,7 +16,7 @@ A four-hour run is an operational observation window, not proof of profitability
 4. Confirm the production Worker and Vercel API use HTTPS.
 5. Confirm these secrets are configured in their intended environments without printing or copying their values:
    - Worker: `CONTROL_TOKEN`, `HELIUS_API_KEY`, `PAPER_EVENT_INGEST_URL`, `PAPER_EVENT_INGEST_TOKEN`
-   - Worker wallet-history collection: keep `FULL_WALLET_HISTORY_ENABLED=false` during preparation. Before a paper session, enable it only after the 16-wallet / 2-page cap and expected Helius credits have been reviewed and explicitly approved; retain `FULL_WALLET_HISTORY_MAX_PAGES=2`.
+   - Worker wallet-history collection: operator approved the bounded configuration on 2026-11-13: `FULL_WALLET_HISTORY_ENABLED=true`, `FULL_WALLET_HISTORY_MAX_PAGES=2`, at most 16 wallets per candidate refresh. Do not increase either cap or the refresh frequency without renewed approval. Monitor actual Helius credit use and stop collection if it exceeds the approved budget.
    - Vercel: `DATABASE_URL`, `PAPER_EVENT_INGEST_TOKEN`
    - Reviewed calibration: `REVIEWED_VOLUME_THRESHOLDS_JSON` only after a real, complete replay has been independently reviewed and approved. Do not fabricate this payload.
 6. Verify the Neon migration version and that the dashboard read path can query session, position, quote and trade projections.
