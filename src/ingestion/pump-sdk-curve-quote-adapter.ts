@@ -24,6 +24,7 @@ import {
   fetchVerifiedPumpQuoteAccountSnapshot, type VerifiedPumpQuoteSnapshot
 } from "./pump-quote-snapshot.js";
 import { isSolQuoteMint } from "./trade-flow.js";
+import { estimateFeesForUnsignedInstructions, type UnsignedInstructionFeeEvidence } from "./solana-fee-estimator.js";
 
 const PUMP_FEE_PROGRAM_ID = "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ";
 const MAX_U64 = 18_446_744_073_709_551_615n;
@@ -490,4 +491,46 @@ export async function buildPumpCurveV3UnsignedInstruction(input: {
       "PAPER_ENTRY_AUTHORIZATION_NOT_GRANTED"
     ]
   };
+}
+
+
+export interface PumpCurveV3UnsignedInstructionWithFees extends PumpCurveV3UnsignedInstruction {
+  feeEvidence: UnsignedInstructionFeeEvidence;
+}
+
+/**
+ * Attach base-network and account-lock-specific priority-fee evidence to the
+ * exact unsigned curve instruction. The recent blockhash is supplied by the
+ * caller so the fee message is compiled from the same instruction that would
+ * be used for paper execution. No signing, simulation or submission occurs.
+ */
+export async function buildPumpCurveV3UnsignedInstructionWithFees(input: {
+  snapshot: VerifiedPumpQuoteSnapshot;
+  user: string;
+  side: "BUY" | "SELL";
+  tokenAmountBaseUnits: string;
+  quoteAmountBaseUnits: string;
+  buybackFeeRecipient?: string;
+  apiKey: string;
+  recentBlockhash: string;
+  computeUnitLimit: number;
+  fetcher?: typeof fetch;
+  nowMs?: number;
+}): Promise<PumpCurveV3UnsignedInstructionWithFees> {
+  const built = await buildPumpCurveV3UnsignedInstruction(input);
+  const feeEvidence = await estimateFeesForUnsignedInstructions({
+    apiKey: input.apiKey,
+    payer: new PublicKey(built.user),
+    recentBlockhash: input.recentBlockhash,
+    instructions: [built.instruction],
+    computeUnitLimit: input.computeUnitLimit,
+    ...(input.fetcher ? { fetcher: input.fetcher } : {}),
+    ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs })
+  });
+  const blockers = built.blockers.filter(blocker =>
+    blocker !== "EXACT_UNSIGNED_TRANSACTION_FEE_MESSAGE_NOT_ATTACHED");
+  if (feeEvidence.status !== "AVAILABLE") {
+    blockers.push("EXACT_UNSIGNED_TRANSACTION_FEE_EVIDENCE_UNAVAILABLE");
+  }
+  return { ...built, blockers, feeEvidence, executionReady: false, paperEntryAuthorized: false };
 }
