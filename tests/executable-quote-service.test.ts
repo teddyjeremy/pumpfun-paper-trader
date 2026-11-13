@@ -1,5 +1,5 @@
 import {describe,expect,it} from "vitest";
-import {fetchExecutableRoundTripQuote} from "../src/ingestion/executable-quote-service.js";
+import {createPumpUnsignedPlanFeeEvidenceBuilder,fetchExecutableRoundTripQuote} from "../src/ingestion/executable-quote-service.js";
 import type {OfflinePumpQuote} from "../src/ingestion/executable-paper-quote.js";
 import type {UnsignedInstructionFeeEvidence} from "../src/ingestion/solana-fee-estimator.js";
 
@@ -112,5 +112,26 @@ describe("executable quote service",()=>{
       }),{status:200})},
       buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,solUsd,now:()=>Date.parse(observedAt)
     })).rejects.toThrow(/maximum price impact/);
+  });
+});
+
+
+describe("exact unsigned plan fee evidence adapter",()=>{
+  it("fails closed without a verified quote snapshot and never authorizes signing or submission",async()=>{
+    const buildExactFeeEvidence=createPumpUnsignedPlanFeeEvidenceBuilder({
+      identity:{
+        kind:"NON_SIGNING_VIRTUAL_TRADER",publicKey:"11111111111111111111111111111111",
+        derivationVersion:1,canSign:false,canSubmit:false
+      },
+      config:{apiKey:"test"},
+      computeUnitLimit:200_000
+    });
+    const evidence=await buildExactFeeEvidence({
+      side:"BUY",quote:quote("BUY",100,"100000000")
+    });
+    expect(evidence.status).toBe("UNAVAILABLE");
+    if(evidence.status==="UNAVAILABLE") {
+      expect(evidence.reason).toMatch(/verified same-context account snapshot/);
+    }
   });
 });
