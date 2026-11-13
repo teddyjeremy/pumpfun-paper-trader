@@ -57,7 +57,10 @@ jobs:
             echo "Restored existing discovery artifact; skipping discovery."
           fi
 
-      - name: Replay the next 20 launches
+      - name: Screen launches using one signature page each (resumable)
+        run: npm run backtest:screen -- --date="$BACKTEST_DATE" --max-credits=500 --max-share-pct=30 --min-successful=5 --min-active-buckets=3
+
+      - name: Replay the next 20 qualified launches
         run: npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=100000
 
       - name: Save checkpoint and collected data
