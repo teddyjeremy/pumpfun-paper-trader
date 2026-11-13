@@ -30,7 +30,8 @@ describe("Helius gap address-history scan", () => {
   });
 
   it("returns a durable cursor at the page bound and resumes without rescanning earlier pages", async () => {
-    const all = Array.from({ length: 12 }, (_, index) => row(String(index + 1), 200 - index));
+    const signatureChars = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C"];
+    const all = signatureChars.map((character, index) => row(character, 200 - index));
     const requests: Array<string | null> = [];
     const fetcher: typeof fetch = async (_input, init) => {
       const request = JSON.parse(String(init?.body));
