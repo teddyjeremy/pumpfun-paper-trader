@@ -57,6 +57,7 @@ This document is the operational checklist for reaching the first verified simul
 
 - The Worker accepts volume thresholds only through `REVIEWED_VOLUME_THRESHOLDS_JSON`, containing a versioned, explicitly approved replay candidate, reviewer, review timestamp, and source session.
 - The Worker rejects missing, malformed, unapproved, stale (older than 30 days), under-sampled, or holdout-failing calibration payloads; absent or rejected calibration leaves both mandatory volume rules UNKNOWN.
+- [x] Calibration excludes any replay that is not `COMPLETE` with complete transaction decoding and a verified entry/exit lifecycle, even if a row contains a non-UNKNOWN label.
 - The production Worker does not currently have a reviewed threshold payload configured. Do not invent or promote values to make the strategy pass.
 - The Worker computes `tradingReady` from runtime prerequisites: active session, both connected streams, full wallet history, reviewed calibration, official SDK modules, configured event ingestion, and a held fenced persistence lease. A true value does not itself prove a completed entry/exit lifecycle; that must be verified separately in the durable journal/dashboard.
 
