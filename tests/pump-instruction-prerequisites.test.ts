@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 import { PUMP_PROGRAM_ID } from "../src/ingestion/pump-account-decoder.js";
 import {
   inspectPumpCurveV3InstructionPrerequisites,
@@ -74,10 +74,7 @@ describe("unsigned Pump instruction account prerequisites", () => {
 
   it("checks every configured PumpSwap buyback quote ATA and totals all missing ATA rent", async () => {
     const identity = await deriveNonSigningVirtualTraderIdentity();
-    const recipients = [
-      new PublicKey(new Uint8Array(32).fill(8)).toBase58(),
-      new PublicKey(new Uint8Array(32).fill(9)).toBase58()
-    ];
+    const recipients = [Keypair.generate().publicKey.toBase58(), Keypair.generate().publicKey.toBase58()];
     const mock = fetcherForMissingAccounts();
     const result = await inspectPumpSwapV2InstructionPrerequisites({
       identity,
