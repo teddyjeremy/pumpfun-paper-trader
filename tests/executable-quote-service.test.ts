@@ -53,6 +53,7 @@ describe("executable quote service",()=>{
     expect(calls).toBe(2);
     expect(result.status).toBe("QUOTES_VALIDATED");
     expect(result.paperEntryAuthorized).toBe(false);
+    expect(result.solUsdPriceUsd).toBe(150);
     expect(result.sellability.quoteSellable).toBe(true);
     expect(result.sellability.tokenAmountBaseUnits).toBe("1000000");
     expect(result.sellability.sellSlot).toBeGreaterThan(result.sellability.buySlot);
