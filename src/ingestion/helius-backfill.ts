@@ -232,8 +232,8 @@ export function applyAddressSignaturesPage(
       pagesScanned: current.pagesScanned + 1,
       scannedCount,
       before: null,
-      lastPageSlot: parsed[parsed.length - 1]!.slot,
-      lastPageBlockTime: parsed[parsed.length - 1]!.blockTime,
+      lastPageSlot: parsed[processedCount - 1]!.slot,
+      lastPageBlockTime: parsed[processedCount - 1]!.blockTime,
       status: "READY_TO_FETCH",
       reason: null
     };
