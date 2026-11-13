@@ -1374,8 +1374,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const rankedWallets = [...volumes.entries()].sort((a, b) =>
       a[1] === b[1] ? a[0].localeCompare(b[0]) : a[1] > b[1] ? -1 : 1
     ).map(([wallet]) => wallet);
-    const wallets = [...new Set([...(launch?.creator ? [launch.creator] : []), ...rankedWallets])].slice(0, 8);
-    const result = await collectWalletFundingEvidence(mint, wallets, {
+    const wallets = [...new Set([...(launch?.creator ? [launch.creator] : []), ...rankedWallets])];
+    const result = await collectCompleteWalletFundingEvidence(mint, wallets, {
       apiKey: this.env.HELIUS_API_KEY,
       fetcher: this.rateLimitedHeliusFetcher()
     });
