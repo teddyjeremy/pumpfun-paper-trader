@@ -72,6 +72,7 @@ import {
   createPumpUnsignedPlanFeeEvidenceBuilder, fetchExecutableRoundTripQuote
 } from "../../../../src/ingestion/executable-quote-service.js";
 import { deriveNonSigningVirtualTraderIdentity } from "../../../../src/ingestion/virtual-trader-identity.js";
+import { getFreshExecutableQuoteCostPct } from "../../../../src/ingestion/executable-quote-eligibility.js";
 
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
@@ -1291,31 +1292,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         reclaimTimeSeconds: profile?.reclaimTime ?? null,
         previousCompletedHigh, nowSeconds, nextObservationPrices
       });
-      const cachedQuote = await this.ctx.storage.get<{
-        status: string; validatedAt: string; venue?: string;
-        result?: {
-          status?: string;
-          buyQuote?: { mint?: string; venue?: string; expiresAt?: string };
-          initialSellQuote?: { mint?: string; venue?: string; expiresAt?: string };
-          exactFeeEvidence?: { buy?: { status?: string }; sell?: { status?: string } };
-          economics?: { roundTripCostPct?: number; meetsRoundTripCostLimit?: boolean };
-        };
-      }>(`executable_quote:${this.activeSessionId}:${mint}`);
-      const quoteAgeMs = cachedQuote ? Date.now() - Date.parse(cachedQuote.validatedAt) : Number.POSITIVE_INFINITY;
-      const executableQuoteAvailable = Boolean(cachedQuote &&
-        cachedQuote.status === "QUOTES_VALIDATED" &&
-        Number.isFinite(quoteAgeMs) && quoteAgeMs >= 0 && quoteAgeMs <= 2_000 &&
-        cachedQuote.result?.status === "QUOTES_VALIDATED" &&
-        cachedQuote.result.buyQuote?.mint === mint &&
-        cachedQuote.result.initialSellQuote?.mint === mint &&
-        cachedQuote.result.buyQuote?.venue === cachedQuote.result.initialSellQuote?.venue &&
-        Date.parse(cachedQuote.result.buyQuote?.expiresAt ?? "") >= Date.now() &&
-        Date.parse(cachedQuote.result.initialSellQuote?.expiresAt ?? "") >= Date.now() &&
-        cachedQuote.result.exactFeeEvidence?.buy?.status === "AVAILABLE" &&
-        cachedQuote.result.exactFeeEvidence?.sell?.status === "AVAILABLE" &&
-        cachedQuote.result.economics?.meetsRoundTripCostLimit === true &&
-        typeof cachedQuote.result.economics.roundTripCostPct === "number" &&
-        Number.isFinite(cachedQuote.result.economics.roundTripCostPct));
+      const cachedQuote = await this.ctx.storage.get<unknown>(
+        `executable_quote:${this.activeSessionId}:${mint}`
+      );
+      const roundTripCostPct = getFreshExecutableQuoteCostPct(cachedQuote, mint);
+      const executableQuoteAvailable = roundTripCostPct !== null;
       const evaluated = evaluateStrictStrategyAudit({
         candidateAgeSeconds: ageSeconds,
         profile: profile ? {
@@ -1339,8 +1320,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         attributionConfidenceBps: confidence > 0 ? confidence : null,
         signalAgeSeconds: freshness.signalAgeSeconds, nextObservationConfirmed: freshness.nextObservationConfirmed,
         executableQuoteAvailable,
-        roundTripCostPct: executableQuoteAvailable
-          ? cachedQuote!.result!.economics!.roundTripCostPct! : null
+        roundTripCostPct
       });
       await this.appendAudit("FEATURE_SNAPSHOT", mint, { triggerSignature, profile, flow, solUsdPrice: report.solUsdPrice ?? null },
         `features:${triggerSignature}:${mint}`);
