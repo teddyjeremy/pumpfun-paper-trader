@@ -39,7 +39,10 @@ describe("complete paginated wallet transaction history", () => {
       });
     };
     const result = await collectCompleteWalletTransactionHistory(mint, [walletA, walletB], {
-      apiKey: "test-key", walletSetVerifiedComplete: true, fetcher
+      apiKey: "test-key", walletSetVerifiedComplete: true,
+      expectedSignaturesByWallet: {
+        [walletA]: ["3".repeat(64)], [walletB]: ["5".repeat(64)]
+      }, fetcher
     });
     expect(result).toMatchObject({
       status: "OBSERVED",
@@ -71,7 +74,11 @@ describe("complete paginated wallet transaction history", () => {
       });
     };
     const result = await collectCompleteWalletTransactionHistory(mint, [walletA, walletB], {
-      apiKey: "test-key", walletSetVerifiedComplete: true, maxPages: 1, fetcher
+      apiKey: "test-key", walletSetVerifiedComplete: true, maxPages: 1,
+      expectedSignaturesByWallet: {
+        [walletA]: [signatureChar(1) + "3".repeat(63)],
+        [walletB]: [signatureChar(2) + "3".repeat(63)]
+      }, fetcher
     });
     expect(result.status).toBe("DATA_INCOMPLETE");
     expect(result.dataComplete).toBe(false);
@@ -85,11 +92,31 @@ describe("complete paginated wallet transaction history", () => {
       return response({ data: [transaction("7".repeat(64), body.params[0], 1_794_484_800)] });
     };
     const result = await collectCompleteWalletTransactionHistory(mint, [walletA, walletB], {
-      apiKey: "test-key", walletSetVerifiedComplete: false, fetcher
+      apiKey: "test-key", walletSetVerifiedComplete: false,
+      expectedSignaturesByWallet: {
+        [walletA]: ["7".repeat(64)], [walletB]: ["7".repeat(64)]
+      }, fetcher
     });
     expect(result.status).toBe("DATA_INCOMPLETE");
     expect(result.walletSetComplete).toBe(false);
     expect(result.walletsCovered).toEqual([walletA, walletB]);
+  });
+
+  it("rejects cursor-exhausted history that omits a verified trade signature", async () => {
+    const fetcher: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { params: [string] };
+      return response({ data: [transaction("3".repeat(64), body.params[0], 1_794_484_800)] });
+    };
+    const result = await collectCompleteWalletTransactionHistory(mint, [walletA, walletB], {
+      apiKey: "test-key", walletSetVerifiedComplete: true,
+      expectedSignaturesByWallet: {
+        [walletA]: ["9".repeat(64)], [walletB]: ["3".repeat(64)]
+      }, fetcher
+    });
+    expect(result.status).toBe("DATA_INCOMPLETE");
+    expect(result.dataComplete).toBe(false);
+    expect(result.walletsCovered).toEqual([walletB]);
+    expect(result.warnings.some(warning => warning.includes("omitted 1 independently observed"))).toBe(true);
   });
 
   it("scans sixteen wallets for positive risk evidence but never claims an oversized set is complete", async () => {
@@ -103,7 +130,9 @@ describe("complete paginated wallet transaction history", () => {
       return response({ data: [transaction("8".repeat(64), body.params[0], 1_794_484_800 + calls)] });
     };
     const result = await collectCompleteWalletTransactionHistory(mint, wallets, {
-      apiKey: "test-key", walletSetVerifiedComplete: true, fetcher
+      apiKey: "test-key", walletSetVerifiedComplete: true,
+      expectedSignaturesByWallet: Object.fromEntries(wallets.map(wallet => [wallet, ["8".repeat(64)] ])),
+      fetcher
     });
     expect(result.status).toBe("DATA_INCOMPLETE");
     expect(result.walletSetComplete).toBe(false);
