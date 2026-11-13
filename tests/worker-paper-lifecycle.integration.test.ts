@@ -83,6 +83,34 @@ class FakeWebSocket {
 
 describe("Cloudflare Worker paper lifecycle durability", () => {
 
+  it("keeps provider streams closed when the Durable Object quota pause is enabled", async () => {
+    const storage = new MemoryDurableStorage();
+    const ctx = context(storage);
+    const socketConstructor = vi.fn();
+    class CountingWebSocket extends FakeWebSocket {
+      constructor(url: string) {
+        super(url);
+        socketConstructor();
+      }
+    }
+    vi.stubGlobal("WebSocket", CountingWebSocket as never);
+    try {
+      const worker = new PumpFunCoordinator(ctx as never, {
+        PAPER_OBSERVATION_PAUSED: "true",
+        PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+        PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64),
+        HELIUS_API_KEY: "test-helius-key"
+      } as never);
+      const status = await worker.start();
+      expect(status.observationPaused).toBe(true);
+      expect(status.tradingReady).toBe(false);
+      expect(status.readinessBlockers[0]).toContain("paused");
+      expect(socketConstructor).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("creates the active session before acquiring its fenced persistence lease", async () => {
     const storage = new MemoryDurableStorage();
     const ctx = context(storage);
