@@ -38,7 +38,7 @@ export interface CompleteWalletFundingEvidenceConfig {
  * has been inspected. A wallet is complete only when the provider returns no
  * continuation cursor before the hard page cap.
  *
- * The caller must supply the complete set of relevant wallets. More than eight
+ * The caller must supply the complete set of relevant wallets. More than sixteen
  * wallets fails closed instead of silently treating a selected subset as the
  * full cluster.
  */
