@@ -55,7 +55,7 @@ export function evaluateWalletClusterRisk(
 ): WalletClusterRisk {
   const reasons: string[] = [];
   const limitations = [
-    "No creator-linked wallet or cluster clearance is possible without independently verified funding, authority, or transfer evidence.",
+    "Absence of a high-confidence relationship edge is not a clearance unless the caller separately proves complete wallet transaction history and a full holder census.",
     "Holder balances are only as complete as the supplied wallet-holding evidence; this module does not claim a full holder census."
   ];
   if (!options.totalSupply || !/^[1-9][0-9]*$/.test(options.totalSupply)) {
