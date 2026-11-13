@@ -551,7 +551,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (!sessionId || !this.status.enabled || !this.postgresLeaseHeld ||
         !this.env.HELIUS_API_KEY) return;
     const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
-    const openPositions = portfolio?.positions.filter(position => position.status === "OPEN") ?? [];
+    const openPositions = portfolio?.positions.filter(position => position.status !== "CLOSED") ?? [];
     if (openPositions.length === 0) return;
 
     const config = { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const };
@@ -562,6 +562,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     });
     const heldSellQuotes = new Map<string, ExecutablePaperQuote>();
     for (const position of openPositions) {
+      if (position.status !== "OPEN") {
+        await this.appendAudit("ERROR", position.mint, {
+          stage: "SCHEDULED_PAPER_EXIT",
+          reason: "Position is already EXIT_BLOCKED; manual or explicit recovery is required before quoting."
+        }, `paper-exit-status-blocked:${sessionId}:${position.positionId}`);
+        continue;
+      }
       try {
         const marketState = await refreshPumpMarketStateFromHelius({
           state: createUnverifiedMarketState(position.mint),
@@ -632,7 +639,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
 
     const latestPortfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
-    const remainingOpen = latestPortfolio?.positions.filter(position => position.status === "OPEN") ?? [];
+    const remainingOpen = latestPortfolio?.positions.filter(position => position.status !== "CLOSED") ?? [];
     if (remainingOpen.length > 0 &&
         remainingOpen.every(position => heldSellQuotes.has(position.positionId))) {
       await this.recordPaperMark({
