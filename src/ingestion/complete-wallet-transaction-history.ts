@@ -211,11 +211,11 @@ export async function collectCompleteWalletTransactionHistory(
           const key = `${evidenceType}:${pair.join(":")}`;
           if (emitted.has(key)) continue;
           emitted.add(key);
+          const evidence: WalletLinkEvidence["evidence"] = evidenceType === "COMMON_FUNDER"
+            ? ["COMMON_FUNDER", "REPEATED_FUNDING"] : ["SHARED_AUTHORITY"];
           links.push({
             mint, walletA: pair[0]!, walletB: pair[1]!, confidenceBps: 7_000,
-            evidence: evidenceType === "COMMON_FUNDER"
-              ? ["COMMON_FUNDER", "REPEATED_FUNDING"] as const : ["SHARED_AUTHORITY"] as const,
-            observedAt: new Date().toISOString()
+            evidence, observedAt: new Date().toISOString()
           });
         }
       }
