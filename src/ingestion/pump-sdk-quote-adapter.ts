@@ -4,6 +4,7 @@ import { PublicKey, SystemProgram, TransactionInstruction, type AccountInfo } fr
 import { getAssociatedTokenAddressSync, getTransferFeeConfig, getTransferHook, unpackMint, type RawMint } from "@solana/spl-token";
 import {
   PUMP_AMM_SDK,
+  supportsTradeV2,
   buyQuoteInput,
   computeFeesBps,
   sellBaseInput
@@ -412,7 +413,7 @@ export interface PumpSwapV2UnsignedInstruction {
   mint: string;
   user: string;
   quoteMint: string;
-  buybackFeeRecipient: string;
+  buybackFeeRecipients: string[];
   instructions: TransactionInstruction[];
   requiredAccountAddressesToVerify: string[];
   slot: number;
@@ -433,7 +434,6 @@ export async function buildPumpSwapV2UnsignedInstructions(input: {
   side: "BUY" | "SELL";
   tokenAmountBaseUnits: string;
   quoteAmountBaseUnits: string;
-  buybackFeeRecipient?: string;
 }): Promise<PumpSwapV2UnsignedInstruction> {
   if (!isU64BaseUnits(input.tokenAmountBaseUnits) || BigInt(input.tokenAmountBaseUnits) <= 0n) {
     throw new Error("PumpSwap instruction token amount must be a positive u64 base-unit integer.");
@@ -466,39 +466,31 @@ export async function buildPumpSwapV2UnsignedInstructions(input: {
     }
   }
 
+  if (!supportsTradeV2(context.pool)) {
+    throw new Error("The verified PumpSwap pool does not support the v2 instruction layout.");
+  }
   const configuredRecipients = context.globalConfig.buybackFeeRecipients ?? [];
-  const recipient = input.buybackFeeRecipient
-    ? new PublicKey(input.buybackFeeRecipient)
-    : configuredRecipients[0];
-  if (!recipient || !configuredRecipients.some(candidate => candidate.equals(recipient))) {
-    throw new Error("PumpSwap buyback recipient must come from the verified on-chain Global config.");
+  if (configuredRecipients.length < 1 ||
+      configuredRecipients.some(candidate => !(candidate instanceof PublicKey))) {
+    throw new Error("PumpSwap Global config has no valid buyback fee recipients.");
   }
 
   const baseTokenProgram = new PublicKey(requiredAccount(input.snapshot, "baseMint").owner);
   const quoteTokenProgram = new PublicKey(requiredAccount(input.snapshot, "quoteMint").owner);
-  const params = {
+  const swapSolanaState = {
     pool: context.pool,
+    poolBaseAmount: context.baseReserve,
+    poolQuoteAmount: context.quoteVaultReserve,
     globalConfig: context.globalConfig,
+    feeConfig: context.feeConfig,
+    baseMint: context.mint,
+    baseMintAccount: context.baseMintAccount,
     user,
-    mint: context.mint,
-    baseAmountOut: tokenAmount,
-    maxQuoteAmountIn: quoteAmount,
-    baseAmountIn: tokenAmount,
-    minQuoteAmountOut: quoteAmount,
-    quoteMint: context.quoteMint,
-    baseTokenProgram,
-    quoteTokenProgram,
-    buybackFeeRecipient: recipient,
     associatedUserAccountInfo: null
-  };
-  const method = input.side === "BUY" ? "buyV2Instructions" : "sellV2Instructions";
-  const builder = (PUMP_AMM_SDK as unknown as Record<string, unknown>)[method];
-  if (typeof builder !== "function") {
-    throw new Error(`Pinned PumpSwap SDK does not expose ${method}.`);
-  }
-  const rawInstructions = await Promise.resolve(
-    (builder as (args: typeof params) => TransactionInstruction[]).call(PUMP_AMM_SDK, params)
-  );
+  } satisfies Parameters<typeof PUMP_AMM_SDK.buyV2Instructions>[0];
+  const rawInstructions = input.side === "BUY"
+    ? await PUMP_AMM_SDK.buyV2Instructions(swapSolanaState, tokenAmount, quoteAmount)
+    : await PUMP_AMM_SDK.sellV2Instructions(swapSolanaState, tokenAmount, quoteAmount);
   if (!Array.isArray(rawInstructions) || rawInstructions.length < 1 ||
       rawInstructions.length > 16 ||
       rawInstructions.some(ix => !(ix instanceof TransactionInstruction))) {
@@ -507,12 +499,14 @@ export async function buildPumpSwapV2UnsignedInstructions(input: {
   const requiredAccountAddressesToVerify = [
     getAssociatedTokenAddressSync(context.mint, user, false, baseTokenProgram).toBase58(),
     getAssociatedTokenAddressSync(context.quoteMint, user, false, quoteTokenProgram).toBase58(),
-    getAssociatedTokenAddressSync(context.quoteMint, recipient, false, quoteTokenProgram).toBase58()
+    ...configuredRecipients.map(recipient =>
+      getAssociatedTokenAddressSync(context.quoteMint, recipient, false, quoteTokenProgram).toBase58())
   ];
   return {
     provider: "pump-sdk-4.3.1", venue: "PUMPSWAP", side: input.side,
     mint: context.mint.toBase58(), user: user.toBase58(),
-    quoteMint: context.quoteMint.toBase58(), buybackFeeRecipient: recipient.toBase58(),
+    quoteMint: context.quoteMint.toBase58(),
+    buybackFeeRecipients: configuredRecipients.map(recipient => recipient.toBase58()),
     instructions: rawInstructions, requiredAccountAddressesToVerify,
     slot: input.snapshot.slot, observedAt: input.snapshot.observedAt,
     executionReady: false, paperEntryAuthorized: false,
@@ -539,7 +533,6 @@ export async function buildPumpSwapV2UnsignedInstructionsWithFees(input: {
   side: "BUY" | "SELL";
   tokenAmountBaseUnits: string;
   quoteAmountBaseUnits: string;
-  buybackFeeRecipient?: string;
   apiKey: string;
   recentBlockhash: string;
   computeUnitLimit: number;
