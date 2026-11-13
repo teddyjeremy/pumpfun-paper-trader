@@ -61,6 +61,30 @@ describe("Helius gap address-history scan", () => {
     expect(requests[10]).toBe(all[9]!.signature);
   });
 
+  it("rejects persisted resume records with invalid block times or a forged page boundary", async () => {
+    const fetcher: typeof fetch = async () => Response.json({ result: [row("1", 100)] });
+    const base = {
+      before: sig("2"),
+      signatures: [row("2", 101)],
+      previousPageOldest: row("2", 101),
+      pagesScanned: 10
+    };
+    const invalid = [
+      { ...base, signatures: [{ ...row("2", 101), blockTime: -1 }] },
+      { ...base, previousPageOldest: { ...row("2", 101), blockTime: 999 } },
+      { ...base, previousPageOldest: { ...row("2", 101), slot: 100 } }
+    ];
+    for (const resume of invalid) {
+      const result = await fetchHeliusGapAddressHistory(
+        "11111111111111111111111111111111",
+        gap, { apiKey: "test", fetcher }, fetcher, 1, resume
+      );
+      expect(result.complete).toBe(false);
+      expect(result.pagesScanned).toBe(0);
+      if (!result.complete) expect(result.reason).toMatch(/resume/i);
+    }
+  });
+
   it("fails closed when the address history ends before the older anchor", async () => {
     const fetcher: typeof fetch = async () => Response.json({ result: [row("3", 102), row("2", 101)] });
     const result = await fetchHeliusGapAddressHistory("11111111111111111111111111111111", gap,
