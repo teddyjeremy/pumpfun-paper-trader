@@ -155,7 +155,7 @@ const INITIAL_STATUS: CoordinatorStatus = {
   enabled: false,
   tradingReady: false,
   quoteSdkModules: officialPumpSdkModulesAvailable(),
-  blocker: "Live discovery, verified transaction decoding and strategy/risk audits are active. Exact unsigned round-trip quote validation and strictly gated simulated entry transitions are implemented, but strategy evidence calibration, complete wallet-history clearance, scheduled dynamic exits and end-to-end Neon/dashboard verification remain outstanding; tradingReady stays false.",
+  blocker: "Live discovery, verified transaction decoding and strategy/risk audits are active. Exact unsigned round-trip quote validation, strictly gated simulated entry transitions and scheduled protective sell-quote/stop evaluation are implemented. Strategy evidence calibration, complete wallet-history clearance, verified 2/5/10/30-second dynamic-exhaustion windows and end-to-end Neon/dashboard verification remain outstanding; tradingReady stays false.",
   connectedAt: null,
   lastMessageAt: null,
   lastSignature: null,
@@ -1026,7 +1026,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.syncCounts();
     this.status.monitoredCandidates = this.heliusState.subscriptions.length;
     this.status.queuedHeliusSignatures = this.heliusState.queue.length;
-    this.status.blocker = "Live discovery, verified transaction decoding and strategy/risk audits are active. Exact unsigned round-trip quote validation and strictly gated simulated entry transitions are implemented, but strategy evidence calibration, complete wallet-history clearance, scheduled dynamic exits and end-to-end Neon/dashboard verification remain outstanding; tradingReady stays false.";
+    this.status.blocker = "Live discovery, verified transaction decoding and strategy/risk audits are active. Exact unsigned round-trip quote validation, strictly gated simulated entry transitions and scheduled protective sell-quote/stop evaluation are implemented. Strategy evidence calibration, complete wallet-history clearance, verified 2/5/10/30-second dynamic-exhaustion windows and end-to-end Neon/dashboard verification remain outstanding; tradingReady stays false.";
     return { ...this.status };
   }
 
