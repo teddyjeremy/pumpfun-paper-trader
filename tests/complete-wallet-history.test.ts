@@ -34,7 +34,7 @@ describe("complete paginated wallet funding history", () => {
       });
     };
     const result = await collectCompleteWalletFundingEvidence(mint, [walletA, walletB], {
-      apiKey: "test-key", fetcher
+      apiKey: "test-key", walletSetVerifiedComplete: true, fetcher
     });
     expect(result).toMatchObject({
       status: "OBSERVED",
@@ -63,7 +63,7 @@ describe("complete paginated wallet funding history", () => {
       });
     };
     const result = await collectCompleteWalletFundingEvidence(mint, [walletA, walletB], {
-      apiKey: "test-key", fetcher
+      apiKey: "test-key", walletSetVerifiedComplete: true, fetcher
     });
     expect(result.dataComplete).toBe(true);
     expect(result.pagesScanned).toBe(3);
@@ -86,7 +86,7 @@ describe("complete paginated wallet funding history", () => {
       });
     };
     const result = await collectCompleteWalletFundingEvidence(mint, [walletA, walletB], {
-      apiKey: "test-key", fetcher
+      apiKey: "test-key", walletSetVerifiedComplete: true, fetcher
     });
     expect(result.status).toBe("DATA_INCOMPLETE");
     expect(result.dataComplete).toBe(false);
@@ -99,7 +99,7 @@ describe("complete paginated wallet funding history", () => {
     let calls = 0;
     const fetcher: typeof fetch = async () => { calls += 1; return response({ data: [] }); };
     const result = await collectCompleteWalletFundingEvidence(mint, wallets, {
-      apiKey: "test-key", fetcher
+      apiKey: "test-key", walletSetVerifiedComplete: true, fetcher
     });
     expect(result.status).toBe("DATA_INCOMPLETE");
     expect(result.walletSetComplete).toBe(false);
