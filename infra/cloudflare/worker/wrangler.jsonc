@@ -6,7 +6,7 @@
   "vars": {
     "PUMPFUN_PROGRAM_ID": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
     "PAPER_EVENT_INGEST_URL": "https://pumpfun-paper-trader-six.vercel.app",
-    "FULL_WALLET_HISTORY_ENABLED": "false",
+    "FULL_WALLET_HISTORY_ENABLED": "true",
     "FULL_WALLET_HISTORY_MAX_PAGES": "2"
   },
   "triggers": {
