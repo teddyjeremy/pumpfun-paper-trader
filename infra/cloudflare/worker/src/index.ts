@@ -1655,23 +1655,36 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       coverageStartByMint
     });
     const creatorRiskByMint = new Map(creatorSellRisk.map(item => [item.mint, item]));
-    // Missing linkage collection remains WATCH; only the on-demand bounded
-    // Helius funding snapshot can contribute explicit >=70% relationship edges.
+    // A clean cluster result is PASS_COMPLETE only when the buyer set was
+    // fully backfilled, every wallet transaction history exhausted pagination,
+    // and the holder census is a stable full-token-account snapshot.
     const launchByMint = new Map(this.verifiedTransactions.flatMap(tx => tx.createEvents)
       .map(event => [event.mint, event] as const));
     const walletClusterRisk = candidateMints.map(mint => {
       const launch = launchByMint.get(mint);
       const snapshot = this.walletLinkSnapshots[mint];
+      const evaluatedRisk = evaluateWalletClusterRisk(this.verifiedTransactions, {
+        mint,
+        creator: launch?.creator ?? null,
+        totalSupply: launch?.tokenTotalSupply.toString() ?? null,
+        links: snapshot?.links ?? [],
+        holdings: this.walletHoldingsByMint[mint] ?? []
+      });
+      const holder = this.holderRiskSnapshots[mint] ?? null;
+      const walletHistoryComplete = snapshot?.coverage === "FULL_WALLET_HISTORY" &&
+        snapshot.dataComplete && snapshot.walletSetComplete;
+      const holderCensusComplete = holder?.status === "OBSERVED" &&
+        holder.snapshot.dataComplete === true &&
+        holder.snapshot.coverage === "FULL_TOKEN_ACCOUNT_CENSUS_STABLE";
+      const status = evaluatedRisk.status === "REJECT_OBSERVED"
+        ? "REJECT_OBSERVED" as const
+        : walletHistoryComplete && holderCensusComplete &&
+          evaluatedRisk.attributionStatus === "NO_HIGH_CONFIDENCE_LINKS"
+          ? "PASS_COMPLETE" as const : "WATCH" as const;
       return {
-        ...evaluateWalletClusterRisk(this.verifiedTransactions, {
-          mint,
-          creator: launch?.creator ?? null,
-          totalSupply: launch?.tokenTotalSupply.toString() ?? null,
-          links: snapshot?.links ?? [],
-          holdings: this.walletHoldingsByMint[mint] ?? []
-        }),
+        ...evaluatedRisk, status,
         collection: snapshot ?? null,
-        holderConcentration: this.holderRiskSnapshots[mint] ?? null
+        holderConcentration: holder
       };
     });
     const creatorRiskRank = (status: string): number =>
