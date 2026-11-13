@@ -113,6 +113,11 @@ try {
   };
 }
 if (artifact.status === "SAMPLE_COMPLETE") {
+  if (artifact.buckets.length !== maxLaunches ||
+      artifact.buckets.some((bucket, index) => bucket?.index !== index ||
+        (bucket.status !== "FOUND" && bucket.status !== "EMPTY"))) {
+    throw new Error("A SAMPLE_COMPLETE artifact must contain exactly one terminal FOUND/EMPTY result for every time bucket.");
+  }
   process.stdout.write(JSON.stringify({
     date, status: artifact.status, launches: artifact.launches.length,
     creditsUsed: artifact.creditsUsed, legacyPriorCreditsUsed: artifact.legacyPriorCreditsUsed,
