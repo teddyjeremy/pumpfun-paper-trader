@@ -68,6 +68,7 @@ describe("unsigned Pump instruction account prerequisites", () => {
     expect(result.ataSnapshot.createInstructions).toHaveLength(1);
     expect(result.totalNewRentReserveLamports).toBe(3_883_680);
     expect(result.blockers).toContain("USER_VOLUME_ACCUMULATOR_RENT_RESERVE_NOT_RECORDED_IN_PAPER_PORTFOLIO");
+    expect(result.blockers).toContain("BUYBACK_FEE_RECIPIENT_ACCOUNT_EXISTENCE_AND_STATE_NOT_VERIFIED");
     expect(result.paperEntryAuthorized).toBe(false);
     expect(mock.rentCalls.sort((a, b) => a - b)).toEqual([137, 165]);
   });
