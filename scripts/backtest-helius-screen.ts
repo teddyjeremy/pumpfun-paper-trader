@@ -44,7 +44,7 @@ if (discovery.requestedLocalDate !== date || discovery.status !== "DAY_EXHAUSTED
   throw new Error("A complete day-discovery artifact is required before activity screening.");
 }
 const path = resolve(dir, `pump-launch-screen-${date}.json`);
-const maxCandidates = Math.max(1, Math.floor(discovery.launches.length * maxSharePct / 100));
+const maxCandidates = Math.floor(discovery.launches.length * maxSharePct / 100);
 let artifact: ScreenArtifact;
 try {
   artifact = JSON.parse(await readFile(path, "utf8")) as ScreenArtifact;
