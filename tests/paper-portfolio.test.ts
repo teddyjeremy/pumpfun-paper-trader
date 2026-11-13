@@ -31,6 +31,13 @@ describe("paper portfolio accounting",()=>{
   expect(closed.position.rentReserveUsd).toBeCloseTo(0.2,8);
  });
 
+ it("requires cash to cover the expected sell fee before an entry",()=>{
+  const p={...createPaperPortfolio(),availableCashUsd:1.01};
+  expect(()=>openPaperPosition(p,{mint:"sell-fee-budget",positionId:"sell-fee-position",occurredAt:now,
+    buyQuote:quote("sell-fee-budget","BUY"),sellQuote:quote("sell-fee-budget","SELL"),nowMs:Date.parse(now)}))
+    .toThrow(/stake, buy and sell fees, and refundable account rent reserve/);
+ });
+ 
  it("blocks an entry when stake, fees and refundable rent cannot all be reserved",()=>{
   const p=createPaperPortfolio();
   expect(()=>openPaperPosition(p,{mint:"rent-mint",positionId:"rent-position",occurredAt:now,
