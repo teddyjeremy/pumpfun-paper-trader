@@ -1,5 +1,5 @@
 import { buildHeliusRpcUrl, PUMP_FUN_PROGRAM_ID } from "./helius.js";
-import { decodeSuccessfulPumpTransaction } from "./pump-events.js";
+import { decodeSuccessfulPumpTransaction, type PumpCreateEvent } from "./pump-events.js";
 
 const CREATE_DISCRIMINATORS = ["0x181ec828051c0777", "0xd6904cec5f8b31b4"];
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -7,7 +7,7 @@ const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
 
 export interface StratifiedLaunch {
   signature: string; slot: number; blockTime: number;
-  event: ReturnType<typeof decodeSuccessfulPumpTransaction> extends infer _T ? import("./pump-events.js").PumpCreateEvent : never;
+  event: PumpCreateEvent;
 }
 export interface StratifiedDiscoveryResult {
   status: "SAMPLE_COMPLETE" | "BUDGET_EXHAUSTED" | "INCOMPLETE";
