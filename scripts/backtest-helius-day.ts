@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   fetchPumpCreateScanPage, fetchVerifiedParsedLaunch,
-  findFirstResumableParsedLaunchBucket, canContinueParsedLaunchBucket,
+  findFirstResumableParsedLaunchBucket, canContinueParsedLaunchBucket, canMarkParsedLaunchBucketEmpty,
   type ParsedCreateScanPage, type VerifiedParsedLaunch
 } from "../src/ingestion/helius-parsed-launch-discovery.js";
 
@@ -157,7 +157,6 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
   }
   if (bucket.startTime !== start || bucket.endTime !== end) throw new Error("Saved bucket time bounds are inconsistent.");
   bucket.status = "RUNNING";
-  bucket.reason = null;
   while (bucket.pagesScanned < maxPagesPerBucket) {
     // Reserve the maximum possible scan charge plus one raw transaction fetch.
     if (artifact.creditsUsed + 21 > maxCredits) {
@@ -252,7 +251,11 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
       await save(path, artifact);
       break;
     }
-    if (page.stoppedOn === "windowEnd" && page.paginationToken === null) {
+    if (canMarkParsedLaunchBucketEmpty({
+      stoppedOn: page.stoppedOn,
+      paginationToken: page.paginationToken,
+      priorVerificationFailure: bucket.reason !== null
+    })) {
       bucket.status = "EMPTY";
       bucket.reason = null;
       artifact.buckets[index] = bucket;
@@ -263,7 +266,7 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
     }
     if (!page.paginationToken) {
       bucket.status = "INCOMPLETE";
-      bucket.reason = `Scan stopped on ${page.stoppedOn} without a continuation cursor.`;
+      bucket.reason = bucket.reason ?? `Scan stopped on ${page.stoppedOn} without a continuation cursor.`;
       artifact.buckets[index] = bucket;
       artifact.nextBucketIndex = index + 1;
       artifact.status = "INCOMPLETE";
