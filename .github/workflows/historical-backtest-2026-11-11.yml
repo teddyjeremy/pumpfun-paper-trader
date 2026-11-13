@@ -1,0 +1,81 @@
+name: Historical paper replay — 2026-11-11 calibration sample
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/historical-backtest-2026-11-11.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-paper-replay-2026-11-11
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      BACKTEST_DATE: "2026-11-11"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+
+      - name: Validate Helius secret
+        run: |
+          test -n "$HELIUS_API_KEY" || { echo "HELIUS_API_KEY repository secret is missing"; exit 1; }
+
+      - name: Validate Neon dashboard publishing secret
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          test -n "$DATABASE_URL" || { echo "DATABASE_URL GitHub Actions secret is required; stopping before Helius credits are spent."; exit 1; }
+
+      - name: Discover a bounded time-stratified launch sample
+        run: npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=7500 --max-launches=100 --max-pages-per-bucket=20
+
+      - name: Screen launches using one signature page each (20% maximum sample)
+        run: npm run backtest:screen -- --date="$BACKTEST_DATE" --max-credits=500 --max-share-pct=20 --min-successful=5 --min-active-buckets=3
+
+      - name: Replay selected launches in resumable batches of 20
+        run: |
+          while true; do
+            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=15000
+            NEXT=$(node -e 'const c=require("./artifacts/checkpoint.json"); process.stdout.write(String(c.nextCandidateIndex))')
+            TOTAL=$(node -e 'const s=require("./artifacts/pump-launch-screen-"+process.env.BACKTEST_DATE+".json"); process.stdout.write(String(s.selectedLaunchIndexes.length))')
+            if [ "$NEXT" -ge "$TOTAL" ]; then
+              break
+            fi
+          done
+
+      - name: Rank decoded coins by actual first-30-second trades
+        if: always() && hashFiles('artifacts/coins/*.json') != ''
+        run: |
+          if [ -d artifacts/coins ]; then
+            npm run backtest:rank -- --date="$BACKTEST_DATE" --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
+          else
+            echo "No deep-replay coin files yet; skipping ranking."
+          fi
+
+      - name: Publish historical research to Neon dashboard
+        if: always() && hashFiles('artifacts/pump-launch-discovery-*.json') != ''
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run backtest:publish -- --date="$BACKTEST_DATE" --run-id="$GITHUB_RUN_ID"
+
+      - name: Save checkpoint and collected data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-11
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
