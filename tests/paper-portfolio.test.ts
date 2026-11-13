@@ -14,14 +14,14 @@ describe("paper portfolio accounting",()=>{
  it("requires fresh exact-size quotes and refuses repeat mints",()=>{
   const p=createPaperPortfolio();
   const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
-  expect(opened.state.availableCashUsd).toBe(1.693);
+  expect(opened.state.availableCashUsd).toBe(1.686);
   expect(()=>openPaperPosition(opened.state,{mint:"mint",positionId:"p2",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)})).toThrow(/only be bought once/);
  });
  it("locks refundable ATA rent separately from trade costs and releases it on close",()=>{
   const p=createPaperPortfolio();
   const opened=openPaperPosition(p,{mint:"rent-mint",positionId:"rent-position",occurredAt:now,
     buyQuote:quote("rent-mint","BUY"),sellQuote:quote("rent-mint","SELL"),rentReserveUsd:0.2,nowMs:Date.parse(now)});
-  expect(opened.state.availableCashUsd).toBeCloseTo(1.493,8);
+  expect(opened.state.availableCashUsd).toBeCloseTo(1.486,8);
   expect(opened.state.reservedAccountRentUsd).toBeCloseTo(0.2,8);
   expect(opened.position.rentReserveUsd).toBeCloseTo(0.2,8);
   const closed=closePaperPosition(opened.state,{positionId:"rent-position",sellQuote:quote("rent-mint","SELL","1000000",1.5),
@@ -31,6 +31,20 @@ describe("paper portfolio accounting",()=>{
   expect(closed.position.rentReserveUsd).toBeCloseTo(0.2,8);
  });
 
+ it("locks the expected sell fee so concurrent entries cannot spend the same exit budget",()=>{
+  let state={...createPaperPortfolio(),maxConcurrentPositions:2};
+  const first=openPaperPosition(state,{mint:"reserved-fee-1",positionId:"reserved-fee-position-1",occurredAt:now,
+    buyQuote:quote("reserved-fee-1","BUY"),sellQuote:quote("reserved-fee-1","SELL"),nowMs:Date.parse(now)});
+  expect(first.position.expectedSellCostsUsd).toBeCloseTo(0.007,8);
+  expect(first.state.availableCashUsd).toBeCloseTo(1.686,8);
+  const second=openPaperPosition(first.state,{mint:"reserved-fee-2",positionId:"reserved-fee-position-2",occurredAt:now,
+    buyQuote:quote("reserved-fee-2","BUY"),sellQuote:quote("reserved-fee-2","SELL"),nowMs:Date.parse(now)});
+  expect(second.state.availableCashUsd).toBeCloseTo(0.672,8);
+  const closed=closePaperPosition(second.state,{positionId:"reserved-fee-position-1",
+    sellQuote:quote("reserved-fee-1","SELL","1000000",1.5),exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
+  expect(closed.state.availableCashUsd).toBeCloseTo(2.172,8);
+ });
+ 
  it("requires cash to cover the expected sell fee before an entry",()=>{
   const p={...createPaperPortfolio(),availableCashUsd:1.01};
   expect(()=>openPaperPosition(p,{mint:"sell-fee-budget",positionId:"sell-fee-position",occurredAt:now,
