@@ -437,7 +437,7 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     await expect(ledgerPersistence!.persistHeliusGapRecoveryArchive({
       sessionId, mint: gapMint,
       gap: { ...baseGap, endSlot: 202, status: "ARCHIVED" }
-    })).rejects.toThrow(/conflicts/);
+    })).rejects.toThrow(/anchors/);
   });
 
 });
