@@ -71,7 +71,7 @@ for (const file of files) {
   if (!Number.isSafeInteger(launchTime)) reasons.push("Launch timestamp is missing; cannot evaluate the true first 30 seconds.");
   if (buyers.size < minBuyers) reasons.push(`Only ${buyers.size} unique buyers in first 30 seconds; need ${minBuyers}.`);
   if (buys.length < minBuyTrades) reasons.push(`Only ${buys.length} buy trades in first 30 seconds; need ${minBuyTrades}.`);
-  if (priceMovePct === null || peakMovePct === null || peakMovePct < minMovePct) reasons.push(`Peak price movement did not reach ${minMovePct}%.`);
+  if (priceMovePct === null || priceMovePct < minMovePct) reasons.push(`End-of-window price movement did not remain at or above ${minMovePct}%.`);
   if (liquidity === null || liquidity < minLiquiditySol) reasons.push(`Observed real SOL reserves below ${minLiquiditySol} SOL or unavailable.`);
   candidates.push({
     mint: coin.mint, status: reasons.length ? "REJECTED" : "QUALIFIED",
@@ -90,7 +90,7 @@ const output = {
   qualifiedCoins: candidates.filter(row => row.status === "QUALIFIED").length,
   rejectedCoins: candidates.filter(row => row.status === "REJECTED").length,
   candidates,
-  interpretation: "This is a historical activity/liquidity pre-qualification, not a strategy win-rate or profitability result. The 30-second window starts at the first decoded SOL-quoted trade, not the exact launch timestamp. Reserve-based price and liquidity are on-chain event observations, not executable quotes."
+  interpretation: "This is a historical activity/liquidity pre-qualification, not a strategy win-rate or profitability result. The 30-second window begins at the decoded CreateEvent block time. Price movement is measured from the first SOL-quoted buy to the final observed SOL-quoted trade in that window. Reserve-based price and liquidity are on-chain event observations, not executable quotes."
 };
 const outputDir = resolve("artifacts");
 await mkdir(outputDir, { recursive: true });
