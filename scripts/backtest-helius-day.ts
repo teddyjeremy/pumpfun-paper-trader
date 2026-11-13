@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { discoverPumpLaunchesInTimeRange } from "../src/ingestion/helius-day-discovery.js";
+import { discoverPumpLaunchesInTimeRange, type HistoricalLaunchDiscovery } from "../src/ingestion/helius-day-discovery.js";
 
 function option(name: string, fallback: string): string {
   const prefix = `--${name}=`;
