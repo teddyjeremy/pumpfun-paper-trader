@@ -13,7 +13,7 @@ import {
 } from "@pump-fun/pump-sdk";
 import {
   decodeSplTokenAccount, decodeVerifiedPumpCurveAccount,
-  PUMP_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+  NATIVE_SOL_MINT, PUMP_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
   type RawProgramAccount
 } from "./pump-account-decoder.js";
 import { derivePumpBondingCurvePda } from "./pump-pdas.js";
@@ -372,6 +372,7 @@ export interface PumpCurveV3UnsignedInstruction {
   buybackFeeRecipient: string;
   instruction: TransactionInstruction;
   requiredAccountAddressesToVerify: string[];
+  optionalAccountAddresses: string[];
   slot: number;
   observedAt: string;
   executionReady: false;
@@ -448,9 +449,13 @@ export async function buildPumpCurveV3UnsignedInstruction(input: {
 
   const tokenProgram = new PublicKey(requiredAccount(input.snapshot, "baseMint").owner);
   const quoteTokenProgram = new PublicKey(SPL_TOKEN_PROGRAM_ID);
+  const nativeSolQuote = context.quoteMint.equals(SystemProgram.programId);
+  // Pump V3 instruction accounts always use WSOL as quote_mint, even when the
+  // curve account stores Pubkey::default to represent native SOL.
+  const instructionQuoteMint = nativeSolQuote ? new PublicKey(NATIVE_SOL_MINT) : context.quoteMint;
   const params = {
     user, mint: context.mint, amount: tokenAmount, quoteAmount,
-    tokenProgram, quoteMint: context.quoteMint, quoteTokenProgram,
+    tokenProgram, quoteMint: instructionQuoteMint, quoteTokenProgram,
     buybackFeeRecipient: recipient
   };
   const method = input.side === "BUY" ? "getBuyV3InstructionRaw" : "getSellV3InstructionRaw";
@@ -469,24 +474,31 @@ export async function buildPumpCurveV3UnsignedInstruction(input: {
   const requiredAccountAddressesToVerify = [
     getAssociatedTokenAddressSync(context.mint, user, false, tokenProgram).toBase58()
   ];
-  if (!context.quoteMint.equals(SystemProgram.programId)) {
+  const optionalAccountAddresses: string[] = [];
+  if (nativeSolQuote) {
+    // For native-SOL curves the program takes WSOL ATA addresses but does not
+    // use or require those accounts to exist; the buyback recipient is a wallet.
+    optionalAccountAddresses.push(
+      getAssociatedTokenAddressSync(instructionQuoteMint, user, false, quoteTokenProgram).toBase58()
+    );
+    requiredAccountAddressesToVerify.push(recipient.toBase58());
+  } else {
     requiredAccountAddressesToVerify.push(
-      getAssociatedTokenAddressSync(context.quoteMint, user, false, quoteTokenProgram).toBase58(),
-      getAssociatedTokenAddressSync(context.quoteMint, recipient, false, quoteTokenProgram).toBase58()
+      getAssociatedTokenAddressSync(instructionQuoteMint, user, false, quoteTokenProgram).toBase58(),
+      getAssociatedTokenAddressSync(instructionQuoteMint, recipient, false, quoteTokenProgram).toBase58()
     );
   }
   return {
     provider: "pump-sdk-4.3.1", venue: "PUMP_CURVE", side: input.side,
     mint: context.mint.toBase58(), user: user.toBase58(),
-    quoteMint: context.quoteMint.toBase58(), buybackFeeRecipient: recipient.toBase58(),
-    instruction, requiredAccountAddressesToVerify,
+    quoteMint: instructionQuoteMint.toBase58(), buybackFeeRecipient: recipient.toBase58(),
+    instruction, requiredAccountAddressesToVerify, optionalAccountAddresses,
     slot: input.snapshot.slot, observedAt: input.snapshot.observedAt,
     executionReady: false, paperEntryAuthorized: false,
     blockers: [
       "USER_BASE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED",
       "BUYBACK_QUOTE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED_WHEN_REQUIRED",
       "ATA_RENT_AND_VIRTUAL_PAYER_BALANCE_NOT_VERIFIED",
-      "USER_VOLUME_ACCUMULATOR_STATE_AND_RENT_NOT_VERIFIED",
       "EXACT_UNSIGNED_TRANSACTION_FEE_MESSAGE_NOT_ATTACHED",
       "PAPER_ENTRY_AUTHORIZATION_NOT_GRANTED"
     ]
