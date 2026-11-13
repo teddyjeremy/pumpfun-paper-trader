@@ -11,12 +11,18 @@ import { fetchSolUsdPrice } from "./sol-usd-price.js";
 import { fetchPumpCurveSdkQuote } from "./pump-sdk-curve-quote-adapter.js";
 import { fetchPumpSwapSdkQuote } from "./pump-sdk-quote-adapter.js";
 import type { HeliusAccountReadConfig } from "./helius-accounts.js";
+import type { UnsignedInstructionFeeEvidence } from "./solana-fee-estimator.js";
 
 export type QuoteSide = "BUY" | "SELL";
 export type OfflineQuoteFetcher = (input: {
   side: QuoteSide;
   amountBaseUnits: string;
 }) => Promise<OfflinePumpQuote>;
+
+export type ExactUnsignedFeeEvidenceBuilder = (input: {
+  side: QuoteSide;
+  quote: OfflinePumpQuote;
+}) => Promise<UnsignedInstructionFeeEvidence>;
 
 /** Creates a curve quote callback backed by the verified Helius account snapshot adapter. */
 export function createPumpCurveOfflineQuoteFetcher(input: {
@@ -72,6 +78,7 @@ export interface ExecutableRoundTripQuote {
     minimumNetReturnPct: number;
   };
   networkFeeEstimate: ReturnType<typeof buildPaperNetworkFeeEstimate>;
+  exactFeeEvidence?: { buy: UnsignedInstructionFeeEvidence; sell: UnsignedInstructionFeeEvidence };
   assumptions: {
     quoteTtlMs: number;
     executionDelayMs: number;
@@ -90,6 +97,8 @@ export interface ExecutableRoundTripQuote {
 export async function fetchExecutableRoundTripQuote(input: {
   fetchQuote: OfflineQuoteFetcher;
   helius: HeliusRpcConfig;
+  buildExactFeeEvidence?: ExactUnsignedFeeEvidenceBuilder;
+  requireExactMessageFees?: boolean;
   buyAmountBaseUnits: string;
   computeUnitLimit: number;
   writableAccounts?: string[];
@@ -136,6 +145,9 @@ export async function fetchExecutableRoundTripQuote(input: {
   if (!Number.isSafeInteger(quoteTtlMs) || quoteTtlMs < 100 || quoteTtlMs > 2_000) {
     throw new Error("Quote TTL must be between 100 and 2000 ms.");
   }
+  if (input.requireExactMessageFees && !input.buildExactFeeEvidence) {
+    throw new Error("Exact unsigned-message fee evidence is required but no instruction builder was supplied.");
+  }
   const startedAt = now();
   const [rawBuy, feeSamples, priceResult] = await Promise.all([
     input.fetchQuote({ side: "BUY", amountBaseUnits: input.buyAmountBaseUnits }),
@@ -167,11 +179,19 @@ export async function fetchExecutableRoundTripQuote(input: {
       maxPriorityFeeLamports: input.maxPriorityFeeLamports
     })
   });
+  const buyExactFeeEvidence = input.buildExactFeeEvidence
+    ? await input.buildExactFeeEvidence({ side: "BUY", quote: rawBuy })
+    : undefined;
+  if (input.requireExactMessageFees && buyExactFeeEvidence?.status !== "AVAILABLE") {
+    throw new Error("Exact buy-message fee evidence is unavailable.");
+  }
+  const buyFeeEstimate = buyExactFeeEvidence?.status === "AVAILABLE"
+    ? buyExactFeeEvidence.estimate : null;
   const buyFetchedAt = now();
   const buyLatencyMs = Math.max(0, Math.ceil(buyFetchedAt - startedAt));
   const buyCosts: PaperExecutionCostEstimate = {
-    networkFeeLamports: networkFeeEstimate.networkFeeLamports,
-    priorityFeeLamports: networkFeeEstimate.priorityFeeLamports,
+    networkFeeLamports: buyFeeEstimate?.networkFeeLamports ?? networkFeeEstimate.networkFeeLamports,
+    priorityFeeLamports: buyFeeEstimate?.priorityFeeLamports ?? networkFeeEstimate.priorityFeeLamports,
     providerFeeUsd,
     simulatedLatencyMs: buyLatencyMs + executionDelayMs,
     quoteTtlMs
@@ -188,10 +208,20 @@ export async function fetchExecutableRoundTripQuote(input: {
   const rawSell = await input.fetchQuote({
     side: "SELL", amountBaseUnits: buyQuote.outputAmountBaseUnits
   });
+  const sellExactFeeEvidence = input.buildExactFeeEvidence
+    ? await input.buildExactFeeEvidence({ side: "SELL", quote: rawSell })
+    : undefined;
+  if (input.requireExactMessageFees && sellExactFeeEvidence?.status !== "AVAILABLE") {
+    throw new Error("Exact sell-message fee evidence is unavailable.");
+  }
+  const sellFeeEstimate = sellExactFeeEvidence?.status === "AVAILABLE"
+    ? sellExactFeeEvidence.estimate : null;
   const sellFetchedAt = now();
   const sellLatencyMs = Math.max(0, Math.ceil(sellFetchedAt - sellStartedAt));
   const sellCosts: PaperExecutionCostEstimate = {
     ...buyCosts,
+    networkFeeLamports: sellFeeEstimate?.networkFeeLamports ?? buyCosts.networkFeeLamports,
+    priorityFeeLamports: sellFeeEstimate?.priorityFeeLamports ?? buyCosts.priorityFeeLamports,
     simulatedLatencyMs: sellLatencyMs + executionDelayMs
   };
   if (rawSell.side !== "SELL") throw new Error("Sell quote adapter returned a non-SELL quote.");
@@ -268,10 +298,13 @@ export async function fetchExecutableRoundTripQuote(input: {
       minimumNetReturnPct
     },
     networkFeeEstimate,
+    ...(buyExactFeeEvidence && sellExactFeeEvidence ? {
+      exactFeeEvidence: { buy: buyExactFeeEvidence, sell: sellExactFeeEvidence }
+    } : {}),
     assumptions: {
       quoteTtlMs, executionDelayMs, providerFeeUsdPerTransaction: providerFeeUsd,
       priceImpactLimitPct: maxPriceImpactPct, priorityFeePercentile: percentile,
-      priorityFeeScope: networkFeeEstimate.priorityFeeScope
+      priorityFeeScope: buyFeeEstimate && sellFeeEstimate ? "ACCOUNT_SPECIFIC" : networkFeeEstimate.priorityFeeScope
     }
   };
 }
