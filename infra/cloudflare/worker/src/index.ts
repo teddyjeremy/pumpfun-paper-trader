@@ -259,7 +259,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     const response = await this.postPostgresIngest("/internal/worker-lease", {
       action: "acquire", leaseName: "pumpfun-paper-trader-coordinator",
-      ownerId: this.postgresLeaseOwnerId, ttlSeconds: 45
+      ownerId: this.postgresLeaseOwnerId, ttlSeconds: 120
     });
     if (!response.ok) {
       let detail = `HTTP ${response.status}`;
@@ -278,7 +278,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       throw new Error("PostgreSQL worker lease was not acquired; another coordinator may hold the unexpired lease.");
     }
     this.postgresLeaseHeld = true;
-    await this.ctx.storage.setAlarm(Date.now() + 15_000);
   }
 
   private async heartbeatPostgresWorkerLease(): Promise<boolean> {
@@ -286,7 +285,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     try {
       const response = await this.postPostgresIngest("/internal/worker-lease", {
         action: "heartbeat", leaseName: "pumpfun-paper-trader-coordinator",
-        ownerId: this.postgresLeaseOwnerId, ttlSeconds: 45
+        ownerId: this.postgresLeaseOwnerId, ttlSeconds: 120
       });
       if (!response.ok) return false;
       const result = await response.json() as { acquired?: boolean };
@@ -1042,7 +1041,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         monitoredCandidates: this.heliusState.subscriptions.length,
         queuedSignatures: this.heliusState.queue.length,
         droppedSignatures: this.heliusState.droppedSignatures
-      }, `heartbeat:${Math.floor(Date.now() / 60_000)}`);
+      }, `heartbeat:${Math.floor(Date.now() / 300_000)}`);
     }
     if (!this.status.enabled) {
       if (this.socket) {
@@ -1062,9 +1061,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       return this.getStatus();
     }
 
-    // A Durable Object may be evicted and rehydrated while its session is
-    // still enabled. Reacquire the fenced DB lease before reconnecting provider
-    // streams; never collect live data while persistence ownership is absent.
+    // Renew the lease from the one-minute coordinator tick. This avoids a
+    // 15-second Durable Object alarm/write loop while retaining a 2-minute
+    // lease window for one missed tick.
+    if (this.postgresLeaseHeld && !(await this.heartbeatPostgresWorkerLease())) {
+      this.postgresLeaseHeld = false;
+    }
     if (!this.postgresLeaseHeld) {
       try {
         await this.acquirePostgresWorkerLease();
@@ -1072,12 +1074,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         this.status.lastError = error instanceof Error
           ? error.message.slice(0, 180)
           : "Unknown PostgreSQL lease error.";
-        await this.persist();
         return this.getStatus();
       }
       if (!this.postgresLeaseHeld) {
         this.status.lastError = "PostgreSQL worker lease is not configured; provider streams remain stopped.";
-        await this.persist();
         return this.getStatus();
       }
     }
@@ -1092,8 +1092,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await this.appendAudit("CANDIDATE_EXPIRED", null, { expiredMints, count: expiredMints.length });
       this.reconcileHelius();
       this.pendingWrites += 1;
+      await this.persist();
     }
-    await this.persist();
 
     if (this.heliusSocket?.readyState === WebSocket.OPEN &&
         this.heliusConnectedAtMs > 0 && Date.now() - this.heliusConnectedAtMs >= 14 * 60 * 1000) {
@@ -1138,7 +1138,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (nextReconnectAt > Date.now()) return this.getStatus();
 
     this.connect();
-    await this.persist();
     return this.getStatus();
   }
 
