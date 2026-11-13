@@ -41,7 +41,7 @@ export interface CandidateTradeFlow {
   largestBuyerShareAcrossLatestThreeBps: number | null;
   flowConfirmationPass: boolean;
   dataComplete: boolean;
-  coverage: "OBSERVED_EVENTS_ONLY";
+  coverage: "OBSERVED_EVENTS_ONLY" | "VERIFIED_COMPLETE_EVENT_STREAM";
   entryEligible: false;
   microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE";
   ignoredMicroTradeCount: number;
