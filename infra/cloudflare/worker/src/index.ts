@@ -1440,25 +1440,69 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       a[1] === b[1] ? a[0].localeCompare(b[0]) : a[1] > b[1] ? -1 : 1
     ).map(([wallet]) => wallet);
     const wallets = [...new Set([...(launch?.creator ? [launch.creator] : []), ...rankedWallets])];
-    const result = await collectCompleteWalletFundingEvidence(mint, wallets, {
+    const fetcher = this.rateLimitedHeliusFetcher();
+    const fundingEvidence = await collectCompleteWalletFundingEvidence(mint, wallets, {
       apiKey: this.env.HELIUS_API_KEY,
       walletSetVerifiedComplete: tradeCoverageComplete,
-      fetcher: this.rateLimitedHeliusFetcher()
+      fetcher
     });
-    this.walletLinkSnapshots[mint] = result;
+    const fullHistoryEnabled = this.env.FULL_WALLET_HISTORY_ENABLED === "true";
+    const configuredMaxPages = Number(this.env.FULL_WALLET_HISTORY_MAX_PAGES ?? "2");
+    const fullWalletHistory = fullHistoryEnabled
+      ? await collectCompleteWalletTransactionHistory(mint, wallets, {
+          apiKey: this.env.HELIUS_API_KEY,
+          walletSetVerifiedComplete: tradeCoverageComplete,
+          maxPages: Number.isSafeInteger(configuredMaxPages) && configuredMaxPages >= 1 &&
+            configuredMaxPages <= 5 ? configuredMaxPages : 2,
+          fetcher
+        })
+      : null;
+    const fullHistoryComplete = fullWalletHistory?.status === "OBSERVED" &&
+      fullWalletHistory.dataComplete && fullWalletHistory.walletSetComplete &&
+      fullWalletHistory.walletsCovered.length === fullWalletHistory.walletsRequested;
+    const linksByEvidence = new Map<string, WalletLinkEvidence>();
+    for (const link of [...fundingEvidence.links, ...(fullWalletHistory?.links ?? [])]) {
+      const key = [link.walletA, link.walletB].sort().join(":") + ":" + [...link.evidence].sort().join(",");
+      linksByEvidence.set(key, link);
+    }
+    const combined: WalletLinkEvidenceSnapshot = {
+      provider: "helius", mint,
+      status: fullHistoryComplete ? "OBSERVED" : "DATA_INCOMPLETE",
+      coverage: fullHistoryComplete ? "FULL_WALLET_HISTORY" :
+        fundingEvidence.dataComplete ? "FULL_SOL_TRANSFER_HISTORY" : "INCOMPLETE",
+      dataComplete: fullHistoryComplete,
+      walletSetComplete: tradeCoverageComplete && wallets.length <= 16,
+      requestedWallets: wallets,
+      walletsCovered: fullWalletHistory?.walletsCovered ?? fundingEvidence.walletsCovered,
+      walletsRequested: wallets.length,
+      walletsChecked: fullWalletHistory?.walletsChecked ?? fundingEvidence.walletsChecked,
+      transactionsChecked: fullWalletHistory?.transactionsChecked ?? 0,
+      pagesScanned: fundingEvidence.pagesScanned + (fullWalletHistory?.pagesScanned ?? 0),
+      estimatedCredits: fullWalletHistory?.estimatedCredits ?? 0,
+      links: [...linksByEvidence.values()],
+      warnings: [...fundingEvidence.warnings, ...(fullWalletHistory?.warnings ?? [])],
+      observedAt: fullWalletHistory?.observedAt ?? fundingEvidence.observedAt,
+      fundingEvidence,
+      fullWalletHistory
+    };
+    this.walletLinkSnapshots[mint] = combined;
     this.reconcileHelius();
     await this.persist();
     const risk = evaluateWalletClusterRisk(candidateTransactions, {
       mint,
       creator: launch?.creator ?? null,
       totalSupply: launch?.tokenTotalSupply.toString() ?? null,
-      links: result.links,
+      links: combined.links,
       holdings: this.walletHoldingsByMint[mint] ?? []
     });
     await this.appendAudit("RISK_EVIDENCE", mint, {
-      evidenceType: "WALLET_CLUSTER", fundingEvidence: jsonSafe(result), risk: jsonSafe(risk)
+      evidenceType: "WALLET_CLUSTER",
+      fundingEvidence: jsonSafe(fundingEvidence),
+      fullWalletHistory: jsonSafe(fullWalletHistory),
+      walletClusterEvidence: jsonSafe(combined),
+      risk: jsonSafe(risk)
     }, `wallet-links:${mint}:${Math.floor(Date.now() / 60_000)}`);
-    return { ...result, risk };
+    return { ...combined, risk };
   }
 
   /** Collect one bounded holder or wallet-link snapshot on each scheduled tick. */
