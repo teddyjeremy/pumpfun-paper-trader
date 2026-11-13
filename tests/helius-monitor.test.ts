@@ -3,7 +3,7 @@ import {
   emptyHeliusMonitorState, enqueueHeliusNotification, enqueueHeliusSignatureWork, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, selectHeliusCandidates, confirmHeliusSubscription,
   takeHeliusWork, retryHeliusSignatureWork, MAX_HELIUS_CANDIDATES, MAX_HELIUS_SIGNATURE_QUEUE, resetHeliusSubscriptionIds,
-  recordHeliusCoverageGap, closeHeliusCoverageGap,
+  recordHeliusCoverageGap,
   FRESH_LAUNCH_SLOT_RESERVE
 } from "../src/ingestion/helius-monitor.js";
 import type { DiscoveryCandidate } from "../src/ingestion/discovery-store.js";
@@ -99,12 +99,14 @@ describe("bounded Helius candidate monitor", () => {
       startedAt: "2026-11-13T10:00:00.000Z",
       endedAt: null
     }]);
-    state = closeHeliusCoverageGap(state, candidate(0).mint, "2026-11-13T10:03:00.000Z");
+    state = confirmHeliusSubscription(state, requestId, 78, "2026-11-13T10:03:00.000Z");
     expect(state.coverageGaps[0]?.endedAt).toBe("2026-11-13T10:03:00.000Z");
     expect(state.incompleteMints).toContain(candidate(0).mint);
     state = recordHeliusCoverageGap(state, candidate(0).mint, "2026-11-13T10:04:00.000Z");
     expect(state.coverageGaps).toHaveLength(2);
     expect(state.coverageGaps[1]?.endedAt).toBeNull();
+    state = confirmHeliusSubscription(state, requestId, 79, "2026-11-13T10:05:00.000Z");
+    expect(state.coverageGaps[1]?.endedAt).toBe("2026-11-13T10:05:00.000Z");
   });
   it("queues provider-discovered create signatures without waiting for a logs subscription", () => {
     const state = emptyHeliusMonitorState();
