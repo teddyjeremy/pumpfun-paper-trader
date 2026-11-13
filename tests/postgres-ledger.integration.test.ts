@@ -263,8 +263,8 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     });
     await ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
-      sequence: 3,
-      eventId: "integration-wallet-risk-3",
+      sequence: 4,
+      eventId: "integration-wallet-risk-4",
       kind: "RISK_EVIDENCE",
       mint: backfillMint,
       occurredAt: "2026-11-12T10:00:04.000Z",
