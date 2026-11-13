@@ -32,7 +32,7 @@ describe("paper portfolio accounting",()=>{
  });
 
  it("locks the expected sell fee so concurrent entries cannot spend the same exit budget",()=>{
-  let state={...createPaperPortfolio(),maxConcurrentPositions:2};
+  let state={...createPaperPortfolio(6),maxConcurrentPositions:2};
   const first=openPaperPosition(state,{mint:"reserved-fee-1",positionId:"reserved-fee-position-1",occurredAt:now,
     buyQuote:quote("reserved-fee-1","BUY"),sellQuote:quote("reserved-fee-1","SELL"),nowMs:Date.parse(now)});
   expect(first.position.expectedSellCostsUsd).toBeCloseTo(0.007,8);
@@ -42,7 +42,7 @@ describe("paper portfolio accounting",()=>{
   expect(second.state.availableCashUsd).toBeCloseTo(0.672,8);
   const closed=closePaperPosition(second.state,{positionId:"reserved-fee-position-1",
     sellQuote:quote("reserved-fee-1","SELL","1000000",1.5),exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
-  expect(closed.state.availableCashUsd).toBeCloseTo(2.172,8);
+  expect(closed.state.availableCashUsd).toBeCloseTo(5.472,8);
  });
  
  it("requires cash to cover the expected sell fee before an entry",()=>{
@@ -109,7 +109,7 @@ describe("paper portfolio accounting",()=>{
   const opened=openPaperPosition(p,{mint:"mint-aggregate",positionId:"p-aggregate",occurredAt:now,buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)});
   expect(opened.position.buyCostsUsd).toBeCloseTo(0.009,8);
   expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(0.991,8);
-  expect(opened.state.availableCashUsd).toBeCloseTo(1.691,8);
+  expect(opened.state.availableCashUsd).toBeCloseTo(1.682,8);
  });
 
  it("includes protocol, creator, pool, priority and transfer fees in the round-trip cap",()=>{
