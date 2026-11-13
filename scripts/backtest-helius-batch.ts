@@ -54,7 +54,7 @@ const checkpointPath = resolve(directory, "checkpoint.json");
 const screeningPath = resolve(directory, `pump-launch-screen-${date}.json`);
 await mkdir(resolve(directory, "coins"), { recursive: true });
 const discovery = JSON.parse(await readFile(discoveryPath, "utf8")) as Discovery;
-if (discovery.requestedLocalDate !== date || discovery.status !== "DAY_EXHAUSTED" ||
+if (discovery.requestedLocalDate !== date || !(discovery.status === "DAY_EXHAUSTED" || discovery.status === "SAMPLE_COMPLETE") ||
     !Array.isArray(discovery.launches) || !Number.isSafeInteger(discovery.creditsUsed) ||
     discovery.creditsUsed > maxCredits) {
   throw new Error("A complete, budget-compliant full-day discovery artifact is required.");
