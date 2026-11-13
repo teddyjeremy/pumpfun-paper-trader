@@ -5,6 +5,7 @@ const mint = "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi";
 const walletA = "11111111111111111111111111111111";
 const walletB = "Vote111111111111111111111111111111111111111";
 const funder = "SysvarRent111111111111111111111111111111111";
+const sharedAuthority = "ComputeBudget111111111111111111111111111111";
 const signatureChar = (index: number) => "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"[index % 58]!;
 function response(result: unknown): Response {
   return Response.json({ jsonrpc: "2.0", id: "test", result });
@@ -13,7 +14,7 @@ function transaction(signature: string, wallet: string, time: number) {
   return {
     signature, slot: time, blockTime: time, feePayer: funder,
     transaction: { message: {
-      accountKeys: [{ pubkey: funder, signer: true }, { pubkey: wallet, signer: true }],
+      accountKeys: [{ pubkey: funder, signer: true }, { pubkey: sharedAuthority, signer: true }, { pubkey: wallet, signer: true }],
       instructions: [{
         program: "system",
         parsed: { type: "transfer", info: { source: funder, destination: wallet, lamports: 1_000_000 } }
