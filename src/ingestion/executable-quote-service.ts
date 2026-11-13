@@ -81,6 +81,8 @@ export interface ExecutableRoundTripQuote {
     minimumNetReturnPct: number;
   };
   networkFeeEstimate: ReturnType<typeof buildPaperNetworkFeeEstimate>;
+  /** Fresh SOL/USD observation used to convert refundable rent lamports into paper USD reserves. */
+  solUsdPriceUsd: number;
   exactFeeEvidence?: { buy: UnsignedInstructionFeeEvidence; sell: UnsignedInstructionFeeEvidence };
   assumptions: {
     quoteTtlMs: number;
@@ -301,6 +303,7 @@ export async function fetchExecutableRoundTripQuote(input: {
       minimumNetReturnPct
     },
     networkFeeEstimate,
+    solUsdPriceUsd: priceResult.observation.priceUsd,
     ...(buyExactFeeEvidence && sellExactFeeEvidence ? {
       exactFeeEvidence: { buy: buyExactFeeEvidence, sell: sellExactFeeEvidence }
     } : {}),
