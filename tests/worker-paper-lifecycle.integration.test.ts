@@ -70,12 +70,12 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
 
   it("proves Worker-to-Neon persistence and idempotency without starting market streams", async () => {
     const storage = new MemoryDurableStorage();
-    const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+    const calls: Array<{ path: string; body: Record<string, unknown>; authorization: string | null }> = [];
     let eventWrites = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-      calls.push({ path: url.pathname, body });
+      calls.push({ path: url.pathname, body, authorization: new Headers(init?.headers).get("authorization") });
       if (url.pathname === "/internal/worker-lease") {
         if (body.action === "release") return Response.json({ released: true });
         return Response.json({ acquired: true });
@@ -91,7 +91,8 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     try {
       const worker = new PumpFunCoordinator(context(storage) as never, {
         PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
-        PAPER_EVENT_INGEST_TOKEN: "t".repeat(40)
+        PAPER_EVENT_INGEST_TOKEN: "o".repeat(40),
+        PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64)
       } as never);
       const result = await worker.smokeIngestion();
       expect(result).toMatchObject({
@@ -102,6 +103,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
       expect(result.sessionId).toMatch(/^smoke-test-worker-/);
       expect(await storage.get("enabled")).not.toBe(true);
       expect(calls.filter(call => call.path === "/internal/paper-events")).toHaveLength(2);
+      expect(calls.every(call => call.authorization === `Bearer ${"v".repeat(64)}`)).toBe(true);
       const [first, replay] = calls.filter(call => call.path === "/internal/paper-events");
       expect(first?.body).toEqual(replay?.body);
       const events = first?.body.events as Array<{ kind: string; data: { smokeTest?: boolean } }>;
