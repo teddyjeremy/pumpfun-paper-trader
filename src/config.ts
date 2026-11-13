@@ -9,6 +9,7 @@ const EnvSchema = z.object({
   DASHBOARD_PASSWORD: z.string().optional().default(""),
   DATABASE_URL: z.string().optional().default(""),
   PAPER_EVENT_INGEST_TOKEN: z.string().optional().default(""),
+  PAPER_EVENT_INGEST_TOKEN_V2: z.string().optional().default(""),
   PAPER_WORKER_URL: z.string().optional().default(""),
   PAPER_WORKER_CONTROL_TOKEN: z.string().optional().default(""),
   HELIUS_API_KEY: z.string().optional().default(""),
@@ -56,7 +57,10 @@ if (parsed.data.PAPER_POSITION_SIZE_USD * parsed.data.PAPER_MAX_OPEN_POSITIONS >
   throw new Error("Maximum position allocation cannot exceed the paper starting balance.");
 }
 
-export const config = Object.freeze(parsed.data);
+export const config = Object.freeze({
+  ...parsed.data,
+  PAPER_EVENT_INGEST_TOKEN: parsed.data.PAPER_EVENT_INGEST_TOKEN_V2 || parsed.data.PAPER_EVENT_INGEST_TOKEN
+});
 
 /** Paper calibration profile; callers must persist these values with each exit decision. */
 export const dynamicExitConfig = Object.freeze({
