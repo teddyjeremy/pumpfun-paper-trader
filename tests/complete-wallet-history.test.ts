@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Keypair } from "@solana/web3.js";
 import { collectCompleteWalletFundingEvidence } from "../src/ingestion/complete-wallet-history.js";
 import { SOL_QUOTE_MINT } from "../src/ingestion/trade-flow.js";
 
@@ -94,17 +95,14 @@ describe("complete paginated wallet funding history", () => {
   });
 
   it("does not claim the supplied wallet set is complete when it exceeds the bounded wallet count", async () => {
-    const wallets = [walletA, walletB, "Stake11111111111111111111111111111111111111",
-      "SysvarRent111111111111111111111111111111111", "SysvarC1ock11111111111111111111111111111111",
-      "SysvarS1otHashes111111111111111111111111111", "SysvarRecentB1ockHashes11111111111111111111",
-      "ComputeBudget111111111111111111111111111111", "Sysvar1nstructions1111111111111111111111111"];
+    const wallets = [walletA, walletB, ...Array.from({ length: 15 }, () => Keypair.generate().publicKey.toBase58())];
     const fetcher: typeof fetch = async () => response({ data: [transfer("7".repeat(64), walletA, 1_794_484_800)] });
     const result = await collectCompleteWalletFundingEvidence(mint, wallets, {
       apiKey: "test-key", fetcher
     });
     expect(result.status).toBe("DATA_INCOMPLETE");
     expect(result.walletSetComplete).toBe(false);
-    expect(result.walletsRequested).toBe(9);
+    expect(result.walletsRequested).toBe(17);
     expect(result.walletsChecked).toBe(0);
   });
 });
