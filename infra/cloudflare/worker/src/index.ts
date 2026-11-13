@@ -67,6 +67,11 @@ import {
   parsePumpPortalDiscoveryMessage,
   pumpPortalDiscoverySubscriptions
 } from "../../../../src/ingestion/pumpportal.js";
+import {
+  createPumpCurveOfflineQuoteFetcher, createPumpSwapOfflineQuoteFetcher,
+  createPumpUnsignedPlanFeeEvidenceBuilder, fetchExecutableRoundTripQuote
+} from "../../../../src/ingestion/executable-quote-service.js";
+import { deriveNonSigningVirtualTraderIdentity } from "../../../../src/ingestion/virtual-trader-identity.js";
 
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
@@ -1134,6 +1139,77 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         requestId, status: "BLOCKED", reason
       }, `curve-quote-result:${requestId}`);
       throw error;
+    }
+  }
+
+
+  /**
+   * Audited round-trip quote validation for a candidate. It checks a fresh
+   * buy, exact-output sellability, and exact unsigned-message fee evidence.
+   * It deliberately does not authorize or create a paper position.
+   */
+  async requestExecutableRoundTripQuote(input: {
+    mint: string;
+    venue: "PUMP_CURVE" | "PUMPSWAP";
+    buyAmountBaseUnits: string;
+    poolAddress?: string;
+  }): Promise<unknown> {
+    await this.hydrate();
+    if (!this.activeSessionId) throw new Error("No active paper session.");
+    if (!this.env.HELIUS_API_KEY) throw new Error("HELIUS_API_KEY is required.");
+    if (input.venue === "PUMPSWAP" &&
+        (typeof input.poolAddress !== "string" || !input.poolAddress.trim())) {
+      throw new Error("A canonical PumpSwap pool address is required.");
+    }
+    if (!/^\\d+$/.test(input.buyAmountBaseUnits) ||
+        input.buyAmountBaseUnits.length > 20 ||
+        BigInt(input.buyAmountBaseUnits) <= 0n ||
+        BigInt(input.buyAmountBaseUnits) > 18_446_744_073_709_551_615n) {
+      throw new Error("Buy amount must be a positive u64 quote-token amount.");
+    }
+
+    const requestId = crypto.randomUUID();
+    const computeUnitLimit = 1_400_000;
+    const config = { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const };
+    await this.appendAudit("QUOTE_REQUESTED", input.mint, {
+      requestId, venue: input.venue, operation: "ROUND_TRIP_VALIDATION",
+      buyAmountBaseUnits: input.buyAmountBaseUnits, computeUnitLimit,
+      poolAddress: input.poolAddress ?? null
+    }, `round-trip-quote-request:${requestId}`);
+    try {
+      const identity = await deriveNonSigningVirtualTraderIdentity();
+      const fetchQuote = input.venue === "PUMP_CURVE"
+        ? createPumpCurveOfflineQuoteFetcher({ mint: input.mint, config })
+        : createPumpSwapOfflineQuoteFetcher({
+            mint: input.mint, poolAddress: input.poolAddress!, config
+          });
+      const buildExactFeeEvidence = createPumpUnsignedPlanFeeEvidenceBuilder({
+        identity, config, computeUnitLimit
+      });
+      const result = await fetchExecutableRoundTripQuote({
+        fetchQuote, helius: config, buildExactFeeEvidence,
+        requireExactMessageFees: true,
+        buyAmountBaseUnits: input.buyAmountBaseUnits,
+        computeUnitLimit,
+        executionDelayMs: 250,
+        quoteTtlMs: 2_000,
+        maxPriceImpactPct: 2,
+        maximumRoundTripCostPct: 4
+      });
+      await this.appendAudit("QUOTE_RESULT", input.mint, {
+        requestId, status: result.status, venue: input.venue,
+        paperEntryAuthorized: false, result
+      }, `round-trip-quote-result:${requestId}`);
+      return result;
+    } catch (error) {
+      const rawReason = error instanceof Error ? error.message : "Round-trip quote validation failed.";
+      const reason = this.env.HELIUS_API_KEY
+        ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
+        : rawReason;
+      await this.appendAudit("QUOTE_RESULT", input.mint, {
+        requestId, status: "BLOCKED", paperEntryAuthorized: false, reason
+      }, `round-trip-quote-result:${requestId}`);
+      throw new Error(reason);
     }
   }
 
@@ -2642,6 +2718,38 @@ export default {
       } catch (error) {
         return Response.json({
           error: error instanceof Error ? error.message : "Unable to create PumpSwap quote"
+        }, { status: 409 });
+      }
+    }
+
+
+    if (url.pathname === "/executable-round-trip-quote" && request.method === "POST") {
+      let body: unknown;
+      try { body = await request.json(); } catch {
+        return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+      const value = body && typeof body === "object" ? body as Record<string, unknown> : {};
+      const { mint, venue, buyAmountBaseUnits, poolAddress } = value;
+      if (typeof mint !== "string" || !mint.trim() ||
+          (venue !== "PUMP_CURVE" && venue !== "PUMPSWAP") ||
+          typeof buyAmountBaseUnits !== "string" || !/^\\d+$/.test(buyAmountBaseUnits) ||
+          buyAmountBaseUnits.length > 20 || BigInt(buyAmountBaseUnits || "0") <= 0n ||
+          BigInt(buyAmountBaseUnits || "0") > 18_446_744_073_709_551_615n ||
+          (venue === "PUMPSWAP" && (typeof poolAddress !== "string" || !poolAddress.trim()))) {
+        return Response.json({
+          error: "mint, venue, positive u64 buyAmountBaseUnits, and poolAddress for PUMPSWAP are required"
+        }, { status: 400 });
+      }
+      try {
+        const result = await coordinator.requestExecutableRoundTripQuote({
+          mint, venue, buyAmountBaseUnits,
+          ...(typeof poolAddress === "string" ? { poolAddress } : {})
+        });
+        return Response.json(jsonSafe(result), { headers: { "cache-control": "no-store" } });
+      } catch (error) {
+        return Response.json({
+          error: error instanceof Error ? error.message : "Unable to validate executable round-trip quote",
+          paperEntryAuthorized: false
         }, { status: 409 });
       }
     }
