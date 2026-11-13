@@ -26,6 +26,43 @@ export interface VerifiedParsedLaunch {
   event: PumpCreateEvent;
 }
 
+
+/** A failed selected transaction can be skipped only while the scan supplied a safe next-page cursor. */
+export function canContinueParsedLaunchBucket(input: {
+  paginationToken: string | null;
+  pagesScanned: number;
+  maxPagesPerBucket: number;
+}): boolean {
+  return typeof input.paginationToken === "string" && input.paginationToken.length > 0 &&
+    Number.isSafeInteger(input.pagesScanned) && input.pagesScanned >= 0 &&
+    Number.isSafeInteger(input.maxPagesPerBucket) && input.maxPagesPerBucket > 0 &&
+    input.pagesScanned < input.maxPagesPerBucket;
+}
+
+/** A bucket is EMPTY only when the provider reached its end with no failed matches. */
+export function canMarkParsedLaunchBucketEmpty(input: {
+  stoppedOn: string;
+  paginationToken: string | null;
+  priorVerificationFailure: boolean;
+}): boolean {
+  return input.stoppedOn === "windowEnd" && input.paginationToken === null &&
+    input.priorVerificationFailure === false;
+}
+
+/** Find the earliest incomplete bucket whose saved cursor can still be resumed. */
+export function findFirstResumableParsedLaunchBucket(
+  buckets: Array<{ status: string; paginationToken: string | null; pagesScanned: number }>,
+  maxPagesPerBucket: number
+): number | null {
+  const index = buckets.findIndex(bucket => (bucket.status === "INCOMPLETE" || bucket.status === "RUNNING") &&
+    canContinueParsedLaunchBucket({
+      paginationToken: bucket.paginationToken,
+      pagesScanned: bucket.pagesScanned,
+      maxPagesPerBucket
+    }));
+  return index < 0 ? null : index;
+}
+
 /**
  * Ask Helius's server-side Parsed Events Scan to search only Pump create/create_v2
  * instructions inside a narrow timestamp bucket. It avoids crawling unrelated
