@@ -1215,7 +1215,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       // Re-evaluate the candidate with this fresh quote evidence. This only
       // updates audit rules; the quote remains explicitly unauthorized.
       try {
-        await this.recordStrategyAudit(`round-trip:${requestId}`, featureReport);
+        await this.recordStrategyAudit(`round-trip:${requestId}`, featureReport, input.mint);
       } catch {
         await this.appendAudit("ERROR", input.mint, {
           requestId, stage: "STRATEGY_REEVALUATION_AFTER_QUOTE",
@@ -1253,8 +1253,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return sessions.filter((item): item is AuditSessionMeta => item !== undefined);
   }
 
-  private async recordStrategyAudit(triggerSignature: string, precomputedReport?: unknown): Promise<void> {
-    const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
+  private async recordStrategyAudit(
+    triggerSignature: string,
+    precomputedReport?: unknown,
+    onlyMint?: string
+  ): Promise<void> {
+    const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))]
+      .filter(mint => !onlyMint || mint === onlyMint);
     if (monitoredMints.length === 0) return;
     const report = (precomputedReport ?? await this.listTradeFlows()) as {
       solUsdPrice?: Awaited<ReturnType<typeof fetchSolUsdPrice>>;
