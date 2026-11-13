@@ -27,6 +27,7 @@ Current documented Workers Free / Durable Objects Free allowances:
 - Workers: 100,000 requests/day, 10 ms CPU per invocation, 128 MB memory.
 - Durable Objects: 100,000 requests/day, 13,000 GB-seconds/day.
 - SQLite-backed Durable Object storage: 5 million row reads/day, 100,000 row writes/day, 5 GB stored data.
+- Each Durable Object `setAlarm()` counts as one row write; the coordinator uses a 60-second idle alarm and avoids unconditional per-minute snapshots.
 - Incoming Durable Object WebSocket messages use a 20:1 request-counting ratio.
 
 One 128 MB Durable Object kept active for 24 hours uses approximately 10,800 GB-seconds/day (0.125 GB × 86,400 seconds), about 83% of the 13,000 GB-second daily allowance. This leaves limited headroom. The one-minute Cron Trigger is limited to one coordinator and one small health/reconnect call.
@@ -70,6 +71,16 @@ Set the same random token in both environments:
 - Vercel production environment variable: `PAPER_EVENT_INGEST_TOKEN_V2` (encrypted)
 
 The Worker and Vercel API prefer the V2 name. The legacy `PAPER_EVENT_INGEST_TOKEN` remains a fallback during rotation. After changing either value, redeploy the Worker and Vercel app, then rerun the production ingestion smoke test. Never expose or commit the token.
+
+## Pause and resume observation safely
+
+Optional Worker secret: `PAPER_OBSERVATION_PAUSED`.
+
+- Set it to `true` to close provider streams and pause collection without deleting the active paper session.
+- Set it to `false` (or remove it) after the storage quota resets or capacity is increased; the one-minute coordinator check reacquires the PostgreSQL lease and reconnects.
+- The pause flag does not create positions, alter the ledger, or authorize paper entries.
+
+Use this when the Free plan's 100,000 Durable Object row-write daily allowance is exhausted. Cloudflare states that Free daily limits reset at 00:00 UTC; Workers Paid includes 50 million Durable Object row writes per month before usage charges. See the official [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) page.
 
 ## Deploy manually
 
