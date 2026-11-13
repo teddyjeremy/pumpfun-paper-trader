@@ -5,6 +5,11 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/smoke-ingestion.yml"
+      - "infra/cloudflare/worker/src/**"
+      - "src/server.ts"
+      - "src/persistence/**"
+      - "db/migrations/**"
+      - "scripts/verify-worker-ingestion.mjs"
   workflow_dispatch:
 
 permissions:
