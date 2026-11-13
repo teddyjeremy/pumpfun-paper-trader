@@ -1,6 +1,7 @@
 import {describe,expect,it} from "vitest";
 import {fetchExecutableRoundTripQuote} from "../src/ingestion/executable-quote-service.js";
 import type {OfflinePumpQuote} from "../src/ingestion/executable-paper-quote.js";
+import type {UnsignedInstructionFeeEvidence} from "../src/ingestion/solana-fee-estimator.js";
 
 const mint="So11111111111111111111111111111111111111112";
 const observedAt="2026-11-12T12:00:00.000Z";
@@ -17,7 +18,22 @@ function quote(side:"BUY"|"SELL",slot:number,amount:string):OfflinePumpQuote {
   if(side==="BUY") return {...common,venue:"PUMP_CURVE" as const,venueFeeBaseUnits:"0"};
   return {...common,venue:"PUMP_CURVE" as const,venueFeeBaseUnits:"1000000"};
 }
-describe("executable quote service",()=>{
+
+function exactFeeEvidence(networkFeeLamports:string,priorityFeeLamports:string):UnsignedInstructionFeeEvidence {
+  const estimate={
+    provider:"helius-solana-rpc" as const,commitment:"confirmed" as const,
+    networkFeeLamports,priorityFeeLamports,priorityFeeMicroLamportsPerCu:"1000",
+    computeUnitLimit:200_000,feeMessageSha256:"a".repeat(64),sampleCount:10,
+    firstSampleSlot:90,lastSampleSlot:99,observedSlot:100,
+    observedAt,priorityPercentile:75 as const
+  };
+  return {
+    status:"AVAILABLE",messageSha256:"a".repeat(64),
+    writableAccountKeys:["11111111111111111111111111111111"],
+    computeUnitLimit:200_000,estimate
+  };
+}
+\ndescribe("executable quote service",()=>{
   it("requires an exact-size fresh sell quote on the same venue and quote mint",async()=>{
     let calls=0;
     const result=await fetchExecutableRoundTripQuote({
