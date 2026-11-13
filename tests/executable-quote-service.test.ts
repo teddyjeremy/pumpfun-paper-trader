@@ -62,6 +62,33 @@ describe("executable quote service",()=>{
     expect(result.economics.meetsRoundTripCostLimit).toBe(true);
     expect(result.economics.meetsMinimumNetReturn).toBe(false);
   });
+
+  it("requires exact unsigned-message fee evidence for both buy and exact-size sell quotes",async()=>{
+    const calls:Array<{side:"BUY"|"SELL";amount:string}>=[];
+    const result=await fetchExecutableRoundTripQuote({
+      fetchQuote:async({side,amountBaseUnits})=>{
+        return side==="BUY"?quote("BUY",100,amountBaseUnits):{
+          ...quote("SELL",101,amountBaseUnits),inputAmountBaseUnits:amountBaseUnits
+        };
+      },
+      buildExactFeeEvidence:async({side,quote:raw})=>{
+        calls.push({side,amount:raw.inputAmountBaseUnits});
+        return exactFeeEvidence("5000","2000");
+      },
+      requireExactMessageFees:true,
+      helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
+        result:[{slot:99,prioritizationFee:1000}]
+      }),{status:200})},
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,
+      solUsd,now:()=>Date.parse(observedAt),executionDelayMs:100
+    });
+    expect(calls.map(item=>item.side)).toEqual(["BUY","SELL"]);
+    expect(calls[0]?.amount).toBe("100000000");
+    expect(calls[1]?.amount).toBe(result.buyQuote.outputAmountBaseUnits);
+    expect(result.exactFeeEvidence?.buy.status).toBe("AVAILABLE");
+    expect(result.exactFeeEvidence?.sell.status).toBe("AVAILABLE");
+    expect(result.paperEntryAuthorized).toBe(false);
+  });
   it("blocks when the sell quote does not match the exact buy output",async()=>{
     await expect(fetchExecutableRoundTripQuote({
       fetchQuote:async({side,amountBaseUnits})=>side==="BUY"?quote("BUY",100,amountBaseUnits):{
