@@ -92,13 +92,22 @@ describe("Helius Parsed Events historical launch discovery", () => {
     expect(body.budget.maxScannedTransactions).toBe(10_000);
   });
 
-  it("reports the exact billing field when the provider exceeds the bounded scan charge", async () => {
-    await expect(fetchPumpCreateScanPage({
-      startTime: 1_700, endTime: 1_900
-    }, { apiKey: "test", fetcher: async () => json({
-      data: [], paginationToken: null,
-      scan: { stoppedOn: "windowEnd", scannedTransactions: 10_000, matchedTransactions: 0, creditsCharged: 21 }
-    }) })).rejects.toThrow(/creditsCharged=21/);
+  it("accepts the observed 21-credit maximum and rejects higher scan charges", async () => {
+    const input = { startTime: 1_700, endTime: 1_900 };
+    const accepted = await fetchPumpCreateScanPage(input, {
+      apiKey: "test", fetcher: async () => json({
+        data: [], paginationToken: null,
+        scan: { stoppedOn: "windowEnd", scannedTransactions: 10_000, matchedTransactions: 0, creditsCharged: 21 }
+      })
+    });
+    expect(accepted.creditsCharged).toBe(21);
+
+    await expect(fetchPumpCreateScanPage(input, {
+      apiKey: "test", fetcher: async () => json({
+        data: [], paginationToken: null,
+        scan: { stoppedOn: "windowEnd", scannedTransactions: 10_000, matchedTransactions: 0, creditsCharged: 22 }
+      })
+    })).rejects.toThrow(/creditsCharged=22/);
   });
 
   it("retains empty budget pages and their pagination cursor for continuation", async () => {
