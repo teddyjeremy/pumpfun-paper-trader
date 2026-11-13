@@ -285,10 +285,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private async releasePostgresWorkerLease(): Promise<void> {
     if (!this.postgresLeaseHeld) return;
     try {
-      await this.postPostgresIngest("/internal/worker-lease", {
+      const response = await this.postPostgresIngest("/internal/worker-lease", {
         action: "release", leaseName: "pumpfun-paper-trader-coordinator",
         ownerId: this.postgresLeaseOwnerId
       });
+      if (!response.ok) throw new Error("PostgreSQL worker lease release was rejected.");
+      const result = await response.json() as { released?: boolean };
+      if (result.released !== true) throw new Error("PostgreSQL worker lease was not released by its owner.");
     } finally {
       this.postgresLeaseHeld = false;
     }
