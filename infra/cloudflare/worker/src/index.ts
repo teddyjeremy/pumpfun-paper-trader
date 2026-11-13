@@ -53,6 +53,7 @@ import {
 } from "../../../../src/ingestion/helius-backfill.js";
 import { assessHistoricalDecodeCoverage } from "../../../../src/ingestion/helius-backfill-coverage.js";
 import { assessHeliusGapRecovery } from "../../../../src/ingestion/helius-gap-recovery.js";
+import { fetchHeliusGapAddressHistory, type HeliusGapHistoryResume } from "../../../../src/ingestion/helius-gap-history.js";
 import { enqueueHistoricalBackfillSignatures } from "../../../../src/ingestion/helius-backfill-queue.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import { classifyWalletClusterRiskWithCoverage, evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
@@ -2914,6 +2915,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         });
         activeWork = null;
       }
+      await this.scanIndependentHeliusGapHistory().catch(() => undefined);
       await this.recoverCoveredHeliusGaps().catch(() => undefined);
     } catch {
       this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
@@ -2953,6 +2955,75 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     } finally {
       this.drainingHelius = false;
     }
+  }
+
+  /**
+   * Independently scan one closed WebSocket interruption per queue cycle.
+   * Cursor and accumulated pages live in Durable Object storage, so a Worker
+   * restart resumes from the last validated Helius signature boundary.
+   *
+   * This phase only establishes signature-history coverage. It deliberately
+   * does not mark the gap recovered: transaction decoding and Neon archive
+   * acknowledgements are separate proof requirements.
+   */
+  private async scanIndependentHeliusGapHistory(): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId || !this.status.enabled) return;
+    const gap = this.heliusState.coverageGaps.find(item =>
+      item.endedAt !== null && item.recoveredAt == null
+    );
+    if (!gap) return;
+    const subscription = this.heliusState.subscriptions.find(item => item.mint === gap.mint);
+    if (!subscription?.bondingCurve) return;
+    const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+    const saved = await this.ctx.storage.get<{
+      status: "SCANNING" | "SCANNED" | "INCOMPLETE";
+      resume?: HeliusGapHistoryResume;
+      signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
+      pagesScanned: number;
+      reason: string | null;
+      updatedAt: string;
+    }>(key);
+    if (saved?.status === "SCANNED") return;
+
+    const throttledFetcher: typeof fetch = async (input, init) => {
+      while (!this.heliusBucket.tryTake()) {
+        await new Promise(resolve => setTimeout(resolve, this.heliusBucket.retryAfterMs));
+        if (!this.status.enabled || this.activeSessionId !== sessionId) {
+          throw new Error("Helius gap scan paused because the paper session stopped.");
+        }
+      }
+      return fetch(input, init);
+    };
+    const result = await fetchHeliusGapAddressHistory(
+      subscription.bondingCurve,
+      gap,
+      { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed", fetcher: throttledFetcher },
+      throttledFetcher,
+      1_000,
+      saved?.resume
+    );
+    const next = {
+      status: result.complete ? "SCANNED" as const :
+        result.resume ? "SCANNING" as const : "INCOMPLETE" as const,
+      ...(result.resume ? { resume: result.resume } : {}),
+      signatures: result.signatures,
+      pagesScanned: result.pagesScanned,
+      reason: result.complete ? null : result.reason,
+      updatedAt: new Date().toISOString()
+    };
+    await this.ctx.storage.put(key, next);
+    await this.appendAudit(result.complete ? "OBSERVATION" : "DATA_GAP", gap.mint, {
+      provider: "helius",
+      independentGapHistory: next.status,
+      startedAt: gap.startedAt,
+      endedAt: gap.endedAt,
+      pagesScanned: result.pagesScanned,
+      signaturesScanned: result.signatures.length,
+      resumable: Boolean(result.resume),
+      reason: next.reason,
+      storageKey: key
+    }, `helius-gap-history:${sessionId}:${gap.mint}:${gap.startedAt}:${result.pagesScanned}`);
   }
 
   /**
