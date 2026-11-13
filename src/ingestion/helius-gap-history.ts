@@ -159,7 +159,7 @@ export async function fetchHeliusGapAddressHistory(
       return {
         complete: true,
         signatures: records.slice(endIndex, startIndex + 1),
-        pagesScanned: pageNumber + 1
+        pagesScanned: priorPages + pageNumber + 1
       };
     }
 
