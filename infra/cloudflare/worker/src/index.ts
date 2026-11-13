@@ -53,7 +53,7 @@ import {
 import { assessHistoricalDecodeCoverage } from "../../../../src/ingestion/helius-backfill-coverage.js";
 import { enqueueHistoricalBackfillSignatures } from "../../../../src/ingestion/helius-backfill-queue.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
-import { evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
+import { classifyWalletClusterRiskWithCoverage, evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
 import { collectCompleteWalletFundingEvidence, type CompleteWalletFundingEvidenceResult } from "../../../../src/ingestion/complete-wallet-history.js";
 import { collectCompleteWalletTransactionHistory, type CompleteWalletTransactionHistoryResult } from "../../../../src/ingestion/complete-wallet-transaction-history.js";
 import {
@@ -1695,11 +1695,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const holderCensusComplete = holder?.status === "OBSERVED" &&
         holder.snapshot.dataComplete === true &&
         holder.snapshot.coverage === "FULL_TOKEN_ACCOUNT_CENSUS_STABLE";
-      const status = evaluatedRisk.status === "REJECT_OBSERVED"
-        ? "REJECT_OBSERVED" as const
-        : walletHistoryComplete && holderCensusComplete &&
-          evaluatedRisk.attributionStatus === "NO_HIGH_CONFIDENCE_LINKS"
-          ? "PASS_COMPLETE" as const : "WATCH" as const;
+      const status = classifyWalletClusterRiskWithCoverage({
+        risk: evaluatedRisk,
+        fullWalletTransactionHistoryComplete: walletHistoryComplete,
+        fullHolderCensusComplete: holderCensusComplete
+      });
       return {
         ...evaluatedRisk, status,
         collection: snapshot ?? null,
