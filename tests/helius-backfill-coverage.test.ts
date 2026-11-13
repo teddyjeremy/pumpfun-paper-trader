@@ -39,4 +39,16 @@ describe("historical transaction decode coverage",()=>{
  it("rejects a signature marked both verified and failed",()=>{
   expect(()=>assessHistoricalDecodeCoverage({...base,failedSignatures:["sig-a","sig-c"]})).toThrow();
  });
+ it("rejects unrelated queue entries instead of silently filtering them",()=>{
+  expect(()=>assessHistoricalDecodeCoverage({...base,queueSignatures:["other"]})).toThrow();
+ });
+ it("rejects archived signatures that were never successfully decoded",()=>{
+  expect(()=>assessHistoricalDecodeCoverage({...base,archivedSignatures:["sig-a","sig-c"]})).toThrow();
+ });
+ it("rejects terminal signatures that remain queued",()=>{
+  expect(()=>assessHistoricalDecodeCoverage({...base,queueSignatures:["sig-a"]})).toThrow();
+ });
+ it("rejects duplicate signatures in the source backfill window",()=>{
+  expect(()=>assessHistoricalDecodeCoverage({...base,state:{...state,signatures:[...signatures,signatures[0]!]} })).toThrow();
+ });
 });
