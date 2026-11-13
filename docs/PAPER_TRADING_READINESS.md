@@ -26,6 +26,8 @@ This document is the operational checklist for reaching the first verified simul
 - [x] Historical terminal outcomes must agree with the original RPC `err` field; successful transactions cannot be marked failed, and failed/unknown-status transactions cannot be marked verified.
 - [x] Address-history pagination rejects duplicate records, non-newest-to-oldest ordering, repeated prior-page cursors, and cross-page movement to newer slots/timestamps.
 - [x] Worker passes unfiltered stored evidence to the integrity checker and fails closed on inconsistent state.
+- [x] PostgreSQL now persists the Helius provider/commitment, bonding-curve scan address, launch-window end time, and final consumed page slot/time alongside the signature cursor.
+- [x] Decode completion is tied to the exact persisted signature window; a changed window revokes the previous completion, and replay reads exclude archived transactions outside the current window.
 - [ ] Confirm the live backfill worker archives every expected signature and records verified/failed terminal outcomes.
 - [x] Worker marks monitored mints incomplete immediately on Helius WebSocket transport errors, connection failures, and socket closure; transport errors force the close/reconnect path.
 - [x] Exit-window evidence rejects transaction buffers whose per-window event counts do not reconcile with the claimed complete-flow snapshots.
