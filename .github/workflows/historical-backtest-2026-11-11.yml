@@ -71,8 +71,14 @@ jobs:
 
       - name: Replay selected launches in resumable batches of 20
         run: |
+          FIRST_BATCH=true
           while true; do
-            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=30000
+            RETRY_FLAG="--retry-incomplete=false"
+            if [ "$FIRST_BATCH" = true ]; then
+              RETRY_FLAG="--retry-incomplete=true"
+              FIRST_BATCH=false
+            fi
+            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=30000 "$RETRY_FLAG"
             STATUS=$(node -e 'const s=require("./artifacts/batch-summary-"+process.env.BACKTEST_DATE+".json"); process.stdout.write(String(s.status))')
             if [ "$STATUS" != "BATCH_COMPLETE" ]; then
               break
