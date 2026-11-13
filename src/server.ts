@@ -274,20 +274,26 @@ app.get("/api/strategy/replay", async (request, reply) => {
         if (!payload) continue;
         if (payload.evidenceType === "WALLET_CLUSTER") {
           const funding = asRecord(payload.fundingEvidence);
-          const observedAt = typeof funding?.observedAt === "string"
-            ? Date.parse(funding.observedAt) / 1_000
-            : Date.parse(evidenceEvent.occurredAt) / 1_000;
+          const fullHistory = asRecord(payload.fullWalletHistory);
+          const observedAt = typeof fullHistory?.observedAt === "string"
+            ? Date.parse(fullHistory.observedAt) / 1_000
+            : typeof funding?.observedAt === "string"
+              ? Date.parse(funding.observedAt) / 1_000
+              : Date.parse(evidenceEvent.occurredAt) / 1_000;
           if (!Number.isSafeInteger(Math.floor(observedAt)) || observedAt < 0) continue;
-          const requested = Array.isArray(funding?.requestedWallets) ? funding.requestedWallets : [];
-          const covered = Array.isArray(funding?.walletsCovered) ? funding.walletsCovered : [];
-          const complete = funding?.coverage === "FULL_WALLET_HISTORY" &&
-            funding?.status === "OBSERVED" && funding.dataComplete === true &&
-            funding.walletSetComplete === true && requested.length > 0 &&
+          const requested = Array.isArray(fullHistory?.requestedWallets)
+            ? fullHistory.requestedWallets
+            : Array.isArray(funding?.requestedWallets) ? funding.requestedWallets : [];
+          const covered = Array.isArray(fullHistory?.walletsCovered) ? fullHistory.walletsCovered : [];
+          const complete = fullHistory?.coverage === "FULL_WALLET_HISTORY_WITHIN_CONFIGURED_CAP" &&
+            fullHistory?.status === "OBSERVED" && fullHistory.dataComplete === true &&
+            fullHistory.walletSetComplete === true && requested.length > 0 &&
             requested.length === covered.length &&
             requested.every(wallet => typeof wallet === "string" && covered.includes(wallet));
           walletClusterEvidenceTimeline.push({ observedAt: Math.floor(observedAt), complete });
-          if (Array.isArray(funding?.links)) {
-            for (const rawLink of funding.links) {
+          for (const source of [funding, fullHistory]) {
+            if (!Array.isArray(source?.links)) continue;
+            for (const rawLink of source.links) {
               const link = asRecord(rawLink);
               if (!link || link.mint !== row.mint || typeof link.walletA !== "string" ||
                   typeof link.walletB !== "string" || !Number.isInteger(link.confidenceBps) ||
