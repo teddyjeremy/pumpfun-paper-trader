@@ -221,6 +221,67 @@ describe("historical strategy replay", () => {
     expect(result.outcome?.label).toBe("UNKNOWN");
     expect(result.outcome?.netFinalReturnPct).toBeNull();
   });
+  it("reports net expectancy, profit factor and drawdown on chronological holdout candidates", () => {
+    const replays = Array.from({ length: 40 }, (_, index) => {
+      const positive = index % 2 === 0;
+      const launchBlockTime = index;
+      return {
+        mint, launchBlockTime, horizonSeconds: 600, decodeComplete: true,
+        decodeReason: null, verifiedTransactionCount: 10, verifiedTradeCount: 10,
+        snapshots: [], firstSetup: {
+          pullbackVolumeVsImpulsePct: positive ? 10 : 80,
+          reclaimVolumeVsPullbackPct: positive ? 200 : 50
+        },
+        outcome: {
+          entryAt: launchBlockTime + 10, entryPriceQuotePerToken: 1,
+          maxFavorableExcursionPct: positive ? 30 : 2,
+          maxAdverseExcursionPct: positive ? 5 : 30,
+          grossFinalReturnPct: positive ? 20 : -15,
+          netFinalReturnPct: positive ? 15 : -10,
+          roundTripCostPct: 5, label: positive ? "SUCCESS" : "FAILURE",
+          labelReason: "Synthetic calibration fixture"
+        },
+        status: "COMPLETE"
+      } as unknown as import("../src/strategy/historical-replay.js").HistoricalCoinReplay;
+    });
+    const result = calibrateVolumeThresholds(replays);
+    expect(result.status).toBe("CALIBRATION_CANDIDATE");
+    expect(result.recommended?.training).toMatchObject({
+      winRate: 1, expectancyNetPct: 15, profitFactor: null
+    });
+    expect(result.recommended?.holdout).toMatchObject({
+      winRate: 1, expectancyNetPct: 15, profitFactor: null
+    });
+    expect(result.recommended?.holdout.maxDrawdownPct).toBe(0);
+  });
+
+  it("rejects a volume threshold that does not generalize to positive net holdout returns", () => {
+    const replays = Array.from({ length: 40 }, (_, index) => {
+      const positive = index % 2 === 0;
+      const holdout = index >= 28;
+      const launchBlockTime = index;
+      return {
+        mint, launchBlockTime, horizonSeconds: 600, decodeComplete: true,
+        decodeReason: null, verifiedTransactionCount: 10, verifiedTradeCount: 10,
+        snapshots: [], firstSetup: {
+          pullbackVolumeVsImpulsePct: positive ? 10 : 80,
+          reclaimVolumeVsPullbackPct: positive ? 200 : 50
+        },
+        outcome: {
+          entryAt: launchBlockTime + 10, entryPriceQuotePerToken: 1,
+          maxFavorableExcursionPct: 30, maxAdverseExcursionPct: 5,
+          grossFinalReturnPct: 20,
+          netFinalReturnPct: holdout ? -10 : (positive ? 15 : -10),
+          roundTripCostPct: 5, label: positive ? "SUCCESS" : "FAILURE",
+          labelReason: "Synthetic holdout failure fixture"
+        },
+        status: "COMPLETE"
+      } as unknown as import("../src/strategy/historical-replay.js").HistoricalCoinReplay;
+    });
+    expect(calibrateVolumeThresholds(replays).status).toBe("NO_GENERALIZATION");
+    expect(calibrateVolumeThresholds(replays).recommended).toBeNull();
+  });
+
   it("refuses to recommend volume thresholds from a small sample", () => {
     const replay = replayHistoricalCoin({
       mint, transactions: [verifiedTransaction()], launchBlockTime: 0,
