@@ -6,6 +6,7 @@ export interface PaperEntryReadinessInput {
   buyAllowed: boolean;
   executableQuoteAvailable: boolean;
   hasBuyAndSellQuotes: boolean;
+  unsignedPlanAuthorized: boolean;
 }
 
 /**
@@ -21,5 +22,6 @@ export function canCommitPaperEntry(input: PaperEntryReadinessInput): boolean {
     input.strategyDecision === "BUY" &&
     input.buyAllowed &&
     input.executableQuoteAvailable &&
-    input.hasBuyAndSellQuotes;
+    input.hasBuyAndSellQuotes &&
+    input.unsignedPlanAuthorized;
 }
