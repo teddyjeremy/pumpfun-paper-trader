@@ -39,7 +39,7 @@ import {
   type CandidateMonitoringEvidence
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
-import { buildCandidateTradeFlows, isSolQuoteMint, SOL_QUOTE_MINT } from "../../../../src/ingestion/trade-flow.js";
+import { buildCandidateTradeFlows, isSolQuoteMint, SOL_QUOTE_MINT, type CandidateTradeFlow } from "../../../../src/ingestion/trade-flow.js";
 import { fetchCompleteHolderConcentration, type HolderConcentrationResult } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
 import { fetchSolUsdPrice } from "../../../../src/ingestion/sol-usd-price.js";
@@ -78,7 +78,7 @@ import {
 } from "../../../../src/paper/exit-lifecycle.js";
 import { createUnverifiedMarketState } from "../../../../src/paper/pump-market-state.js";
 import { refreshPumpMarketStateFromHelius } from "../../../../src/ingestion/helius-pump-market.js";
-import { buildExitWindowObservations } from "../../../../src/strategy/exit-window-builder.js";
+import { buildPumpCurveExitWindowEvidence } from "../../../../src/strategy/pump-curve-exit-window-evidence.js";
 import { buildExecutablePaperQuote } from "../../../../src/ingestion/executable-paper-quote.js";
 
 interface Env {
@@ -554,15 +554,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
     const openPositions = portfolio?.positions.filter(position => position.status !== "CLOSED") ?? [];
     if (openPositions.length === 0) return;
-    const flowReport = await this.listTradeFlows() as {
-      flows: Array<{
-        mint: string; quoteMint: string | null; dataComplete: boolean;
-        windows: Array<{
-          startTime: number; endTime: number; buyQuoteVolume: string;
-          sellQuoteVolume: string; uniqueBuyers: number; uniqueSellers: number;
-        }>;
-      }>;
-    };
+    const flowReport = await this.listTradeFlows() as { flows: CandidateTradeFlow[] };
 
     const config = { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const };
     const identity = await deriveNonSigningVirtualTraderIdentity();
@@ -591,53 +583,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           config
         });
         await this.ctx.storage.put(`paper_market_state:${sessionId}:${position.mint}`, marketState);
-        const quoteMint = marketState.status === "LIVE_CURVE"
+        const marketQuoteMint = marketState.status === "LIVE_CURVE"
           ? marketState.curve?.quoteMint
           : marketState.pool?.quoteMint;
         const flow = flowReport.flows.find(item =>
-          item.mint === position.mint && item.quoteMint === quoteMint
-        );
-        const latestFlowWindows = flow?.windows.slice(-3) ?? [];
-        const consecutiveFlowWindows = latestFlowWindows.length === 3 &&
-          latestFlowWindows[1]!.startTime === latestFlowWindows[0]!.startTime + 1 &&
-          latestFlowWindows[2]!.startTime === latestFlowWindows[1]!.startTime + 1;
-        // PumpTradeEvent currently provides Pump bonding-curve observations;
-        // do not relabel those historical events as PumpSwap after migration.
-        const exitWindowSamples = quoteMint && marketState.status === "LIVE_CURVE" &&
-          isSolQuoteMint(quoteMint)
-          ? latestFlowWindows.map(window => {
-              const events = this.verifiedTransactions.flatMap(transaction => transaction.tradeEvents)
-                .filter(event => event.mint === position.mint && event.quoteMint === quoteMint &&
-                  Number(event.timestamp) >= window.startTime && Number(event.timestamp) < window.endTime)
-                .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
-              const priceOf = (event: (typeof events)[number] | undefined): number | null => {
-                if (!event || event.virtualQuoteReserves <= 0n || event.virtualTokenReserves <= 0n) return null;
-                const scaled = (event.virtualQuoteReserves * 1_000_000_000_000n) / event.virtualTokenReserves;
-                const price = Number(scaled) / 1_000_000_000_000;
-                return Number.isFinite(price) && price > 0 ? price : null;
-              };
-              return {
-                mint: position.mint,
-                marketPhase: "bonding_curve" as const,
-                venue: "pump_curve" as const,
-                quoteMint,
-                endedAtMs: window.endTime * 1_000,
-                windowSeconds: 2 as const,
-                complete: Boolean(flow?.dataComplete && consecutiveFlowWindows),
-                buyQuoteVolumeBaseUnits: window.buyQuoteVolume,
-                sellQuoteVolumeBaseUnits: window.sellQuoteVolume,
-                uniqueBuyers: window.uniqueBuyers,
-                uniqueSellers: window.uniqueSellers,
-                startPriceQuotePerToken: priceOf(events[0]),
-                endPriceQuotePerToken: priceOf(events[events.length - 1]),
-                // Real quote reserves are available on verified Pump curve
-                // trade events; holder-distribution time series is not.
-                quoteLiquidityBaseUnits: events.at(-1)?.realQuoteReserves.toString() ?? null,
-                largeHolderDistributionDetected: null
-              };
-            })
-          : [];
-        const exitWindows = buildExitWindowObservations(exitWindowSamples);
+          item.mint === position.mint && item.quoteMint === marketQuoteMint
+        ) ?? null;
+        const exitWindows = buildPumpCurveExitWindowEvidence({
+          marketState, flow, transactions: this.verifiedTransactions
+        });
         if (marketState.status !== "LIVE_CURVE" &&
             marketState.status !== "MIGRATED_POOL_VERIFIED") {
           await this.appendAudit("ERROR", position.mint, {
