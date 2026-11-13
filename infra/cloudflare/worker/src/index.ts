@@ -285,10 +285,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private async releasePostgresWorkerLease(): Promise<void> {
     if (!this.postgresLeaseHeld) return;
     try {
-      await this.postPostgresIngest("/internal/worker-lease", {
+      const response = await this.postPostgresIngest("/internal/worker-lease", {
         action: "release", leaseName: "pumpfun-paper-trader-coordinator",
         ownerId: this.postgresLeaseOwnerId
       });
+      if (!response.ok) throw new Error("PostgreSQL worker lease release was rejected.");
+      const result = await response.json() as { released?: boolean };
+      if (result.released !== true) throw new Error("PostgreSQL worker lease was not released by its owner.");
     } finally {
       this.postgresLeaseHeld = false;
     }
@@ -796,6 +799,67 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         verifiedTransactionsRetained: this.verifiedTransactions.length,
         heliusCoverage: "GAP_UNTIL_RESUBSCRIBED"
       }, `restart:${crypto.randomUUID()}`);
+    }
+  }
+
+  /**
+   * Prove the deployed Worker secret can write an isolated, non-trading
+   * audit session to Vercel/Neon. This never starts the market streams or
+   * creates a position, quote, fill, or transaction.
+   */
+  async smokeIngestion(): Promise<{
+    ok: true; sessionId: string; eventPersisted: true; idempotentReplay: true;
+    leaseAcquired: true; leaseHeartbeat: true; leaseRetained: boolean; leaseReleased: boolean;
+  }> {
+    await this.hydrate();
+    if (!this.postgresIngestConfigured) {
+      throw new Error("Worker-to-Neon ingestion is not configured.");
+    }
+    const keepLease = this.status.enabled;
+    try {
+      await this.acquirePostgresWorkerLease();
+      if (!this.postgresLeaseHeld) throw new Error("Worker could not acquire its Neon lease.");
+      const heartbeat = await this.heartbeatPostgresWorkerLease();
+      if (!heartbeat) throw new Error("Worker Neon lease heartbeat failed.");
+      const sessionId = `smoke-test-worker-${crypto.randomUUID()}`;
+      const startedAt = new Date().toISOString();
+      const stoppedAt = new Date(Date.parse(startedAt) + 1).toISOString();
+      const strategyVersion = "smoke-ingestion-v1";
+      const events: StoredAuditEvent[] = [
+      {
+        sessionId, sequence: 1, eventId: `smoke-started:${sessionId}`,
+        kind: "SESSION_STARTED", occurredAt: startedAt, mint: null,
+        strategyVersion, data: { smokeTest: true, source: "worker-to-neon-ingestion" }
+      },
+      {
+        sessionId, sequence: 2, eventId: `smoke-stopped:${sessionId}`,
+        kind: "SESSION_STOPPED", occurredAt: stoppedAt, mint: null,
+        strategyVersion, data: { smokeTest: true, source: "worker-to-neon-ingestion" }
+      }
+    ];
+
+      const firstResponse = await this.postPostgresIngest("/internal/paper-events", { sessionId, events });
+      if (!firstResponse.ok) throw new Error("Worker event ingestion was rejected.");
+      const first = await firstResponse.json() as { ok?: boolean; inserted?: number; lastSequence?: number };
+      if (first.ok !== true || first.inserted !== 2 || first.lastSequence !== 2) {
+        throw new Error("Worker event ingestion did not acknowledge both persisted events.");
+      }
+
+      const replayResponse = await this.postPostgresIngest("/internal/paper-events", { sessionId, events });
+      if (!replayResponse.ok) throw new Error("Worker idempotent event replay was rejected.");
+      const replay = await replayResponse.json() as {
+        ok?: boolean; inserted?: number; duplicates?: number; lastSequence?: number;
+      };
+      if (replay.ok !== true || replay.inserted !== 0 || replay.duplicates !== 2 || replay.lastSequence !== 2) {
+        throw new Error("Worker event replay was not idempotent.");
+      }
+      return {
+        ok: true, sessionId, eventPersisted: true, idempotentReplay: true,
+        leaseAcquired: true, leaseHeartbeat: true,
+        leaseRetained: keepLease, leaseReleased: !keepLease
+      };
+    } finally {
+      if (!keepLease && this.postgresLeaseHeld) await this.releasePostgresWorkerLease();
     }
   }
 
@@ -3463,6 +3527,13 @@ export default {
 
     if (!(await authorized(request, env))) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (url.pathname === "/smoke-ingestion" && request.method === "POST") {
+      try {
+        return Response.json(await coordinator.smokeIngestion());
+      } catch {
+        return Response.json({ error: "Worker-to-Vercel/Neon ingestion smoke test failed." }, { status: 503 });
+      }
     }
     if (url.pathname === "/start" && request.method === "POST") {
       return Response.json(await coordinator.start());

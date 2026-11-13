@@ -1,14 +1,20 @@
 # Paper-trading readiness
 
+> **Verified status correction (2026-11-13):** PR #77 and PR #78 are merged. The PR #78 Vercel production deployment is READY; the Cloudflare Worker deployment from PR #77 succeeded. Neon migration workflow run [43487821121](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43487821121) completed successfully and applied pending migrations through `0010`. The Nov 12 historical replay is running in [Actions run 43488935615](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43488935615). These milestones do **not** mean forward paper trading is enabled: reviewed calibration and the deployed Worker-to-Neon simulated entry/exit acceptance test remain outstanding. Keep `tradingReady=false`.
+>
+> **Concurrent operation:** Historical replay and a forward live-market-data paper session are independent workloads and do not need to wait for one another to finish. They may overlap after migrations are applied and each workload's own preflight passes. Historical replay uses its dated artifacts/checkpoint and shared 30,000-credit historical ceiling; the forward session uses its own Worker lease, paper portfolio, event stream, and approved wallet-history caps. Do not share checkpoints, portfolio state, or leases. Monitor total Helius account usage across both workloads; do not increase approved caps or refresh frequency. Historical replay is research-only and must never toggle the live Worker or alter the paper portfolio. The forward session remains blocked until its separate production acceptance test passes.
+
 Last reviewed: 2026-11-13
 
 ## Latest verification snapshot — 2026-11-13
 
-- [x] Latest PR head `447672ee336b1f3a0148b6a3256a2d34dcb49440` passed CI run [43482636593](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43482636593): dependency installation, application TypeScript checks, dedicated historical-script TypeScript checks, tests, build, and Cloudflare Worker bundle validation.
-- [x] PR #77 is open and mergeable; it has not been merged or deployed. Production remains on main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
-- [x] Operator-approved bounded full-wallet-history collection is enabled in the PR branch configuration and enforced in Worker code: no more than 16 wallets and 2 pages per wallet per refresh. Wallet sets exceeding the cap remain incomplete. This branch setting is not deployed; production remains unchanged until the planned release.
-- [ ] Historical replay has not yet run through the new Parsed Events Scan workflow; the workflow must first be present on the default branch.
-- [ ] The new Neon migrations, production Worker release, reviewed calibration, and deployed Worker-to-Neon entry/exit acceptance remain outstanding. `tradingReady` must remain false; do not start a trade-producing forward session yet.
+- [x] PR #77 (Worker readiness) and PR #78 (historical dashboard integration) are merged; PR #78 production Vercel deployment is READY and the Worker deployment workflow succeeded.
+- [x] Ordered Neon migration workflow [43487821121](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43487821121) completed successfully, applying pending migrations through `0010`. Production migration-ledger verification remains part of the smoke/acceptance check.
+- [x] Concurrent historical replay and forward paper operation are documented as isolated workloads.
+- [x] The Nov 12 historical Parsed Events Scan replay is running in [workflow run 43488935615](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43488935615); candidate quality, completeness, artifacts and credit ledger have not yet been reviewed.
+- [ ] Reviewed strategy calibration is not configured; do not invent or promote thresholds.
+- [ ] Production Worker-to-Neon event ingestion, fenced lease, simulated entry/exit, restart recovery and dashboard reconciliation have not passed end-to-end acceptance. Keep `tradingReady=false`.
+- [ ] PR #81 is the single consolidated release containing the documentation, historical resume and Worker ingestion smoke changes. Its exact-head GitHub CI must pass before merge; preview deployment rate limits do not affect the existing production deployment.
 
 ## Current decision
 
@@ -20,14 +26,14 @@ This document is the operational checklist for reaching the first verified simul
 
 ### 1. CI and release integrity
 
-- [x] PR head `690d9e89d6e3d6284308281d8bc9a23addde19e6` passed [GitHub CI run 43423726899](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43423726899): `npm run check` and Cloudflare Worker bundle validation.
-- [x] Historical pagination, PostgreSQL scan-provenance migration, decode-completion revocation, and current-window replay filtering passed [GitHub CI run 43428197546](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43428197546): TypeScript checks, PostgreSQL-backed integration tests, full test suite, build, and Cloudflare Worker bundle validation.
-- [x] Production dashboard deployment `dpl_BARieVKofhUX76xk1JpT3LUqjyVT` is READY at [pumpfun-paper-trader-six.vercel.app](https://pumpfun-paper-trader-six.vercel.app), deployed from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
-- [x] Production Worker deployment succeeded in [Cloudflare deployment workflow 43378493964](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43378493964); deployed version is `1dac036e-76c4-4ff6-90bc-37345d114c3b` from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
-- [ ] Production Worker smoke health and a complete simulated entry/exit lifecycle remain unverified. The deployed main-branch code still reports `tradingReady=false`; PR #77 is not deployed.
-- [x] PostgreSQL-backed integration tests pass in the CI test suite.
-- [ ] The final PR head is reviewed and the merge is performed only against that exact tested head. Current PR head is `447672ee336b1f3a0148b6a3256a2d34dcb49440`; latest CI is green, but the PR remains open.
-- [ ] Production smoke tests pass after the single planned deployment.
+- [x] PR #77 (Worker readiness) and PR #78 (historical dashboard integration) are merged.
+- [x] Vercel production deployment for PR #78 merge commit `5a24c70cb29695c24e9fd0a6fd94c5b481af4907` is READY at [pumpfun-paper-trader-six.vercel.app](https://pumpfun-paper-trader-six.vercel.app).
+- [x] Cloudflare Worker deployment succeeded; current deployed Worker version is `98165354-3d72-46c3-82f2-435f27130fea` (100% traffic). The deployed configuration includes the approved full-wallet-history caps (16 wallets, 2 pages per wallet), ingestion URL, and the required secret bindings.
+- [x] Readiness documentation changes passed [CI run 43490724586](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43490724586) before consolidation into PR #81.
+- [x] Historical discovery resume fix passed [CI run 43490426078](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43490426078) before consolidation into PR #81.
+- [ ] Production Worker health, authenticated event-ingestion acknowledgement and production lease heartbeat remain unverified end to end. The public health endpoints could not be independently reached from this check, and secret values are intentionally not exposed.
+- [ ] Complete deployed simulated entry/exit lifecycle and dashboard reconciliation remain unverified.
+- [ ] Keep production `tradingReady=false`; no paper session has passed the production acceptance gate.
 
 ### 2. Historical data completeness
 
@@ -144,8 +150,8 @@ Until these items pass, dynamic exhaustion remains disabled. Protective exits st
 
 - [x] Implement independent Helius WebSocket-gap history scans with durable cursors, per-signature verification, and Neon-acknowledged transaction archival. Recovery remains fail-closed until both boundary anchors, every terminal transaction outcome, and every successful transaction archive are proven.
 - [ ] Verify an actual production WebSocket interruption is scanned, decoded, archived to Neon, and only then marked recovered.
-- [x] Database migrations 0001–0007 have been applied in the configured environment (deployment state still requires verification).
-- [ ] Verify production connection and migration version.
+- [x] Ordered Neon migration workflow run [43487821121](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43487821121) completed successfully and applied pending migrations through `0010`; confirm the target production database migration ledger during the end-to-end smoke test.
+- [ ] Verify production database connectivity and read back the applied migration version from the same Neon database used by the deployed API.
 - Production Vercel environment contains `DATABASE_URL` and `PAPER_EVENT_INGEST_TOKEN`; Cloudflare has `PAPER_EVENT_INGEST_URL` pointed at the dashboard alias and a `PAPER_EVENT_INGEST_TOKEN` secret binding. The secret values are write-only, so matching and successful event ingestion still need an end-to-end acknowledgement.
 - [ ] Persist paper entries, exits, trade state, portfolio snapshots, and append-only events.
 - [ ] Enforce idempotency keys and unique constraints for entry/exit transitions.
@@ -165,16 +171,14 @@ Until these items pass, dynamic exhaustion remains disabled. Protective exits st
 
 Do not rotate the shared ingestion token without coordinated authorization to update both environments. Never put the token value in repository documentation, commits, logs, or chat.
 
-### 10. Single-batch merge and deployment
+### 10. Release discipline
 
-- [ ] Complete and test all changes on the existing `batch/unsigned-execution-readiness` branch and PR #77.
-- [ ] Keep changes batched; do not repeatedly deploy production during implementation.
-- [x] `vercel.json` keeps `main` deployments enabled and disables Vercel preview deployments for `batch/unsigned-execution-readiness`; no new preview deployment was created after the configuration commit. The production alias remains on main.
-- [ ] Review the final diff and all CI jobs on the exact PR head.
-- [ ] Merge only when all required checks are green and the integration tests pass.
-- [ ] Perform the planned production deployment once.
-- [ ] Run production smoke tests with paper mode only and verify persistence/dashboard integration.
-- [ ] Keep live signing and submission disabled.
+- [x] PR #77 and PR #78 were merged after required checks passed; their production releases are already complete.
+- [x] Keep changes batched and avoid repeated Vercel production deployments during preparation.
+- [ ] Review and merge the single consolidated PR #81 only after its exact head and GitHub CI result are reviewed; do not merge superseded PRs #79 or #80 separately.
+- [ ] After PR #81 is merged, rerun the Nov 12 historical workflow from its latest artifact checkpoint; do not spend beyond the existing 5,000-credit discovery allocation or the shared 30,000-credit ceiling.
+- [ ] Perform the deployed paper-only Worker/Neon acceptance test before starting a forward session.
+- [ ] Keep live signing and transaction submission disabled.
 
 ## Historical backtest tooling
 
@@ -184,7 +188,7 @@ Do not rotate the shared ingestion token without coordinated authorization to up
 - [x] Process deep replay one coin at a time, save a separate mint-keyed coin artifact, and checkpoint the next candidate after each completed coin. Reserve per-coin credits before starting so a budget stop does not publish a partial coin as complete.
 - [x] Enforce the shared 30,000-credit ceiling including the 16,778-credit legacy sunk spend, with 5,000 for new discovery and 500 for screening.
 - [x] Rank only selected coins belonging to the matching date/discovery/screen/replay checkpoint; unrelated or stale files are excluded.
-- [ ] Manually dispatch the November 12, 2026 workflow with previous run ID `43442196641`, then inspect the Parsed Events Scan access result, actual credit ledger, candidate shortlist and per-coin artifacts. The workflow has not yet been run with the replacement discovery.
+- [x] Manually dispatched the November 12, 2026 workflow with previous run ID `43442196641`; [run 43488935615](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43488935615) found 11 verified launches but ended incomplete because 89 buckets had unverified selected signatures. The artifact is saved and must be resumed after PR #80 fixes cursor continuation. Inspect the final access result, credit ledger, shortlist and per-coin artifacts before treating the date as complete.
 - [ ] Build complete historical wallet/holder evidence and verified fee-inclusive entry/exit execution evidence before using replay to estimate profitability.
 - [ ] Use a separate control sample of rejected/low-activity launches before making population-wide claims; the top-30% shortlist is activity-biased and is for triage only.
 
@@ -215,7 +219,7 @@ If any item fails, keep `tradingReady=false` and report the exact blocker. Do no
 ## Current known blockers
 
 - Historical buyer-set provenance and complete wallet transaction-history clearance are not yet proven end to end.
-- Production full wallet transaction-history collection remains disabled by default, including on the PR branch. Enabling the bounded collector (16 wallets, 2 pages each) is a separate operator decision after Helius credit usage is estimated and approved.
+- The bounded full wallet transaction-history collector is enabled in the deployed Worker configuration with the approved limits of at most 16 wallets and 2 pages per wallet per candidate refresh. Verify real candidate coverage and actual Helius credit usage; retain UNKNOWN/WATCH when the cap prevents complete evidence.
 - No empirically validated and operator-reviewed volume calibration is configured in production; the Worker now accepts only an explicit approved payload and remains fail-closed without it.
 - Complete contiguous rolling event-stream coverage is not yet available; PumpSwap event decoding and multi-window exhaustion evidence remain outstanding.
 - The Worker now treats the paper portfolio as the simulated payer budget and previews stake, both exact fee legs, and refundable ATA/accumulator rent before an entry. Actual Worker-to-Vercel/Neon ingestion and production account-state/rent reconciliation remain unverified; quote-only unsigned plans continue to return `paperEntryAuthorized=false`.

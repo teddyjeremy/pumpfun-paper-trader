@@ -1,24 +1,19 @@
 #!/usr/bin/env node
 /**
- * Safe production smoke test for the Cloudflare Worker -> Vercel -> Neon path.
- *
- * It reads Worker health/status and uses a uniquely named, short-lived
- * PostgreSQL lease to prove that the shared ingestion token authenticates and
- * the Vercel API can write to the migrated database. It never starts/stops the
- * coordinator, submits paper events, creates trades, or signs transactions.
+ * Safe production smoke test for the deployed Cloudflare Worker -> Vercel -> Neon path.
+ * The Worker writes a uniquely tagged, stopped audit-only session and retries the
+ * same two events to prove persistence and idempotency. No market streams start,
+ * no positions/quotes/fills are created, and no Solana transaction is signed or sent.
  */
-import { randomUUID } from "node:crypto";
-
-const required = ["PAPER_WORKER_URL", "PAPER_WORKER_CONTROL_TOKEN",
-  "PAPER_EVENT_INGEST_URL", "PAPER_EVENT_INGEST_TOKEN"];
+const required = ["PAPER_WORKER_CONTROL_TOKEN"];
 const missing = required.filter((key) => !process.env[key]);
 if (missing.length) {
   console.error(`Missing required environment variables: ${missing.join(", ")}`);
   process.exit(2);
 }
 
-const workerUrl = new URL(process.env.PAPER_WORKER_URL);
-const apiUrl = new URL(process.env.PAPER_EVENT_INGEST_URL);
+const workerUrl = new URL(process.env.PAPER_WORKER_URL ?? "https://pumpfun-paper-worker.teddyjeremy12.workers.dev");
+const apiUrl = new URL(process.env.PAPER_EVENT_INGEST_URL ?? "https://pumpfun-paper-trader-six.vercel.app");
 if (workerUrl.protocol !== "https:" || apiUrl.protocol !== "https:") {
   console.error("Production smoke tests require HTTPS endpoints.");
   process.exit(2);
@@ -51,9 +46,6 @@ const check = (name, ok, detail) => {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}: ${detail}`);
 };
 
-let leaseName;
-let ownerId;
-let acquired = false;
 let failure;
 try {
   const healthResponse = await fetch(new URL("/health", workerUrl), {
@@ -62,9 +54,7 @@ try {
   const health = await healthResponse.json();
   check("Worker public health", healthResponse.ok && health.service === "pumpfun-paper-worker",
     `HTTP ${healthResponse.status}; mode=${health.mode ?? "unknown"}`);
-  if (!healthResponse.ok || health.service !== "pumpfun-paper-worker") {
-    throw new Error("Cloudflare Worker health check failed.");
-  }
+  if (!healthResponse.ok || health.service !== "pumpfun-paper-worker") throw new Error("Cloudflare Worker health check failed.");
 
   const status = await request(workerUrl, "/status", process.env.PAPER_WORKER_CONTROL_TOKEN);
   check("Worker authenticated control API", status.mode === "paper" && status.tradingReady === false,
@@ -79,40 +69,24 @@ try {
   const apiHealth = await apiHealthResponse.json();
   check("Vercel API health", apiHealthResponse.ok && apiHealth.status === "ok",
     `HTTP ${apiHealthResponse.status}; status=${apiHealth.status ?? "unknown"}`);
-  if (!apiHealthResponse.ok || apiHealth.status !== "ok") {
-    throw new Error("Vercel API health check failed.");
+  if (!apiHealthResponse.ok || apiHealth.status !== "ok") throw new Error("Vercel API health check failed.");
+
+  const smoke = await request(workerUrl, "/smoke-ingestion", process.env.PAPER_WORKER_CONTROL_TOKEN, {});
+  check("Worker-to-Neon lease acquisition and heartbeat", smoke.leaseAcquired === true && smoke.leaseHeartbeat === true,
+    "Worker acquired and heartbeated its fenced Neon lease.");
+  check("Worker event persistence", smoke.eventPersisted === true,
+    `Two audit-only events persisted in smoke session ${smoke.sessionId ?? "unknown"}.`);
+  check("Worker event idempotency", smoke.idempotentReplay === true,
+    "Replaying the same two events produced duplicates without new inserts.");
+  check("Lease handling", smoke.leaseRetained === true || smoke.leaseReleased === true,
+    smoke.leaseRetained ? "Existing active-session lease was retained." : "Temporary smoke-test lease was released.");
+  if (smoke.ok !== true || smoke.leaseAcquired !== true || smoke.leaseHeartbeat !== true ||
+      smoke.eventPersisted !== true || smoke.idempotentReplay !== true ||
+      (smoke.leaseRetained !== true && smoke.leaseReleased !== true)) {
+    throw new Error("Worker-to-Neon ingestion smoke test returned incomplete acceptance evidence.");
   }
-
-  leaseName = `smoke-test-${Date.now()}-${randomUUID().slice(0, 8)}`;
-  ownerId = randomUUID();
-  const lease = await request(apiUrl, "/internal/worker-lease", process.env.PAPER_EVENT_INGEST_TOKEN,
-    { action: "acquire", leaseName, ownerId, ttlSeconds: 30 });
-  acquired = lease.acquired === true;
-  check("Shared ingestion token + Neon lease write", acquired,
-    acquired ? "Vercel authenticated the shared token and acquired a unique database lease." :
-      "Lease was not acquired; database write or lease ownership failed.");
-  if (!acquired) throw new Error("Could not acquire the isolated smoke-test lease.");
-
-  const heartbeat = await request(apiUrl, "/internal/worker-lease", process.env.PAPER_EVENT_INGEST_TOKEN,
-    { action: "heartbeat", leaseName, ownerId, ttlSeconds: 30 });
-  check("Neon lease heartbeat", heartbeat.acquired === true,
-    heartbeat.acquired === true ? "Lease heartbeat persisted." : "Lease heartbeat was rejected.");
-  if (heartbeat.acquired !== true) throw new Error("Smoke-test lease heartbeat failed.");
 } catch (error) {
   failure = error;
-} finally {
-  if (acquired) {
-    try {
-      const release = await request(apiUrl, "/internal/worker-lease", process.env.PAPER_EVENT_INGEST_TOKEN,
-        { action: "release", leaseName, ownerId });
-      check("Smoke-test lease cleanup", release.released === true,
-        release.released === true ? "Temporary lease released." : "Temporary lease was not released.");
-      if (release.released !== true && !failure) failure = new Error("Temporary lease cleanup failed.");
-    } catch (error) {
-      check("Smoke-test lease cleanup", false, "Release request failed; the 30-second lease will expire automatically.");
-      if (!failure) failure = error;
-    }
-  }
 }
 
 if (failure) {
@@ -120,4 +94,4 @@ if (failure) {
   process.exit(1);
 }
 if (checks.some((item) => !item.ok)) process.exit(1);
-console.log("All safe Worker/API/Neon connectivity checks passed. No paper trades were created.");
+console.log("All Worker/API/Neon smoke checks passed. Only a tagged audit-only smoke session was created; no paper trades were created.");
