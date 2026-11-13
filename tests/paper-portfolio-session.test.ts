@@ -82,7 +82,22 @@ describe("atomic paper portfolio transitions", () => {
     const input = {
       sessionId, idempotencyKey: "entry:mint:restart-safe", occurredAt, mint: "mint",
       apply: (portfolio: ReturnType<typeof createPaperPortfolio>) => ({
-        state: { ...portfolio, availableCashUsd: 1.686 },
+        state: {
+          ...portfolio,
+          availableCashUsd: 1.486,
+          reservedAccountRentUsd: 0.2,
+          enteredMints: ["mint"],
+          positions: [{
+            positionId: "position-recovered", mint: "mint", openedAt: occurredAt,
+            stakeUsd: 1, tokenAmountBaseUnits: "1000000", tokenDecimals: 6,
+            buyQuoteId: "buy-recovered", entryPriceUsdPerToken: 1, buyCostsUsd: 0.007,
+            expectedSellCostsUsd: 0.007, rentReserveUsd: 0.2,
+            highWaterPriceUsdPerToken: 0.99, latestPriceUsdPerToken: 0.99,
+            latestLiquidationValueUsd: 0.993, latestSellQuoteId: "sell-recovered",
+            latestSellQuoteAt: occurredAt, realizedPnlUsd: null, status: "OPEN" as const,
+            exitReason: null
+          }]
+        },
         result: "position-recovered",
         events: [{ kind: "PAPER_ENTRY" as const, data: { positionId: "position-recovered" } }]
       })
@@ -92,7 +107,14 @@ describe("atomic paper portfolio transitions", () => {
 
     // A new coordinator instance receives the same durable backing storage.
     const afterRestart = beforeRestart.reopen();
-    expect(afterRestart.read<any>(`paper_portfolio:${sessionId}`)?.availableCashUsd).toBe(1.686);
+    const restored = afterRestart.read<any>(`paper_portfolio:${sessionId}`);
+    expect(restored?.availableCashUsd).toBe(1.486);
+    expect(restored?.reservedAccountRentUsd).toBe(0.2);
+    expect(restored?.positions).toHaveLength(1);
+    expect(restored?.positions[0]).toMatchObject({
+      positionId: "position-recovered", status: "OPEN",
+      expectedSellCostsUsd: 0.007, rentReserveUsd: 0.2
+    });
     const replay = await commitPaperPortfolioTransition(afterRestart, {
       ...input,
       apply: () => { throw new Error("replayed entry must not be applied"); }
