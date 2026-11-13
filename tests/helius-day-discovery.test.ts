@@ -33,7 +33,9 @@ describe("bounded historical Pump launch discovery", () => {
       const body = JSON.parse(String(init?.body));
       if (body.method === "getSignaturesForAddress") {
         expect(body.params[0]).toBe(PUMP_FUN_PROGRAM_ID);
-        return rpcResult([{ signature, slot: 900, blockTime: 1_800, err: null }]);
+        return rpcResult(body.params[1].before
+          ? [{ signature: "6".repeat(88), slot: 800, blockTime: 1_600, err: null }]
+          : [{ signature, slot: 900, blockTime: 1_800, err: null }]);
       }
       expect(body.method).toBe("getTransaction");
       return rpcResult({
@@ -47,11 +49,11 @@ describe("bounded historical Pump launch discovery", () => {
     });
     const result = await discoverPumpLaunchesInTimeRange(1_700, 1_900, {
       apiKey: "test", fetcher, maxCredits: 10, maxLaunches: 1,
-      pageSize: 2, requestIntervalMs: 0
+      pageSize: 1, requestIntervalMs: 0
     });
     expect(result).toMatchObject({
-      status: "SAMPLE_CAP_REACHED", pagesScanned: 1,
-      signaturesScanned: 1, transactionFetches: 1, creditsUsed: 2
+      status: "DAY_EXHAUSTED", pagesScanned: 2,
+      signaturesScanned: 1, transactionFetches: 1, creditsUsed: 3
     });
     expect(result.launches).toHaveLength(1);
     expect(result.launches[0]?.event.name).toBe("Backtest coin");
