@@ -242,6 +242,6 @@ export async function discoverPumpLaunchesInTimeRange(
     const status = message === "CREDIT_BUDGET_EXHAUSTED" ? "BUDGET_EXHAUSTED" : "INCOMPLETE";
     return result(status, status === "BUDGET_EXHAUSTED"
       ? "Helius credit ceiling reached before the requested sample was complete."
-      : message, launches, pagesScanned, signaturesScanned, transactionFetches, creditsUsed, before);
+      : message, launches, pagesScanned, signaturesScanned, transactionFetches, creditsUsed, before, previousOldest);
   }
 }
