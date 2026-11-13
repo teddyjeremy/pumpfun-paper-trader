@@ -167,15 +167,50 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     );
     expect(afterRollback.rows[0]).toEqual({ last_sequence: "1", events: 1, positions: 1 });
 
+    const closedAt = "2026-11-12T10:01:00.000Z";
+    const closedPosition = {
+      ...position, status: "CLOSED", closedAt,
+      latestLiquidationValueUsd: 0, realizedPnlUsd: -0.021, exitReason: "TEST_EXIT"
+    };
+    const exitQuote = {
+      ...quote("SELL", "integration-exit-sell-q"),
+      observedAt: "2026-11-12T10:00:59.000Z",
+      expiresAt: "2026-11-12T10:01:01.000Z",
+      simulatedFillAt: "2026-11-12T10:01:00.050Z"
+    };
+    const exitEvent = {
+      ...entryEvent, sequence: 2, eventId: "integration-exit-2",
+      kind: "PAPER_EXIT", occurredAt: closedAt,
+      data: { position: closedPosition, sellQuoteId: exitQuote.quoteId,
+        exitReason: "TEST_EXIT", sellQuote: exitQuote }
+    };
+    const exit = await ledgerPersistence!.persistPaperAuditEvents(sessionId, [exitEvent]);
+    expect(exit).toEqual({ inserted: 1, duplicates: 0, lastSequence: 2 });
+    expect(await ledgerPersistence!.persistPaperAuditEvents(sessionId, [exitEvent]))
+      .toEqual({ inserted: 0, duplicates: 1, lastSequence: 2 });
+
+    // A fresh dashboard read must reconstruct the closed trade and both fills
+    // from the durable PostgreSQL projections, independent of Worker memory.
+    const recoveredLedger = await ledgerPersistence!.getPaperSessionLedgerSnapshot(sessionId);
+    expect(recoveredLedger.available).toBe(true);
+    expect(recoveredLedger.positions).toHaveLength(1);
+    expect(recoveredLedger.positions[0]).toMatchObject({
+      session_id: sessionId, mint, status: "CLOSED", exit_reason: "TEST_EXIT"
+    });
+    expect(recoveredLedger.quotes).toHaveLength(3);
+    expect(recoveredLedger.trades).toHaveLength(2);
+    expect(recoveredLedger.trades.map((trade: { side: string }) => trade.side).sort())
+      .toEqual(["buy", "sell"]);
+
     const next = await ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
-      sequence: 2,
-      eventId: "integration-session-heartbeat-2",
+      sequence: 3,
+      eventId: "integration-session-heartbeat-3",
       kind: "SESSION_HEARTBEAT",
-      occurredAt: "2026-11-12T10:00:02.000Z",
+      occurredAt: "2026-11-12T10:01:02.000Z",
       data: { heartbeat: true }
     }]);
-    expect(next).toEqual({ inserted: 1, duplicates: 0, lastSequence: 2 });
+    expect(next).toEqual({ inserted: 1, duplicates: 0, lastSequence: 3 });
   });
   it("persists resumable Helius checkpoints and verified decoded transactions idempotently", async () => {
     await ledgerPersistence!.persistPaperAuditEvents(sessionId, [entryEvent]);
