@@ -5,8 +5,8 @@ import type { WalletLinkEvidence } from "./wallet-cluster-risk.js";
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
 export const WALLET_HISTORY_PAGE_SIZE = 100;
-export const WALLET_HISTORY_MAX_PAGES = 5;
-export const WALLET_HISTORY_MAX_WALLETS = 8;
+export const WALLET_HISTORY_MAX_PAGES = 2;
+export const WALLET_HISTORY_MAX_WALLETS = 16;
 
 export interface CompleteWalletFundingEvidenceResult {
   provider: "helius";
@@ -56,7 +56,7 @@ export async function collectCompleteWalletFundingEvidence(
       ["A valid mint and at least two unique wallets are required."]);
   }
   if (!walletSetComplete) {
-    warnings.push("The supplied wallet set exceeds the bounded eight-wallet collection limit or contains invalid/duplicate wallet entries.");
+    warnings.push("The supplied wallet set exceeds the bounded sixteen-wallet collection limit or contains invalid/duplicate wallet entries.");
     return result(mint, "DATA_INCOMPLETE", false, false, uniqueWallets.length, 0, 0, 0, warnings, [], uniqueWallets);
   }
 
