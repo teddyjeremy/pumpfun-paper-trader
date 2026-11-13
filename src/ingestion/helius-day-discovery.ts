@@ -22,6 +22,7 @@ export interface HistoricalDayDiscoveryResult {
   creditsUsed: number;
   nextBefore: string | null;
   reason: string | null;
+  resumeBoundary: { signature: string; slot: number; blockTime: number } | null;
 }
 
 export interface HistoricalDayDiscoveryConfig {
@@ -31,6 +32,15 @@ export interface HistoricalDayDiscoveryConfig {
   maxLaunches: number;
   pageSize?: number;
   requestIntervalMs?: number;
+  resume?: {
+    before: string;
+    pagesScanned: number;
+    signaturesScanned: number;
+    transactionFetches: number;
+    creditsUsed: number;
+    launches: HistoricalLaunchDiscovery[];
+    previousOldest?: { signature: string; slot: number; blockTime: number };
+  };
 }
 
 /**
@@ -51,10 +61,11 @@ export async function discoverPumpLaunchesInTimeRange(
   const interval = config.requestIntervalMs ?? 250;
   const result = (status: HistoricalDayDiscoveryResult["status"], reason: string | null,
     launches: HistoricalLaunchDiscovery[], pagesScanned: number, signaturesScanned: number,
-    transactionFetches: number, creditsUsed: number, nextBefore: string | null
+    transactionFetches: number, creditsUsed: number, nextBefore: string | null,
+    resumeBoundary: { signature: string; slot: number; blockTime: number } | null
   ): HistoricalDayDiscoveryResult => ({
     status, startTime, endTime, launches, pagesScanned, signaturesScanned,
-    transactionFetches, creditsUsed, nextBefore, reason
+    transactionFetches, creditsUsed, nextBefore, reason, resumeBoundary
   });
 
   if (!Number.isSafeInteger(startTime) || !Number.isSafeInteger(endTime) ||
@@ -69,13 +80,25 @@ export async function discoverPumpLaunchesInTimeRange(
   }
 
   const fetcher = config.fetcher ?? fetch;
-  let creditsUsed = 0;
-  let pagesScanned = 0;
-  let signaturesScanned = 0;
-  let transactionFetches = 0;
-  let before: string | null = null;
-  let previousOldest: { signature: string; slot: number; blockTime: number } | null = null;
-  const launches: HistoricalLaunchDiscovery[] = [];
+  const resume = config.resume;
+  if (resume && (!SIGNATURE.test(resume.before) ||
+      !Number.isSafeInteger(resume.pagesScanned) || resume.pagesScanned < 0 ||
+      !Number.isSafeInteger(resume.signaturesScanned) || resume.signaturesScanned < 0 ||
+      !Number.isSafeInteger(resume.transactionFetches) || resume.transactionFetches < 0 ||
+      !Number.isSafeInteger(resume.creditsUsed) || resume.creditsUsed < 0 || resume.creditsUsed >= config.maxCredits ||
+      !Array.isArray(resume.launches) || resume.launches.length > config.maxLaunches ||
+      (resume.previousOldest !== undefined && (resume.previousOldest.signature !== resume.before ||
+        !Number.isSafeInteger(resume.previousOldest.slot) || resume.previousOldest.slot < 0 ||
+        !Number.isSafeInteger(resume.previousOldest.blockTime) || resume.previousOldest.blockTime < 0)))) {
+    throw new Error("Invalid historical discovery resume checkpoint.");
+  }
+  let creditsUsed = resume?.creditsUsed ?? 0;
+  let pagesScanned = resume?.pagesScanned ?? 0;
+  let signaturesScanned = resume?.signaturesScanned ?? 0;
+  let transactionFetches = resume?.transactionFetches ?? 0;
+  let before: string | null = resume?.before ?? null;
+  let previousOldest: { signature: string; slot: number; blockTime: number } | null = resume?.previousOldest ?? null;
+  const launches: HistoricalLaunchDiscovery[] = resume?.launches ? [...resume.launches] : [];
   let lastRequestAt = 0;
 
   const rpc = async (method: string, params: unknown[]): Promise<unknown> => {
@@ -101,6 +124,21 @@ export async function discoverPumpLaunchesInTimeRange(
   };
 
   try {
+    if (before && !previousOldest) {
+      const boundary = await rpc("getTransaction", [before, {
+        encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0
+      }]);
+      transactionFetches += 1;
+      if (!boundary || typeof boundary !== "object" ||
+          !Number.isSafeInteger((boundary as Record<string, unknown>).slot) ||
+          !Number.isSafeInteger((boundary as Record<string, unknown>).blockTime) ||
+          ((boundary as Record<string, unknown>).blockTime as number) < 0) {
+        throw new Error("Could not validate the previous discovery cursor boundary.");
+      }
+      previousOldest = { signature: before,
+        slot: (boundary as Record<string, unknown>).slot as number,
+        blockTime: (boundary as Record<string, unknown>).blockTime as number };
+    }
     while (true) {
       const page = await rpc("getSignaturesForAddress", [
         PUMP_FUN_PROGRAM_ID,
@@ -110,7 +148,7 @@ export async function discoverPumpLaunchesInTimeRange(
       if (!Array.isArray(page)) throw new Error("Helius returned a malformed program-signature page.");
       if (page.length === 0) {
         return result("DAY_EXHAUSTED", null, launches, pagesScanned, signaturesScanned,
-          transactionFetches, creditsUsed, before);
+          transactionFetches, creditsUsed, before, previousOldest);
       }
 
       const parsed: Array<{ signature: string; slot: number; blockTime: number | null; err: unknown }> = [];
@@ -150,7 +188,7 @@ export async function discoverPumpLaunchesInTimeRange(
         if (item.blockTime === null) throw new Error("Null blockTime prevents proving the historical day boundary.");
         if (item.blockTime < startTime) {
           return result("DAY_EXHAUSTED", null, launches, pagesScanned, signaturesScanned,
-            transactionFetches, creditsUsed, before);
+            transactionFetches, creditsUsed, before, previousOldest);
         }
         if (item.blockTime >= endTime) continue;
         signaturesScanned += 1;
@@ -196,7 +234,7 @@ export async function discoverPumpLaunchesInTimeRange(
       before = oldest.signature;
       if (page.length < pageSize) {
         return result("DAY_EXHAUSTED", null, launches, pagesScanned, signaturesScanned,
-          transactionFetches, creditsUsed, before);
+          transactionFetches, creditsUsed, before, previousOldest);
       }
     }
   } catch (error) {
