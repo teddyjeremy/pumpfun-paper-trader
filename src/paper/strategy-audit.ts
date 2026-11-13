@@ -147,9 +147,8 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
   const watchReasons = unknownRules.map(rule => `${rule.rule}: ${rule.reason}`);
   const blockingUnknownRules = unknownRules.map(rule => rule.rule);
   // A BUY is possible only when every mandatory rule is present exactly once
-  // and PASS. The worker currently supplies no calibrated volume thresholds,
-  // no complete wallet-cluster clearance and no executable quote, so it remains
-  // WATCH until those real evidence sources are connected.
+  // and PASS. The Worker still lacks reviewed volume thresholds and complete
+  // wallet-cluster clearance; those unknowns keep candidates on WATCH.
   const allRulesPass = rules.length === 15 && rules.every(rule => rule.status === "PASS");
   const buyAllowed = rejectionReasons.length === 0 && unknownRules.length === 0 && allRulesPass;
   return {
