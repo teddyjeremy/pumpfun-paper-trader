@@ -52,8 +52,8 @@ jobs:
       - name: Discover the complete day (first run only)
         run: |
           DISCOVERY="artifacts/pump-launch-discovery-$BACKTEST_DATE.json"
-          if [ ! -f "$DISCOVERY" ] || ! node -e 'const d=require("./"+process.argv[1]); process.exit(d.status === "DAY_EXHAUSTED" ? 0 : 1)' "$DISCOVERY"; then
-            npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=40000 --max-launches=100
+          if [ ! -f "$DISCOVERY" ] || ! node -e 'const d=require("./"+process.argv[1]); process.exit(d.provider === "HELIUS_PARSED_EVENTS_SCAN" && d.status === "SAMPLE_COMPLETE" ? 0 : 1)' "$DISCOVERY"; then
+            npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=10000 --max-launches=100 --max-pages-per-bucket=5
           else
             echo "Restored complete discovery artifact; skipping discovery."
           fi
