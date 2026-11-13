@@ -12,10 +12,10 @@ type Launch = {
 type Discovery = {
   requestedLocalDate: string; status: string; creditsUsed: number; launches: Launch[];
 };
-type Screening = { date: string; status: string; selectedLaunchIndexes: number[]; results: Array<{ index: number; result: HistoricalLaunchActivityScreenResult }> };
+type Screening = { date: string; status: string; creditsUsed: number; selectedLaunchIndexes: number[]; results: Array<{ index: number; result: HistoricalLaunchActivityScreenResult }> };
 type Checkpoint = {
   schemaVersion: 2; date: string; discoveryLaunchCount: number;
-  discoveryCredits: number; totalCreditCeiling: number;
+  discoveryCredits: number; screeningCredits: number; totalCreditCeiling: number;
   selectedLaunchIndexes: number[]; nextCandidateIndex: number;
   completedMints: string[]; incompleteMints: string[];
   cumulativeCreditsUsed: number; updatedAt: string;
@@ -63,6 +63,8 @@ if (new Set(discovery.launches.map(row => row.event.mint)).size !== discovery.la
 
 const screening = JSON.parse(await readFile(screeningPath, "utf8")) as Screening;
 if (screening.date !== date || screening.status !== "COMPLETE" ||
+    !Number.isSafeInteger((screening as Screening & { creditsUsed?: number }).creditsUsed) ||
+    ((screening as Screening & { creditsUsed?: number }).creditsUsed ?? maxCredits) < 0 ||
     !Array.isArray(screening.selectedLaunchIndexes) ||
     screening.selectedLaunchIndexes.length > Math.floor(discovery.launches.length * 0.3) ||
     screening.selectedLaunchIndexes.some(index => !Number.isSafeInteger(index) || index < 0 || index >= discovery.launches.length) ||
@@ -80,10 +82,11 @@ try {
   if (checkpoint.schemaVersion !== 2 || checkpoint.date !== date ||
       checkpoint.discoveryLaunchCount !== discovery.launches.length ||
       checkpoint.discoveryCredits !== discovery.creditsUsed ||
+      checkpoint.screeningCredits !== screening.creditsUsed ||
       checkpoint.totalCreditCeiling !== maxCredits ||
       JSON.stringify(checkpoint.selectedLaunchIndexes) !== JSON.stringify(selectedLaunchIndexes) ||
       checkpoint.nextCandidateIndex < 0 || checkpoint.nextCandidateIndex > selectedLaunchIndexes.length ||
-      checkpoint.cumulativeCreditsUsed < discovery.creditsUsed ||
+      checkpoint.cumulativeCreditsUsed < discovery.creditsUsed + screening.creditsUsed ||
       checkpoint.cumulativeCreditsUsed > maxCredits) {
     throw new Error("Checkpoint does not match this discovery artifact/date/credit ceiling.");
   }
@@ -91,9 +94,9 @@ try {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   checkpoint = {
     schemaVersion: 2, date, discoveryLaunchCount: discovery.launches.length,
-    discoveryCredits: discovery.creditsUsed, totalCreditCeiling: maxCredits,
+    discoveryCredits: discovery.creditsUsed, screeningCredits: screening.creditsUsed, totalCreditCeiling: maxCredits,
     selectedLaunchIndexes, nextCandidateIndex: 0, completedMints: [], incompleteMints: [],
-    cumulativeCreditsUsed: discovery.creditsUsed, updatedAt: new Date().toISOString()
+    cumulativeCreditsUsed: discovery.creditsUsed + screening.creditsUsed, updatedAt: new Date().toISOString()
   };
   await atomicJson(checkpointPath, checkpoint);
 }
