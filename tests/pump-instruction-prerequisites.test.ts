@@ -75,6 +75,28 @@ describe("unsigned Pump instruction account prerequisites", () => {
     expect(mock.rentCalls.sort((a, b) => a - b)).toEqual([137, 165]);
   });
 
+  it("rejects a non-canonical volume-accumulator address before making RPC requests", async () => {
+    const identity = await deriveNonSigningVirtualTraderIdentity();
+    const fetcher: typeof fetch = async () => {
+      throw new Error("RPC must not be called for a non-canonical accumulator PDA.");
+    };
+    await expect(inspectPumpCurveV3InstructionPrerequisites({
+      identity,
+      instruction: {
+        provider: "pump-sdk-4.3.1", venue: "PUMP_CURVE", side: "BUY",
+        mint: MINT, user: identity.publicKey, quoteMint: QUOTE,
+        baseTokenProgram: TOKEN_PROGRAM_ID.toBase58(),
+        quoteTokenProgram: TOKEN_PROGRAM_ID.toBase58(),
+        buybackFeeRecipient: new PublicKey(new Uint8Array(32).fill(8)).toBase58(),
+        userVolumeAccumulatorAddress: new PublicKey(new Uint8Array(32).fill(9)).toBase58(),
+        instruction: {} as never, requiredAccountAddressesToVerify: [],
+        optionalAccountAddresses: [], slot: 1234, observedAt: new Date(NOW).toISOString(),
+        executionReady: false, paperEntryAuthorized: false, blockers: []
+      },
+      config: { apiKey: "test-key", now: () => NOW, fetcher }
+    })).rejects.toThrow(/does not match the canonical user PDA/);
+  });
+
   it("rejects a Pump-owned 137-byte account with the wrong volume-accumulator discriminator", async () => {
     const identity = await deriveNonSigningVirtualTraderIdentity();
     const user = new PublicKey(identity.publicKey);
