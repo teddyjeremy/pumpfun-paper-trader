@@ -260,9 +260,22 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       action: "acquire", leaseName: "pumpfun-paper-trader-coordinator",
       ownerId: this.postgresLeaseOwnerId, ttlSeconds: 45
     });
-    if (!response.ok) throw new Error("PostgreSQL worker lease could not be acquired.");
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      try {
+        const payload = await response.json() as { error?: unknown; detail?: unknown };
+        const message = typeof payload.detail === "string" ? payload.detail :
+          typeof payload.error === "string" ? payload.error : "";
+        if (message) detail += `: ${message.slice(0, 180)}`;
+      } catch {
+        // Keep the bounded status-only diagnostic when the API body is not JSON.
+      }
+      throw new Error(`PostgreSQL worker lease request failed (${detail}).`);
+    }
     const result = await response.json() as { acquired?: boolean };
-    if (result.acquired !== true) throw new Error("Another coordinator currently owns the PostgreSQL worker lease.");
+    if (result.acquired !== true) {
+      throw new Error("PostgreSQL worker lease was not acquired; another coordinator may hold the unexpired lease.");
+    }
     this.postgresLeaseHeld = true;
     await this.ctx.storage.setAlarm(Date.now() + 15_000);
   }
