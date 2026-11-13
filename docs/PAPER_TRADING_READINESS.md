@@ -12,7 +12,7 @@ This document is the operational checklist for reaching the first verified simul
 
 ### 1. CI and release integrity
 
-- [x] Latest code-changing commit verified by CI is `d74f0dd46ddbecda50f9b1c8846930a90c94e7ae`: dependency installation, TypeScript checks, 58 test files / 435 tests, and Cloudflare Worker bundle.
+- [x] Latest code-changing commit verified by CI is `1253dd84d599b355a855ee7a9d9c277ea1c37908`: dependency installation, TypeScript checks, 59 test files / 443 tests, and Cloudflare Worker bundle.
 - [x] PostgreSQL-backed integration tests pass in the CI test suite.
 - [ ] The final PR head is reviewed and the merge is performed only against that exact tested head.
 - [ ] Production smoke tests pass after the single planned deployment.
@@ -58,7 +58,8 @@ This document is the operational checklist for reaching the first verified simul
 - [ ] Verify user volume accumulator initialization instruction and rent handling on the final message.
 - [ ] Verify all required ATA creation instructions are included exactly once and rent is reserved.
 - [ ] Complete extension-aware Token-2022 account sizing or reject missing Token-2022 accounts.
-- [x] Portfolio entry guard checks available cash against stake, both buy/sell fee estimates, and refundable rent before opening; regression-tested for an insufficient sell-fee budget.
+- [x] Portfolio entry guard checks available cash against stake, both buy/sell fee estimates, and refundable rent before opening; regression-tested for insufficient and concurrent exit-fee budgets.
+- [x] Worker derives entry authorization only after both exact unsigned plans have no unresolved account blockers and a pure portfolio preview passes the stake, buy/sell fee, and refundable-rent budget.
 - [ ] Verify simulated payer balance, portfolio reserve, and transaction fee budget before an entry.
 - [ ] Prove BUY and exact-size SELL quote legs are fresh, same-mint/same-venue, unexpired, and have matching exact-message fee evidence.
 - [ ] Explicitly reject unsupported curve versions, cashback/unsupported pool variants, and incomplete account snapshots.
@@ -69,7 +70,7 @@ A fee quote or unsigned instruction plan does not prove that a transaction can b
 
 - [x] Worker route requests exact round-trip quote evidence and records strategy audit evidence.
 - [x] Gated simulated entry transition is connected to the strict strategy audit.
-- [x] Entry transition additionally requires `paperEntryAuthorized=true` from the unsigned plan; quote validity alone cannot authorize a position.
+- [x] Quote validity alone cannot authorize a position; the Worker independently validates both unsigned plan evidence objects and previews the real portfolio transition before granting entry authorization.
 - [x] Simulated entries additionally require the active PostgreSQL ingestion configuration and fenced Worker lease, preventing ephemeral-only entries.
 - [x] Scheduled protective-exit cycle requests fresh full-position sell quotes.
 - [x] Portfolio marks are deferred until every open position has a fresh quote.
@@ -146,11 +147,11 @@ If any item fails, keep `tradingReady=false` and report the exact blocker. Do no
 - Historical buyer-set provenance and complete wallet transaction-history clearance are not yet proven end to end.
 - Worker does not yet supply empirically calibrated strategy volume thresholds.
 - Complete contiguous rolling event-stream coverage is not yet available; PumpSwap event decoding and multi-window exhaustion evidence remain outstanding.
-- The portfolio now checks the full round-trip cash budget, but verified virtual-payer balance evidence and the end-to-end account-state/rent-to-portfolio path remain unproven; unsigned plans still return `paperEntryAuthorized=false`, so every entry remains blocked.
+- The Worker now treats the paper portfolio as the simulated payer budget and previews stake, both exact fee legs, and refundable ATA/accumulator rent before an entry. Actual Worker-to-Vercel/Neon ingestion and production account-state/rent reconciliation remain unverified; quote-only unsigned plans continue to return `paperEntryAuthorized=false`.
 - Production Neon lifecycle, idempotent persistence, and Worker restart recovery remain unverified.
 - Vercel ingestion authentication and dashboard display of persisted simulated trades remain unverified.
 - The latest CI run must be green on the final PR head before merge.
 
 ## Safety invariant
 
-The paper trader is a simulator. It must not hold or derive a wallet private key, sign a Solana transaction, or submit a transaction to the network. `paperEntryAuthorized` and `tradingReady` must remain false until the corresponding documented evidence and integration tests pass; paper readiness must never imply live-trading authorization.
+The paper trader is a simulator. It must not hold or derive a wallet private key, sign a Solana transaction, or submit a transaction to the network. The quote-only unsigned plan remains unauthorized; Worker-level paper entry authorization is derived only after complete plan checks and a successful portfolio budget preview. `tradingReady` remains false until the complete live Worker/Neon/dashboard acceptance test passes; paper readiness must never imply live-trading authorization.
