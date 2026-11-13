@@ -65,6 +65,33 @@ describe("complete historical Pump launch-window collection", () => {
     expect(result.transactions.map(item => item.signature)).toEqual([tradeSignature, createSignature]);
   });
 
+  it("counts a successfully decoded non-matching transaction as terminal coverage", async () => {
+    const unrelatedSignature = "8".repeat(88);
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.method === "getSignaturesForAddress") {
+        return rpcResult([
+          { signature: unrelatedSignature, slot: 101, blockTime: 1_001, err: null },
+          { signature: createSignature, slot: 100, blockTime: 1_000, err: null }
+        ]);
+      }
+      const signature = body.params[0] as string;
+      if (signature === unrelatedSignature) {
+        return rpcResult({
+          slot: 101, blockTime: 1_001, transaction: { signatures: [signature] },
+          meta: { err: null, logMessages: [`Program ${PUMP_FUN_PROGRAM_ID} invoke [1]`] }
+        });
+      }
+      return rpcResult(transaction(signature, 100, 1_000));
+    });
+    const result = await collectHistoricalLaunchWindow({
+      mint, bondingCurve: curve, createSignature, launchBlockTime: 1_000
+    }, { apiKey: "test", maxCredits: 10, fetcher, requestIntervalMs: 0 });
+    expect(result.status).toBe("COMPLETE");
+    expect(result.ignoredSignatures).toEqual([unrelatedSignature]);
+    expect(result.transactions.map(item => item.signature)).toEqual([createSignature]);
+  });
+
   it("never exceeds the caller's remaining Helius credit budget", async () => {
     const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
