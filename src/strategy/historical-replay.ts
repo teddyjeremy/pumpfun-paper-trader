@@ -18,6 +18,9 @@ export interface HistoricalReplayCoinInput {
   walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
   /** Historical second at which a genuinely complete holder census was independently verified. Top-20 snapshots do not qualify. */
   holderCensusCompleteAt?: number;
+  /** Timestamped completeness transitions; latest evidence at or before evaluation wins. */
+  walletClusterEvidenceTimeline?: readonly { observedAt: number; complete: boolean }[];
+  holderCensusEvidenceTimeline?: readonly { observedAt: number; complete: boolean }[];
   /** Historical second when every non-risk entry gate (signal freshness, liquidity/MC, executable quote/cost and capacity) was verified. */
   entryEvidenceCompleteAt?: number;
   /** Historical second when the dynamic exit lifecycle completed with a fresh full-size sell quote and zero-balance confirmation. */
@@ -172,16 +175,30 @@ export function classifyHistoricalWalletClusterRisk(input: {
   walletClusterEvidenceCompleteAt?: number;
   walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
   holderCensusCompleteAt?: number;
+  walletClusterEvidenceTimeline?: readonly { observedAt: number; complete: boolean }[];
+  holderCensusEvidenceTimeline?: readonly { observedAt: number; complete: boolean }[];
   evaluatedAt: number;
 }): "PASS_COMPLETE" | "REJECT_OBSERVED" | "UNKNOWN" {
   if (input.walletRisk?.status === "REJECT_OBSERVED") return "REJECT_OBSERVED";
-  const walletCoverageComplete = input.walletClusterEvidenceCoverage === "FULL_WALLET_HISTORY" &&
-    Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) &&
-    input.walletClusterEvidenceCompleteAt! >= 0 &&
-    input.walletClusterEvidenceCompleteAt! <= input.evaluatedAt;
-  const holderCoverageComplete = Number.isSafeInteger(input.holderCensusCompleteAt) &&
-    input.holderCensusCompleteAt! >= 0 &&
-    input.holderCensusCompleteAt! <= input.evaluatedAt;
+  const latestAt = (timeline: readonly { observedAt: number; complete: boolean }[] | undefined) =>
+    [...(timeline ?? [])]
+      .filter(item => Number.isSafeInteger(item.observedAt) && item.observedAt >= 0 &&
+        item.observedAt <= input.evaluatedAt)
+      .sort((a, b) => a.observedAt - b.observedAt)
+      .at(-1);
+  const latestWalletEvidence = latestAt(input.walletClusterEvidenceTimeline);
+  const latestHolderEvidence = latestAt(input.holderCensusEvidenceTimeline);
+  const walletCoverageComplete = latestWalletEvidence
+    ? latestWalletEvidence.complete
+    : input.walletClusterEvidenceCoverage === "FULL_WALLET_HISTORY" &&
+      Number.isSafeInteger(input.walletClusterEvidenceCompleteAt) &&
+      input.walletClusterEvidenceCompleteAt! >= 0 &&
+      input.walletClusterEvidenceCompleteAt! <= input.evaluatedAt;
+  const holderCoverageComplete = latestHolderEvidence
+    ? latestHolderEvidence.complete
+    : Number.isSafeInteger(input.holderCensusCompleteAt) &&
+      input.holderCensusCompleteAt! >= 0 &&
+      input.holderCensusCompleteAt! <= input.evaluatedAt;
   if (walletCoverageComplete && holderCoverageComplete && input.walletRisk !== null &&
       input.walletRisk.attributionStatus !== "INVALID_EVIDENCE") return "PASS_COMPLETE";
   return "UNKNOWN";
@@ -343,6 +360,12 @@ export function replayHistoricalCoin(
         }),
         ...(input.holderCensusCompleteAt === undefined ? {} : {
           holderCensusCompleteAt: input.holderCensusCompleteAt
+        }),
+        ...(input.walletClusterEvidenceTimeline === undefined ? {} : {
+          walletClusterEvidenceTimeline: input.walletClusterEvidenceTimeline
+        }),
+        ...(input.holderCensusEvidenceTimeline === undefined ? {} : {
+          holderCensusEvidenceTimeline: input.holderCensusEvidenceTimeline
         }),
         evaluatedAt
       });
