@@ -73,6 +73,12 @@ import {
 } from "../../../../src/ingestion/executable-quote-service.js";
 import { deriveNonSigningVirtualTraderIdentity } from "../../../../src/ingestion/virtual-trader-identity.js";
 import { getFreshExecutableQuoteCostPct } from "../../../../src/ingestion/executable-quote-eligibility.js";
+import {
+  executePaperExit
+} from "../../../../src/paper/exit-lifecycle.js";
+import { createUnverifiedMarketState } from "../../../../src/paper/pump-market-state.js";
+import { refreshPumpMarketStateFromHelius } from "../../../../src/ingestion/helius-pump-market.js";
+import { buildExecutablePaperQuote } from "../../../../src/ingestion/executable-paper-quote.js";
 
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
@@ -534,6 +540,108 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     for (const sessionId of sessions) await this.flushAuditEventsToPostgres(sessionId);
   }
 
+  /**
+   * Scheduled, paper-only protective exit pass. Each position is refreshed
+   * against authoritative curve/pool accounts and quoted for its full balance.
+   * Incomplete market/fee evidence leaves the position open and records a
+   * blocker; no signing or transaction submission exists in this path.
+   */
+  private async runScheduledPaperExitCycle(): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId || !this.status.enabled || !this.postgresLeaseHeld ||
+        !this.env.HELIUS_API_KEY) return;
+    const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
+    const openPositions = portfolio?.positions.filter(position => position.status === "OPEN") ?? [];
+    if (openPositions.length === 0) return;
+
+    const config = { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const };
+    const identity = await deriveNonSigningVirtualTraderIdentity();
+    const computeUnitLimit = 1_400_000;
+    const buildExactFeeEvidence = createPumpUnsignedPlanFeeEvidenceBuilder({
+      identity, config, computeUnitLimit
+    });
+    const heldSellQuotes = new Map<string, ExecutablePaperQuote>();
+    for (const position of openPositions) {
+      try {
+        const marketState = await refreshPumpMarketStateFromHelius({
+          state: createUnverifiedMarketState(position.mint),
+          config
+        });
+        await this.ctx.storage.put(`paper_market_state:${sessionId}:${position.mint}`, marketState);
+        if (marketState.status !== "LIVE_CURVE" &&
+            marketState.status !== "MIGRATED_POOL_VERIFIED") {
+          await this.appendAudit("ERROR", position.mint, {
+            stage: "SCHEDULED_PAPER_EXIT_MARKET_VERIFICATION",
+            status: marketState.status, reason: marketState.reason
+          }, `paper-exit-market-blocked:${sessionId}:${position.positionId}:${marketState.updatedAt}`);
+          continue;
+        }
+
+        const quoteFetcher = marketState.status === "LIVE_CURVE"
+          ? createPumpCurveOfflineQuoteFetcher({ mint: position.mint, config })
+          : createPumpSwapOfflineQuoteFetcher({
+              mint: position.mint, poolAddress: marketState.pool!.poolAddress, config
+            });
+        const result = await executePaperExit({
+          position, marketState, windows: [],
+          quoteSell: async ({ tokenAmountBaseUnits }) => {
+            const solUsdResult = await fetchSolUsdPrice({ nowMs: Date.now() });
+            if (solUsdResult.status !== "AVAILABLE") {
+              throw new Error(`SOL/USD reference unavailable: ${solUsdResult.reason}`);
+            }
+            const quote = await quoteFetcher({
+              side: "SELL", amountBaseUnits: tokenAmountBaseUnits
+            });
+            const feeEvidence = await buildExactFeeEvidence({ side: "SELL", quote });
+            if (feeEvidence.status !== "AVAILABLE") {
+              throw new Error(`Exact sell-message fee evidence unavailable: ${feeEvidence.reason}`);
+            }
+            return {
+              quote,
+              context: {
+                solUsd: solUsdResult.observation,
+                costs: {
+                  networkFeeLamports: feeEvidence.estimate.networkFeeLamports,
+                  priorityFeeLamports: feeEvidence.estimate.priorityFeeLamports,
+                  providerFeeUsd: 0,
+                  simulatedLatencyMs: 250,
+                  quoteTtlMs: 2_000
+                }
+              }
+            };
+          },
+          // Defer the complete-portfolio mark until every still-open position
+          // has a fresh quote. A partial mark is never committed.
+          commitMark: async ({ positionId, sellQuote }) => {
+            heldSellQuotes.set(positionId, sellQuote);
+            return { status: "DEFERRED_UNTIL_COMPLETE_PORTFOLIO_MARK" };
+          },
+          commitExit: input => this.recordPaperExit(input)
+        });
+        if (result.status === "BLOCKED") {
+          await this.appendAudit("ERROR", position.mint, {
+            stage: "SCHEDULED_PAPER_EXIT", status: result.status, reason: result.reason
+          }, `paper-exit-blocked:${sessionId}:${position.positionId}:${Date.now()}`);
+        }
+      } catch (error) {
+        await this.appendAudit("ERROR", position.mint, {
+          stage: "SCHEDULED_PAPER_EXIT_CYCLE",
+          reason: error instanceof Error ? error.message : "Scheduled paper exit failed closed."
+        }, `paper-exit-cycle-error:${sessionId}:${position.positionId}:${Date.now()}`);
+      }
+    }
+
+    const latestPortfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
+    const remainingOpen = latestPortfolio?.positions.filter(position => position.status === "OPEN") ?? [];
+    if (remainingOpen.length > 0 &&
+        remainingOpen.every(position => heldSellQuotes.has(position.positionId))) {
+      await this.recordPaperMark({
+        sellQuotes: remainingOpen.map(position => heldSellQuotes.get(position.positionId)!)
+      });
+    }
+    this.ctx.waitUntil(this.flushAuditEventsToPostgres(sessionId));
+  }
+
   async alarm(): Promise<void> {
     await this.hydrate();
     // The Durable Object's alarm survives eviction, but in-memory lease state
@@ -558,6 +666,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     if (this.status.enabled && this.postgresLeaseHeld) {
       await this.drainHeliusQueue();
+      await this.runScheduledPaperExitCycle();
     }
     await this.flushAllAuditSessionsToPostgres();
     await this.flushAllHeliusBackfillArchivesToPostgres();
