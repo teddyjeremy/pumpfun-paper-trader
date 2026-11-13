@@ -15,7 +15,7 @@ export interface HistoricalReplayCoinInput {
   /** Historical second at which complete relevant-wallet history/linkage coverage was independently verified. Recent-20 signature samples do not qualify. */
   walletClusterEvidenceCompleteAt?: number;
   /** Coverage class for wallet-link evidence; RECENT_SIGNATURE_SAMPLE_ONLY is reject-only, never a clearance. */
-  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
+  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "FULL_SOL_TRANSFER_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
   /** Historical second at which a genuinely complete holder census was independently verified. Top-20 snapshots do not qualify. */
   holderCensusCompleteAt?: number;
   /** Timestamped completeness transitions; latest evidence at or before evaluation wins. */
@@ -173,7 +173,7 @@ export function hasCompleteHistoricalEntryEvidence(input: {
 export function classifyHistoricalWalletClusterRisk(input: {
   walletRisk: ReturnType<typeof evaluateWalletClusterRisk> | null;
   walletClusterEvidenceCompleteAt?: number;
-  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
+  walletClusterEvidenceCoverage?: "FULL_WALLET_HISTORY" | "FULL_SOL_TRANSFER_HISTORY" | "RECENT_SIGNATURE_SAMPLE_ONLY";
   holderCensusCompleteAt?: number;
   walletClusterEvidenceTimeline?: readonly { observedAt: number; complete: boolean }[];
   holderCensusEvidenceTimeline?: readonly { observedAt: number; complete: boolean }[];
