@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS historical_backtest_runs (
-  date TEXT PRIMARY KEY CHECK (date ~ '^\\d{4}-\\d{2}-\\d{2}$'),
+  date TEXT PRIMARY KEY CHECK (date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'),
   provider TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('RUNNING','SAMPLE_COMPLETE','INCOMPLETE','BUDGET_EXHAUSTED','UNKNOWN')),
   discovery_status TEXT,
