@@ -110,7 +110,7 @@ function finishPlan(input: {
     requiredAccountAddressesToVerify: input.requiredAccountAddressesToVerify,
     accountPrerequisites: input.accountPrerequisites,
     feeEvidence: input.feeEvidence,
-    rentReserveLamports: input.accountPrerequisites.rentEstimate.newAtaRentReserveLamports,
+    rentReserveLamports: input.accountPrerequisites.totalNewRentReserveLamports,
     executionReady: false, paperEntryAuthorized: false,
     blockers: [...new Set(blockers)]
   };
