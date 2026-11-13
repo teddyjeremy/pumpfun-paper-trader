@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/historical-backtest.yml"
       - "scripts/backtest-helius-day.ts"
+      - "src/ingestion/helius-parsed-launch-discovery.ts"
   workflow_dispatch:
     inputs:
       date:
