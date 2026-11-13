@@ -99,6 +99,27 @@ describe("bounded Helius historical backfill", () => {
     expect(outOfOrder.state.reason).toMatch(/pagination moved backwards/i);
   });
 
+  it("fails closed when a resumed legacy scan lacks its prior-page boundary", () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const first = applyAddressSignaturesPage(initial, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null }
+    ]);
+    expect(first.status).toBe("CONTINUE");
+    if (first.status !== "CONTINUE") return;
+    const legacyState = {
+      ...first.state,
+      lastPageSlot: undefined,
+      lastPageBlockTime: undefined
+    } as unknown as HistoricalBackfillState;
+    const resumed = applyAddressSignaturesPage(legacyState, [
+      { signature: older, slot: 11, blockTime: 1050, err: null }
+    ]);
+    expect(resumed.status).toBe("INCOMPLETE");
+    expect(resumed.state.reason).toMatch(/missing the preceding page boundary/i);
+  });
+
   it("rejects duplicate or out-of-order address-history records", () => {
     const initial = createHistoricalBackfillState({
       mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
