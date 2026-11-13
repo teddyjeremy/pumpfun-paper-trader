@@ -254,7 +254,7 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
     if (canMarkParsedLaunchBucketEmpty({
       stoppedOn: page.stoppedOn,
       paginationToken: page.paginationToken,
-      priorVerificationFailure: bucket.reason !== null
+      priorVerificationFailure: bucket.hasUnverifiedMatch === true
     })) {
       bucket.status = "EMPTY";
       bucket.reason = null;
