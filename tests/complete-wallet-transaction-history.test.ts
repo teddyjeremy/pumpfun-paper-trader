@@ -62,6 +62,28 @@ describe("complete paginated wallet transaction history", () => {
     expect(calls).toEqual([walletA, walletB]);
   });
 
+  it("rejects wallet history pages that are not newest-to-oldest", async () => {
+    const fetcher: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { params: [string] };
+      const wallet = body.params[0];
+      return response({
+        data: wallet === walletA
+          ? [transaction("3".repeat(64), walletA, 100), transaction("4".repeat(64), walletA, 101)]
+          : [transaction("5".repeat(64), walletB, 100)]
+      });
+    };
+    const result = await collectCompleteWalletTransactionHistory(mint, [walletA, walletB], {
+      apiKey: "test-key", walletSetVerifiedComplete: true,
+      expectedSignaturesByWallet: {
+        [walletA]: ["3".repeat(64), "4".repeat(64)],
+        [walletB]: ["5".repeat(64)]
+      }, fetcher
+    });
+    expect(result.status).toBe("DATA_INCOMPLETE");
+    expect(result.walletsCovered).toEqual([walletB]);
+    expect(result.warnings.some(warning => warning.includes("ordering moved newer"))).toBe(true);
+  });
+
   it("traverses pagination and fails closed when the page cap leaves a cursor", async () => {
     let call = 0;
     const fetcher: typeof fetch = async (_input, init) => {
