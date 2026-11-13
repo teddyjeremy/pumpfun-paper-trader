@@ -26,14 +26,14 @@ This document is the operational checklist for reaching the first verified simul
 
 ### 1. CI and release integrity
 
-- [x] PR head `690d9e89d6e3d6284308281d8bc9a23addde19e6` passed [GitHub CI run 43423726899](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43423726899): `npm run check` and Cloudflare Worker bundle validation.
-- [x] Historical pagination, PostgreSQL scan-provenance migration, decode-completion revocation, and current-window replay filtering passed [GitHub CI run 43428197546](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43428197546): TypeScript checks, PostgreSQL-backed integration tests, full test suite, build, and Cloudflare Worker bundle validation.
-- [x] Production dashboard deployment `dpl_BARieVKofhUX76xk1JpT3LUqjyVT` is READY at [pumpfun-paper-trader-six.vercel.app](https://pumpfun-paper-trader-six.vercel.app), deployed from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
-- [x] Production Worker deployment succeeded in [Cloudflare deployment workflow 43378493964](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43378493964); deployed version is `1dac036e-76c4-4ff6-90bc-37345d114c3b` from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
-- [ ] Production Worker smoke health and a complete simulated entry/exit lifecycle remain unverified. The deployed main-branch code still reports `tradingReady=false`; PR #77 is not deployed.
-- [x] PostgreSQL-backed integration tests pass in the CI test suite.
-- [ ] The final PR head is reviewed and the merge is performed only against that exact tested head. Current PR head is `447672ee336b1f3a0148b6a3256a2d34dcb49440`; latest CI is green, but the PR remains open.
-- [ ] Production smoke tests pass after the single planned deployment.
+- [x] PR #77 (Worker readiness) and PR #78 (historical dashboard integration) are merged.
+- [x] Vercel production deployment for PR #78 merge commit `5a24c70cb29695c24e9fd0a6fd94c5b481af4907` is READY at [pumpfun-paper-trader-six.vercel.app](https://pumpfun-paper-trader-six.vercel.app).
+- [x] Cloudflare Worker deployment succeeded; current deployed Worker version is `98165354-3d72-46c3-82f2-435f27130fea` (100% traffic). The deployed configuration includes the approved full-wallet-history caps (16 wallets, 2 pages per wallet), ingestion URL, and the required secret bindings.
+- [x] PR #79 documentation corrections passed [CI run 43489914513](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43489914513).
+- [x] PR #80 historical discovery resume fix passed [CI run 43490426078](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43490426078); it remains open for review/merge.
+- [ ] Production Worker health, authenticated event-ingestion acknowledgement and production lease heartbeat remain unverified end to end. The public health endpoints could not be independently reached from this check, and secret values are intentionally not exposed.
+- [ ] Complete deployed simulated entry/exit lifecycle and dashboard reconciliation remain unverified.
+- [ ] Keep production `tradingReady=false`; no paper session has passed the production acceptance gate.
 
 ### 2. Historical data completeness
 
@@ -171,16 +171,14 @@ Until these items pass, dynamic exhaustion remains disabled. Protective exits st
 
 Do not rotate the shared ingestion token without coordinated authorization to update both environments. Never put the token value in repository documentation, commits, logs, or chat.
 
-### 10. Single-batch merge and deployment
+### 10. Release discipline
 
-- [ ] Complete and test all changes on the existing `batch/unsigned-execution-readiness` branch and PR #77.
-- [ ] Keep changes batched; do not repeatedly deploy production during implementation.
-- [x] `vercel.json` keeps `main` deployments enabled and disables Vercel preview deployments for `batch/unsigned-execution-readiness`; no new preview deployment was created after the configuration commit. The production alias remains on main.
-- [ ] Review the final diff and all CI jobs on the exact PR head.
-- [ ] Merge only when all required checks are green and the integration tests pass.
-- [ ] Perform the planned production deployment once.
-- [ ] Run production smoke tests with paper mode only and verify persistence/dashboard integration.
-- [ ] Keep live signing and submission disabled.
+- [x] PR #77 and PR #78 were merged after required checks passed; their production releases are already complete.
+- [x] Keep changes batched and avoid repeated Vercel production deployments during preparation.
+- [ ] Review and merge PR #79 (documentation corrections) and PR #80 (bounded historical discovery resume fix) only after their exact heads and CI results are reviewed.
+- [ ] After PR #80 is merged, rerun the Nov 12 historical workflow from its latest artifact checkpoint; do not spend beyond the existing 5,000-credit discovery allocation or the shared 30,000-credit ceiling.
+- [ ] Perform the deployed paper-only Worker/Neon acceptance test before starting a forward session.
+- [ ] Keep live signing and transaction submission disabled.
 
 ## Historical backtest tooling
 
