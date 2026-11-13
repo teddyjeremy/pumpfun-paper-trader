@@ -1358,6 +1358,40 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           classification: evaluated.rejectionReasons.includes(reason) ? "REJECT" : "WATCH"
         }, `decision-reason:${triggerSignature}:${mint}:${reason}`);
       }
+      // The portfolio transition is reachable only after the complete strict
+      // strategy audit returns BUY and both exact quote legs remain fresh.
+      // This is simulated accounting only; no wallet signing/submission exists.
+      if (this.status.enabled && evaluated.decision === "BUY" && evaluated.buyAllowed &&
+          executableQuoteAvailable && cachedQuote && typeof cachedQuote === "object") {
+        const quoteResult = (cachedQuote as {
+          result?: {
+            buyQuote?: ExecutablePaperQuote;
+            initialSellQuote?: ExecutablePaperQuote;
+          };
+        }).result;
+        if (quoteResult?.buyQuote && quoteResult.initialSellQuote) {
+          const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
+          if (portfolio && !portfolio.enteredMints.includes(mint)) {
+            try {
+              await this.recordPaperEntry({
+                mint,
+                positionId: `paper-entry:${this.activeSessionId}:${mint}:${quoteResult.buyQuote.quoteId}`,
+                buyQuote: quoteResult.buyQuote,
+                sellQuote: quoteResult.initialSellQuote
+              });
+              const committedSessionId = this.activeSessionId;
+              if (committedSessionId) {
+                this.ctx.waitUntil(this.flushAuditEventsToPostgres(committedSessionId));
+              }
+            } catch (error) {
+              await this.appendAudit("ERROR", mint, {
+                triggerSignature, stage: "STRICT_PAPER_ENTRY_TRANSITION",
+                reason: error instanceof Error ? error.message : "Paper entry transition failed closed."
+              }, `paper-entry-error:${triggerSignature}:${mint}`);
+            }
+          }
+        }
+      }
     }
   }
 
