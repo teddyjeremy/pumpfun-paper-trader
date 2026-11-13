@@ -61,6 +61,19 @@ export interface UnsignedFeeMessage {
   messageSha256: string;
 }
 
+export interface UnsignedPlanEvidence {
+  provider: "pump-sdk-4.3.1";
+  venue: "PUMP_CURVE" | "PUMPSWAP";
+  side: "BUY" | "SELL";
+  mint: string;
+  user: string;
+  requiredAccountAddressesToVerify: string[];
+  rentReserveLamports: number | null;
+  executionReady: false;
+  paperEntryAuthorized: false;
+  blockers: string[];
+}
+
 export type UnsignedInstructionFeeEvidence =
   | {
       status: "AVAILABLE";
@@ -68,6 +81,7 @@ export type UnsignedInstructionFeeEvidence =
       writableAccountKeys: string[];
       computeUnitLimit: number;
       estimate: SolanaFeeEstimate;
+      planEvidence?: UnsignedPlanEvidence;
     }
   | {
       status: "UNAVAILABLE";
@@ -75,6 +89,7 @@ export type UnsignedInstructionFeeEvidence =
       messageSha256?: string;
       writableAccountKeys?: string[];
       computeUnitLimit: number;
+      planEvidence?: UnsignedPlanEvidence;
     };
 
 /**
