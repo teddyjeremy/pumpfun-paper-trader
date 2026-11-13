@@ -100,6 +100,7 @@ interface Env {
   FULL_WALLET_HISTORY_ENABLED?: string;
   FULL_WALLET_HISTORY_MAX_PAGES?: string;
   REVIEWED_VOLUME_THRESHOLDS_JSON?: string;
+  PAPER_OBSERVATION_PAUSED?: string;
 }
 
 interface WalletLinkEvidenceSnapshot {
@@ -130,6 +131,7 @@ interface CoordinatorStatus {
   subscriptionsSent: boolean;
   enabled: boolean;
   tradingReady: boolean;
+  observationPaused: boolean;
   readinessBlockers: string[];
   quoteSdkModules: { curve: boolean; pumpSwap: boolean };
   blocker: string;
@@ -166,6 +168,7 @@ const INITIAL_STATUS: CoordinatorStatus = {
   subscriptionsSent: false,
   enabled: false,
   tradingReady: false,
+  observationPaused: false,
   readinessBlockers: ["Coordinator is stopped.", "No active paper session."],
   quoteSdkModules: officialPumpSdkModulesAvailable(),
   blocker: "Coordinator is stopped; runtime paper-trading readiness has not been established.",
@@ -233,6 +236,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private readonly env: Env;
 
 
+  private get observationPaused(): boolean {
+    return this.env.PAPER_OBSERVATION_PAUSED === "true";
+  }
+
   private get postgresIngestConfigured(): boolean {
     return Boolean(this.env.PAPER_EVENT_INGEST_URL && (this.env.PAPER_EVENT_INGEST_TOKEN_V2 || this.env.PAPER_EVENT_INGEST_TOKEN));
   }
@@ -259,7 +266,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     const response = await this.postPostgresIngest("/internal/worker-lease", {
       action: "acquire", leaseName: "pumpfun-paper-trader-coordinator",
-      ownerId: this.postgresLeaseOwnerId, ttlSeconds: 45
+      ownerId: this.postgresLeaseOwnerId, ttlSeconds: 120
     });
     if (!response.ok) {
       let detail = `HTTP ${response.status}`;
@@ -278,7 +285,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       throw new Error("PostgreSQL worker lease was not acquired; another coordinator may hold the unexpired lease.");
     }
     this.postgresLeaseHeld = true;
-    await this.ctx.storage.setAlarm(Date.now() + 15_000);
+    try {
+      await this.ctx.storage.setAlarm(Date.now() + 60_000);
+    } catch {
+      // The one-minute cron also renews the lease; alarm scheduling is a
+      // best-effort backup and must not discard an acquired database lease.
+    }
   }
 
   private async heartbeatPostgresWorkerLease(): Promise<boolean> {
@@ -286,7 +298,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     try {
       const response = await this.postPostgresIngest("/internal/worker-lease", {
         action: "heartbeat", leaseName: "pumpfun-paper-trader-coordinator",
-        ownerId: this.postgresLeaseOwnerId, ttlSeconds: 45
+        ownerId: this.postgresLeaseOwnerId, ttlSeconds: 120
       });
       if (!response.ok) return false;
       const result = await response.json() as { acquired?: boolean };
@@ -723,6 +735,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     await this.hydrate();
+    if (this.observationPaused) {
+      this.socket?.close(1000, "Observation paused");
+      this.socket = null;
+      this.heliusSocket?.close(1000, "Observation paused");
+      this.heliusSocket = null;
+      this.status.connected = false;
+      this.status.subscriptionsSent = false;
+      this.status.heliusConnected = false;
+      return;
+    }
     // The Durable Object's alarm survives eviction, but in-memory lease state
     // does not. Reacquire the PostgreSQL fencing lease before resuming work.
     if (this.status.enabled && this.postgresIngestConfigured && !this.postgresLeaseHeld) {
@@ -762,7 +784,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const now = Date.now();
       const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
       const hasOpenPositions = Boolean(portfolio?.positions.some(position => position.status !== "CLOSED"));
-      const nextCycleDelayMs = hasOpenPositions ? 5_000 : 15_000;
+      const nextCycleDelayMs = hasOpenPositions ? 5_000 : 60_000;
       const pendingRetryAt = this.heliusState.queue
         .map(item => item.retryAfterAt ? Date.parse(item.retryAfterAt) : Number.NaN)
         .filter(at => Number.isFinite(at) && at > now)
@@ -820,11 +842,19 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.syncCounts();
     this.hydrated = true;
     if (this.activeSessionId && this.status.enabled) {
-      await this.appendAudit("WORKER_RESTARTED", null, {
-        discoveryCandidates: this.discovery.candidates.length,
-        verifiedTransactionsRetained: this.verifiedTransactions.length,
-        heliusCoverage: "GAP_UNTIL_RESUBSCRIBED"
-      }, `restart:${crypto.randomUUID()}`);
+      try {
+        await this.appendAudit("WORKER_RESTARTED", null, {
+          discoveryCandidates: this.discovery.candidates.length,
+          verifiedTransactionsRetained: this.verifiedTransactions.length,
+          heliusCoverage: "GAP_UNTIL_RESUBSCRIBED"
+        }, `restart:${crypto.randomUUID()}`);
+      } catch (error) {
+        // Hydration and read-only status must remain available when a storage
+        // quota blocks audit writes. The restart gap remains visible in memory.
+        this.status.lastError = error instanceof Error
+          ? `Restart audit persistence unavailable: ${error.message.slice(0, 120)}`
+          : "Restart audit persistence unavailable.";
+      }
     }
   }
 
@@ -898,7 +928,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async start(): Promise<CoordinatorStatus> {
     await this.hydrate();
-    await this.acquirePostgresWorkerLease();
+    if (this.observationPaused) return this.getStatus();
     if (!this.status.enabled || this.heliusSocket?.readyState !== WebSocket.OPEN) {
       this.markHeliusCoverageGap();
     }
@@ -945,10 +975,29 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put(`audit_event_id:${sessionId}:session-started:${sessionId}`, 1);
       });
       this.activeSessionId = sessionId;
-      this.ctx.waitUntil(this.flushAuditEventsToPostgres(sessionId));
     } else {
       await this.appendAudit("PROVIDER_STATUS", null, { action: "START_REQUESTED" });
     }
+    // Acquire the fenced persistence lease only after the active session ID
+    // exists. Acquiring before session creation sends a null session ID and
+    // leaves the coordinator enabled without a lease or a scheduled alarm.
+    let leaseError: string | null = null;
+    if (!this.postgresLeaseHeld) {
+      try {
+        await this.acquirePostgresWorkerLease();
+      } catch (error) {
+        leaseError = error instanceof Error ? error.message.slice(0, 180) : "Unknown PostgreSQL lease error.";
+      }
+    }
+    if (!this.postgresLeaseHeld) {
+      await this.ctx.storage.put("enabled", false);
+      this.status.enabled = false;
+      this.status.lastError = leaseError ?? "PostgreSQL worker lease is not configured; provider streams remain stopped.";
+      await this.persist();
+      return this.getStatus();
+    }
+
+    if (this.activeSessionId) this.ctx.waitUntil(this.flushAuditEventsToPostgres(this.activeSessionId));
     await this.ctx.storage.put("enabled", true);
     this.status.enabled = true;
     this.status.nextReconnectAt = null;
@@ -1017,6 +1066,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async ensureRunning(): Promise<CoordinatorStatus> {
     await this.hydrate();
+    if (this.observationPaused) {
+      this.socket?.close(1000, "Observation paused");
+      this.socket = null;
+      this.heliusSocket?.close(1000, "Observation paused");
+      this.heliusSocket = null;
+      this.status.connected = false;
+      this.status.subscriptionsSent = false;
+      this.status.heliusConnected = false;
+      return this.getStatus();
+    }
     if (this.activeSessionId) {
       await this.appendAudit("SESSION_HEARTBEAT", null, {
         enabled: this.status.enabled, pumpPortalConnected: this.status.connected,
@@ -1024,7 +1083,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         monitoredCandidates: this.heliusState.subscriptions.length,
         queuedSignatures: this.heliusState.queue.length,
         droppedSignatures: this.heliusState.droppedSignatures
-      }, `heartbeat:${Math.floor(Date.now() / 60_000)}`);
+      }, `heartbeat:${Math.floor(Date.now() / 300_000)}`);
     }
     if (!this.status.enabled) {
       if (this.socket) {
@@ -1044,6 +1103,27 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       return this.getStatus();
     }
 
+    // Renew the lease from the one-minute coordinator tick. This avoids a
+    // 15-second Durable Object alarm/write loop while retaining a 2-minute
+    // lease window for one missed tick.
+    if (this.postgresLeaseHeld && !(await this.heartbeatPostgresWorkerLease())) {
+      this.postgresLeaseHeld = false;
+    }
+    if (!this.postgresLeaseHeld) {
+      try {
+        await this.acquirePostgresWorkerLease();
+      } catch (error) {
+        this.status.lastError = error instanceof Error
+          ? error.message.slice(0, 180)
+          : "Unknown PostgreSQL lease error.";
+        return this.getStatus();
+      }
+      if (!this.postgresLeaseHeld) {
+        this.status.lastError = "PostgreSQL worker lease is not configured; provider streams remain stopped.";
+        return this.getStatus();
+      }
+    }
+
     // Expire stale candidates even if the provider is quiet, then flush state.
     const previousCandidates = this.discovery.candidates;
     const beforeExpiry = previousCandidates.length;
@@ -1054,8 +1134,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       await this.appendAudit("CANDIDATE_EXPIRED", null, { expiredMints, count: expiredMints.length });
       this.reconcileHelius();
       this.pendingWrites += 1;
+      await this.persist();
     }
-    await this.persist();
 
     if (this.heliusSocket?.readyState === WebSocket.OPEN &&
         this.heliusConnectedAtMs > 0 && Date.now() - this.heliusConnectedAtMs >= 14 * 60 * 1000) {
@@ -1100,7 +1180,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (nextReconnectAt > Date.now()) return this.getStatus();
 
     this.connect();
-    await this.persist();
     return this.getStatus();
   }
 
@@ -1124,9 +1203,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       pumpProgramConfigured: Boolean(this.env.PUMPFUN_PROGRAM_ID),
       quoteSdkModulesAvailable: this.status.quoteSdkModules.curve && this.status.quoteSdkModules.pumpSwap
     });
-    this.status.tradingReady = readiness.tradingReady;
-    this.status.readinessBlockers = readiness.blockers;
-    this.status.blocker = readiness.blockers[0] ??
+    const blockers = [...readiness.blockers];
+    if (this.observationPaused) {
+      blockers.unshift("Forward observation is paused while the Durable Objects free-tier daily row-write limit resets.");
+    }
+    this.status.observationPaused = this.observationPaused;
+    this.status.tradingReady = readiness.tradingReady && !this.observationPaused;
+    this.status.readinessBlockers = blockers;
+    this.status.blocker = blockers[0] ??
       "System prerequisites passed; a persistent simulated entry/exit lifecycle still needs verification.";
     return { ...this.status };
   }
