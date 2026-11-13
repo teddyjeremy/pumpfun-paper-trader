@@ -68,6 +68,9 @@ try {
     creditsUsed?: number; provider?: string; requestedLocalDate?: string;
     startTime?: number; endTime?: number;
   };
+  if (previous.requestedLocalDate && previous.requestedLocalDate !== date) {
+    throw new Error("Restored historical discovery artifact belongs to a different date.");
+  }
   if (previous.provider === "HELIUS_PARSED_EVENTS_SCAN") {
     if (previous.schemaVersion !== 2 || previous.requestedLocalDate !== date ||
         previous.startTime !== startTime || previous.endTime !== endTime ||
@@ -251,7 +254,9 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
   if (bucket.status === "INCOMPLETE") continue;
 }
 if (!budgetStopped && artifact.nextBucketIndex >= maxLaunches) {
-  artifact.status = artifact.buckets.every(bucket => bucket.status === "FOUND" || bucket.status === "EMPTY")
+  artifact.status = artifact.buckets.length === maxLaunches &&
+    artifact.buckets.every((bucket, index) => bucket?.index === index &&
+      (bucket.status === "FOUND" || bucket.status === "EMPTY"))
     ? "SAMPLE_COMPLETE" : "INCOMPLETE";
 }
 artifact.launches.sort((a, b) => a.blockTime - b.blockTime || a.signature.localeCompare(b.signature));
