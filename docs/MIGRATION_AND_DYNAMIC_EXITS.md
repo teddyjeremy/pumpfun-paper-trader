@@ -2,6 +2,12 @@
 
 This document supersedes the old rule that rejected all migrated tokens and the old 60-second / 300-second maximum-hold settings for open positions.
 
+## Current runtime limitation (must remain visible)
+
+The Worker currently builds dynamic-exhaustion windows only from verified Pump bonding-curve TradeEvent data. It deliberately does not relabel those events as PumpSwap trades after graduation. Until a PumpSwap event decoder is verified against the deployed program's actual event layout, migrated positions receive fresh full-balance PumpSwap sell quotes and remain managed by the hard/protective stops, but PumpSwap dynamic-exhaustion signals are unavailable. The Worker writes a one-time audit blocker for each migrated position so this limitation is not silent.
+
+Do not describe the migrated-market dynamic exit path as fully implemented until the decoder, complete-window coverage, and restart/replay tests are all verified. A migration or missing dynamic-flow evidence never fabricates a fill or closes a position.
+
 ## State machine
 
 DISCOVERED → CURVE_ACTIVE → ENTRY_PENDING → OPEN_CURVE
