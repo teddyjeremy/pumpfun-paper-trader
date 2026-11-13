@@ -4,9 +4,9 @@ This run is paper-only and uses standard Helius RPC. It does not sign or submit 
 
 ## Budget
 
-The operator-approved initial ceiling is 100,000 Helius credits. The discovery phase defaults to 40,000 credits so approximately 60,000 remain for the per-launch transaction windows. Every standard `getSignaturesForAddress` and `getTransaction` request is counted as one credit. The scripts stop before making a request that would exceed their supplied ceiling. Requests are throttled to four per second.
+The operator-approved initial ceiling is 100,000 Helius credits. The discovery phase defaults to a 40,000-credit ceiling. Every standard `getSignaturesForAddress` and `getTransaction` request is counted as one credit. The scripts stop before making a request that would exceed their supplied ceiling. Requests are throttled to four per second. Discovery now uses page-local duplicate checks rather than retaining every signature from the entire day in memory, and incomplete artifacts preserve a resumable cursor plus the prior page boundary.
 
-A full-day scan is required before selecting the earliest 100 launches. If the 40,000-credit discovery cap is reached before the Nairobi day boundary is crossed, the artifact is marked `BUDGET_EXHAUSTED` and the replay script refuses to run. Do not treat a partial suffix of the day as the first 100 launches.
+A full-day scan is required before selecting up to 100 launches. The sample is time-stratified across 100 equal-width buckets over the Nairobi day (at most one deterministic launch per bucket), rather than taking only the earliest 100 launches. If the 40,000-credit discovery cap is reached before the Nairobi day boundary is crossed, the artifact is marked `BUDGET_EXHAUSTED` and replay refuses to run. A later workflow run can restore the artifact and resume from its cursor instead of repeating the pages already scanned.
 
 ## Run on Windows PowerShell
 
@@ -18,7 +18,7 @@ npm run backtest:discover -- --date=2026-11-12 --utc-offset-minutes=180
 npm run backtest:replay -- --date=2026-11-12 --max-credits=100000
 ```
 
-The fixed +180-minute offset defines November 12 in Nairobi (Africa/Nairobi). The discovery script scans Pump.fun program-address history newest-to-oldest, verifies successful transaction logs, and retains the earliest 100 CreateEvents after it proves the full local day was traversed.
+The fixed +180-minute offset defines November 12 in Nairobi (Africa/Nairobi). The discovery script scans Pump.fun program-address history newest-to-oldest, verifies successful transaction logs, and retains one CreateEvent per time bucket after it proves the full local day was traversed.
 
 The workflow first screens every discovered bonding curve with one `getSignaturesForAddress` page (one additional RPC credit per launch). It ranks the top 30% by successful signature activity, activity across distinct 10-second buckets, and active span. Coins need at least five successful non-create signatures across at least three time buckets to qualify. The screening checkpoint is written after each coin, so a later workflow run can resume without repeating completed screens. Only selected candidates proceed to full 600-second collection and transaction decoding, capped at 120 signatures per launch. It requires exact signature, slot, and block-time reconciliation; any missing transaction, decoder issue, pagination truncation, or unclassified success leaves that launch incomplete. Confirmed failed signatures are counted from the signature index without a transaction fetch.
 
