@@ -18,6 +18,7 @@ on:
     paths:
       - ".github/workflows/historical-backtest.yml"
       - "scripts/backtest-helius-batch.ts"
+      - "package.json"
 
 permissions:
   contents: read
