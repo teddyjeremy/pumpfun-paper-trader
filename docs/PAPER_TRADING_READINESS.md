@@ -66,6 +66,13 @@ This document is the operational checklist for reaching the first verified simul
 
 A fee quote or unsigned instruction plan does not prove that a transaction can be executed. The virtual payer balance and full account state must be verified before the simulated entry is allowed.
 
+### Portfolio sizing and concurrency invariants
+
+- Start with a $1 stake and one concurrent position.
+- At $5 equity, add one concurrent slot and increase the stake to $1.50; at each subsequent equity doubling, add one slot and compound the current stake by 50% ($2.25 at $10, $3.375 at $20, etc.), capped at $100.
+- Count only closed positions as released slots. An open or exit-blocked position continues to occupy its slot.
+- A mint may be entered only once per paper session, including after its position has closed.
+
 ### 6. Worker paper lifecycle and exits
 
 - [x] Worker route requests exact round-trip quote evidence and records strategy audit evidence.
