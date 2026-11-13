@@ -374,12 +374,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     ) ?? 0;
     const verifiedKey = `helius_verified_historical_signatures:${sessionId}:${mint}`;
     const expectedSignatures = new Set(state.signatures.map(item => item.signature));
-    const verified = new Set((await this.ctx.storage.get<string[]>(verifiedKey) ?? [])
-      .filter(signature => expectedSignatures.has(signature)));
+    const verified = new Set(await this.ctx.storage.get<string[]>(verifiedKey) ?? []);
     const transactionKey = `helius_verified_historical_transactions:${sessionId}:${mint}`;
     const storedTransactions = await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(transactionKey) ?? {};
     for (const signature of Object.keys(storedTransactions)) {
-      if (expectedSignatures.has(signature)) verified.add(signature);
+      if (!expectedSignatures.has(signature)) {
+        return {
+          complete: false,
+          reason: "Stored historical transactions contain a signature outside the verified backfill window.",
+          verifiedTransactionCount: 0
+        };
+      }
+      verified.add(signature);
     }
     for (const transaction of this.verifiedTransactions) {
       if (transaction.mint === mint && expectedSignatures.has(transaction.signature)) {
@@ -388,11 +394,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     if (verified.size > 0) await this.ctx.storage.put(verifiedKey, [...verified].slice(-500));
     const failedKey = `helius_failed_historical_signatures:${sessionId}:${mint}`;
-    const failed = new Set((await this.ctx.storage.get<string[]>(failedKey) ?? [])
-      .filter(signature => expectedSignatures.has(signature)));
+    const failed = new Set(await this.ctx.storage.get<string[]>(failedKey) ?? []);
     const archivedKey = `helius_archived_transaction_signatures:${sessionId}:${mint}`;
-    const archived = new Set((await this.ctx.storage.get<string[]>(archivedKey) ?? [])
-      .filter(signature => expectedSignatures.has(signature)));
+    const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
     const legacyArchived = new Set(await this.ctx.storage.get<string[]>(
       `helius_archived_transaction_signatures:${sessionId}`
     ) ?? []);
@@ -403,13 +407,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       `helius_backfill_decode_incomplete:${sessionId}:${mint}`
     );
     const queueSignatures = this.heliusState.queue
-      .filter(work => work.mint === mint && state.signatures.some(item => item.signature === work.signature))
+      .filter(work => work.mint === mint)
       .map(work => work.signature);
-    return assessHistoricalDecodeCoverage({
-      state, queueCursor: cursor, queueSignatures,
-      verifiedSignatures: [...verified], failedSignatures: [...failed],
-      archivedSignatures: [...archived], incompleteReason: failure?.reason ?? null
-    });
+    try {
+      return assessHistoricalDecodeCoverage({
+        state, queueCursor: cursor, queueSignatures,
+        verifiedSignatures: [...verified], failedSignatures: [...failed],
+        archivedSignatures: [...archived], incompleteReason: failure?.reason ?? null
+      });
+    } catch (error) {
+      return {
+        complete: false,
+        reason: error instanceof Error
+          ? `Historical decode evidence is inconsistent: ${error.message}`
+          : "Historical decode evidence is inconsistent.",
+        verifiedTransactionCount: 0
+      };
+    }
   }
 
   private async archiveVerifiedHistoricalTransaction(transaction: VerifiedPumpTransaction): Promise<void> {
