@@ -59,6 +59,7 @@ describe("unsigned Pump instruction account prerequisites", () => {
         executionReady: false, paperEntryAuthorized: false,
         blockers: ["USER_BASE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED",
           "ATA_RENT_AND_VIRTUAL_PAYER_BALANCE_NOT_VERIFIED",
+          "BUYBACK_FEE_RECIPIENT_ACCOUNT_EXISTENCE_AND_STATE_NOT_VERIFIED",
           "USER_VOLUME_ACCUMULATOR_STATE_AND_RENT_NOT_VERIFIED"]
       },
       config: { apiKey: "test-key", now: () => NOW, fetcher: mock.fetcher }
