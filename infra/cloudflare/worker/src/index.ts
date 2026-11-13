@@ -2572,6 +2572,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       socket.addEventListener("error", () => {
         if (this.heliusSocket !== socket) return;
         this.status.lastError = "Helius WebSocket transport error.";
+        // An error can precede a close event or leave the socket half-open.
+        // Invalidate the affected coverage immediately; never wait for close.
+        if (this.status.enabled) this.markHeliusCoverageGap();
         this.auditInBackground("ERROR", null, { subsystem: "HELIUS_WEBSOCKET", message: this.status.lastError });
         void this.persist().catch(() => undefined);
       });
@@ -2581,7 +2584,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.heliusConnectedAtMs = 0;
       this.heliusConnectingSinceMs = 0;
       this.status.lastError = "Unable to create the Helius WebSocket connection.";
+      if (this.status.enabled) this.markHeliusCoverageGap();
       this.auditInBackground("ERROR", null, { subsystem: "HELIUS_CONNECT", message: this.status.lastError });
+      void this.persist().catch(() => undefined);
     }
   }
 
