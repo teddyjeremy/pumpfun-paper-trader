@@ -3243,6 +3243,47 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       gap.endedAt !== null && gap.recoveredAt == null
     );
     for (const gap of gaps) {
+      const independentKey = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+      const independentScan = await this.ctx.storage.get<{
+        status: "SCANNING" | "SCANNED" | "INCOMPLETE";
+        signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
+      }>(independentKey);
+      const independentArchive = await this.ctx.storage.get<{ status: string }>(
+        `${independentKey}:archive_status`
+      );
+      if (independentScan?.status === "SCANNED" && independentArchive?.status === "ARCHIVED") {
+        const [verifiedSignatures, failedSignatures, archivedSignatures] = await Promise.all([
+          this.ctx.storage.get<string[]>(`${independentKey}:verified_signatures`),
+          this.ctx.storage.get<string[]>(`${independentKey}:failed_signatures`),
+          this.ctx.storage.get<string[]>(`${independentKey}:archived_signatures`)
+        ]);
+        const proof = assessHeliusGapRecovery({
+          gap,
+          signatures: independentScan.signatures,
+          verifiedSignatures: verifiedSignatures ?? [],
+          failedSignatures: failedSignatures ?? [],
+          archivedSignatures: archivedSignatures ?? []
+        });
+        if (proof.recovered) {
+          const recovered = markHeliusCoverageGapRecovered(
+            this.heliusState, gap.mint, gap.startedAt,
+            { recovered: true, recoveredSignatures: proof.recoveredSignatures }
+          );
+          if (recovered !== this.heliusState) {
+            this.heliusState = recovered;
+            await this.ctx.storage.put("helius_monitor_state", this.heliusState);
+            await this.appendAudit("OBSERVATION", gap.mint, {
+              provider: "helius",
+              historicalGapRecovery: "RECOVERED",
+              startedAt: gap.startedAt,
+              endedAt: gap.endedAt,
+              recoveredSignatures: proof.recoveredSignatures,
+              evidenceSource: "INDEPENDENT_GAP_HISTORY_AND_NEON_ARCHIVE_ACKNOWLEDGEMENTS"
+            }, "helius-gap-recovered:" + sessionId + ":" + gap.mint + ":" + gap.startedAt);
+          }
+          continue;
+        }
+      }
       const backfill = await this.ctx.storage.get<HistoricalBackfillState>(
         "helius_backfill:" + sessionId + ":" + gap.mint
       );
