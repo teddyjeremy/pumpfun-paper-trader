@@ -570,6 +570,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         continue;
       }
       try {
+        // Fetch the slower USD reference first; refresh authoritative market
+        // accounts immediately before the short-lived full-balance sell quote.
+        const solUsdResult = await fetchSolUsdPrice({ nowMs: Date.now() });
+        if (solUsdResult.status !== "AVAILABLE") {
+          throw new Error(`SOL/USD reference unavailable: ${solUsdResult.reason}`);
+        }
         const marketState = await refreshPumpMarketStateFromHelius({
           state: createUnverifiedMarketState(position.mint),
           config
@@ -592,10 +598,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const result = await executePaperExit({
           position, marketState, windows: [],
           quoteSell: async ({ tokenAmountBaseUnits }) => {
-            const solUsdResult = await fetchSolUsdPrice({ nowMs: Date.now() });
-            if (solUsdResult.status !== "AVAILABLE") {
-              throw new Error(`SOL/USD reference unavailable: ${solUsdResult.reason}`);
-            }
             const quote = await quoteFetcher({
               side: "SELL", amountBaseUnits: tokenAmountBaseUnits
             });
