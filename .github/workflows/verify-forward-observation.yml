@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/verify-forward-observation.yml"
+      - "infra/cloudflare/worker/src/**"
+      - "infra/cloudflare/worker/src/**"
 
 permissions:
   contents: read
@@ -31,18 +33,27 @@ jobs:
               const blockers = Array.isArray(s.readinessBlockers) ? s.readinessBlockers : [];
               const calibrationBlocked = blockers.some(x => String(x).includes("Reviewed chronological volume calibration is not configured"));
               const leaseBlocked = blockers.some(x => String(x).includes("Fenced PostgreSQL Worker lease is not held"));
-              const checks = {
-                paperMode: s.mode === "paper",
-                sessionEnabled: s.enabled === true,
-                discoveryConnected: s.connected === true,
-                discoverySubscribed: s.subscriptionsSent === true,
-                heliusConnected: s.heliusConnected === true,
-                persistenceLeaseHeld: !leaseBlocked,
-                simulatedEntriesLocked: s.tradingReady === false && calibrationBlocked
-              };
+              const checks = s.observationPaused === true
+                ? {
+                    paperMode: s.mode === "paper",
+                    observationPaused: true,
+                    sessionEnabled: s.enabled === true,
+                    providerStreamsClosed: s.connected === false && s.subscriptionsSent === false && s.heliusConnected === false,
+                    simulatedEntriesLocked: s.tradingReady === false
+                  }
+                : {
+                    paperMode: s.mode === "paper",
+                    sessionEnabled: s.enabled === true,
+                    discoveryConnected: s.connected === true,
+                    discoverySubscribed: s.subscriptionsSent === true,
+                    heliusConnected: s.heliusConnected === true,
+                    persistenceLeaseHeld: !leaseBlocked,
+                    simulatedEntriesLocked: s.tradingReady === false && calibrationBlocked
+                  };
               process.stdout.write(JSON.stringify({
                 checks,
                 blockers,
+                observationPaused: s.observationPaused === true,
                 lastError: typeof s.lastError === "string" ? s.lastError.slice(0, 240) : null,
                 reconnectAttempts: s.reconnectAttempts,
                 nextReconnectAt: s.nextReconnectAt,
