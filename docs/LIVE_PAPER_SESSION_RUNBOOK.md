@@ -11,10 +11,11 @@ A four-hour run is an operational observation window, not proof of profitability
 ## Phase 0 — release and environment preflight
 
 1. Confirm PR #77 is merged only after every required CI job passes on the exact reviewed head.
-2. Perform the single planned Vercel and Cloudflare production deployment. Do not create repeated preview/production deployments during preparation.
-3. Confirm the production Worker reports `mode=paper` and `tradingReady=false` until all runtime gates pass. A `true` value means system prerequisites only; it is not proof of a complete persisted trade lifecycle.
-4. Confirm the production Worker and Vercel API use HTTPS.
-5. Confirm these secrets are configured in their intended environments without printing or copying their values:
+2. Apply the ordered Neon migrations, including the PR's new `0008` and `0009` migrations, against the intended production database; verify the migration ledger before deploying code that depends on them.
+3. Perform the single planned Vercel and Cloudflare production deployment. Do not create repeated preview/production deployments during preparation.
+4. Confirm the production Worker reports `mode=paper` and `tradingReady=false` until all runtime gates pass. A `true` value means system prerequisites only; it is not proof of a complete persisted trade lifecycle.
+5. Confirm the production Worker and Vercel API use HTTPS.
+6. Confirm these secrets are configured in their intended environments without printing or copying their values:
    - Worker: `CONTROL_TOKEN`, `HELIUS_API_KEY`, `PAPER_EVENT_INGEST_URL`, `PAPER_EVENT_INGEST_TOKEN`
    - Worker wallet-history collection: operator approved the bounded configuration on 2026-11-13: `FULL_WALLET_HISTORY_ENABLED=true`, `FULL_WALLET_HISTORY_MAX_PAGES=2`, at most 16 wallets per candidate refresh. Do not increase either cap or the refresh frequency without renewed approval. Monitor actual Helius credit use and stop collection if it exceeds the approved budget.
    - Vercel: `DATABASE_URL`, `PAPER_EVENT_INGEST_TOKEN`
