@@ -100,6 +100,8 @@ export async function collectCompleteWalletTransactionHistory(
     const seenCursors = new Set<string>();
     let cursor: string | null = null;
     let walletComplete = false;
+    let previousPageLastSlot: number | null = null;
+    let previousPageLastBlockTime: number | null = null;
 
     for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
       const params: Record<string, unknown> = {
@@ -130,6 +132,7 @@ export async function collectCompleteWalletTransactionHistory(
         break;
       }
 
+      let previousRecord: { slot: number; blockTime: number } | null = null;
       for (const raw of payload.data) {
         const transaction = asRecord(raw);
         const signature = transaction?.signature;
@@ -148,6 +151,18 @@ export async function collectCompleteWalletTransactionHistory(
           walletComplete = false;
           break;
         }
+        const currentRecord = { slot: slot as number, blockTime: blockTime as number };
+        if ((previousRecord && (currentRecord.slot > previousRecord.slot ||
+            currentRecord.blockTime > previousRecord.blockTime)) ||
+            (!previousRecord && previousPageLastSlot !== null &&
+              (currentRecord.slot > previousPageLastSlot ||
+                (previousPageLastBlockTime !== null && currentRecord.blockTime > previousPageLastBlockTime)))) {
+          warnings.push(`Transaction history page ordering moved newer for wallet ${wallet}.`);
+          incomplete = true;
+          walletComplete = false;
+          break;
+        }
+        previousRecord = currentRecord;
         seenSignatures.add(signature);
         transactionsChecked += 1;
         if (meta.err !== null) continue;
@@ -184,6 +199,10 @@ export async function collectCompleteWalletTransactionHistory(
         }
       }
       if (incomplete && !walletComplete && warnings[warnings.length - 1]?.includes(wallet)) break;
+      if (previousRecord) {
+        previousPageLastSlot = previousRecord.slot;
+        previousPageLastBlockTime = previousRecord.blockTime;
+      }
       if (typeof nextCursor !== "string" || nextCursor.length === 0) {
         walletComplete = true;
         break;
