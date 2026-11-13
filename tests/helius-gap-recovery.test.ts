@@ -27,6 +27,37 @@ describe("Helius WebSocket gap recovery", () => {
     })).toMatchObject({ recovered: true, recoveredSignatures: 3, reason: null });
   });
 
+  it("rejects invalid gap time, signature, address and slot anchors", () => {
+    const invalidGaps = [
+      { ...gap, mint: "bad" },
+      { ...gap, startedAt: "bad-date" },
+      { ...gap, endedAt: "2026-11-13T09:59:00.000Z" },
+      { ...gap, startSignature: "bad-signature" },
+      { ...gap, startSlot: null },
+      { ...gap, endSlot: 99 }
+    ];
+    for (const invalidGap of invalidGaps) {
+      expect(assessHeliusGapRecovery({
+        gap: invalidGap, signatures: records,
+        verifiedSignatures: [sig("3"), sig("1")],
+        failedSignatures: [sig("2")],
+        archivedSignatures: [sig("3"), sig("1")]
+      }).recovered).toBe(false);
+    }
+  });
+
+  it("rejects malformed transaction status records", () => {
+    const malformed = [{ ...records[0]!, err: "failed" }, ...records.slice(1)];
+    const result = assessHeliusGapRecovery({
+      gap, signatures: malformed,
+      verifiedSignatures: [sig("3"), sig("1")],
+      failedSignatures: [sig("2")],
+      archivedSignatures: [sig("3"), sig("1")]
+    });
+    expect(result.recovered).toBe(false);
+    expect(result.reason).toContain("malformed signature records");
+  });
+
   it("does not treat a closed/reconnected socket as recovered without anchors", () => {
     expect(assessHeliusGapRecovery({
       gap: { ...gap, endSignature: null, endSlot: null },
