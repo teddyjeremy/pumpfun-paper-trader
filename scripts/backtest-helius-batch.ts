@@ -44,7 +44,7 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 
 const date = option("date", "");
 const batchSize = integer("batch-size", 20, 20);
-const maxCredits = integer("max-credits", 30_000, 30_000);
+const maxCredits = integer("max-credits", 50_000, 50_000);
 const apiKey = process.env.HELIUS_API_KEY ?? "";
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !apiKey.trim()) {
   throw new Error("Set HELIUS_API_KEY and pass --date=YYYY-MM-DD.");
@@ -88,7 +88,7 @@ try {
       checkpoint.discoveryCredits !== discovery.creditsUsed ||
       checkpoint.screeningCredits !== screening.creditsUsed ||
       checkpoint.legacyPriorCreditsUsed !== (discovery.legacyPriorCreditsUsed ?? 0) ||
-      checkpoint.totalCreditCeiling !== maxCredits ||
+      checkpoint.totalCreditCeiling > maxCredits ||
       JSON.stringify(checkpoint.selectedLaunchIndexes) !== JSON.stringify(selectedLaunchIndexes) ||
       checkpoint.nextCandidateIndex < 0 || checkpoint.nextCandidateIndex > selectedLaunchIndexes.length ||
       checkpoint.cumulativeCreditsUsed < (discovery.legacyPriorCreditsUsed ?? 0) + discovery.creditsUsed + screening.creditsUsed ||
@@ -107,6 +107,18 @@ try {
   };
   await atomicJson(checkpointPath, checkpoint);
 }
+// Old checkpoints counted incomplete coins as completed. Normalize them so
+// one higher-cap replay can retry those exact candidates without duplicating
+// already complete coins.
+checkpoint.completedMints = checkpoint.completedMints.filter(mint => !checkpoint.incompleteMints.includes(mint));
+checkpoint.totalCreditCeiling = maxCredits;
+const incompleteMintSet = new Set(checkpoint.incompleteMints);
+const firstIncompleteCandidate = selectedLaunchIndexes.findIndex(index =>
+  incompleteMintSet.has(discovery.launches[index]!.event.mint)
+);
+if (firstIncompleteCandidate >= 0) {
+  checkpoint.nextCandidateIndex = Math.min(checkpoint.nextCandidateIndex, firstIncompleteCandidate);
+}
 const solUsd = await fetchSolUsdPrice();
 if (solUsd.status !== "AVAILABLE") throw new Error("Fresh SOL/USD reference unavailable.");
 const startIndex = checkpoint.nextCandidateIndex;
@@ -117,14 +129,14 @@ for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex 
   const index = selectedLaunchIndexes[candidateIndex]!;
   const launch = discovery.launches[index]!;
   const remaining = maxCredits - checkpoint.cumulativeCreditsUsed;
-  // A coin is an atomic work unit: at most two 100-signature pages plus 120 transaction fetches.
-  // Never start a coin unless its worst-case collection budget is reserved.
-  const maxCreditsPerCoin = 122;
+  // A coin is an atomic work unit: at most five 100-signature pages plus
+  // 500 raw transaction fetches. Reserve the full bound before starting it.
+  const maxCreditsPerCoin = 505;
   if (remaining < maxCreditsPerCoin) { budgetStopped = true; break; }
   const collected = await collectHistoricalLaunchWindow({
     mint: launch.event.mint, bondingCurve: launch.event.bondingCurve,
     createSignature: launch.signature, launchBlockTime: launch.blockTime,
-    horizonSeconds: 600, maxSignatures: 120
+    horizonSeconds: 600, maxSignatures: 500
   }, { apiKey, maxCredits: remaining, requestIntervalMs: 250 });
   checkpoint.cumulativeCreditsUsed += collected.creditsUsed;
   const replay = collected.status === "COMPLETE"
@@ -165,6 +177,7 @@ for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex 
       signatureCount: collected.state.signatures.length, pagesScanned: collected.state.pagesScanned,
       verifiedTransactions: collected.transactions.length,
       confirmedFailedSignatures: collected.failedSignatures.length,
+      ignoredNonMatchingSignatures: collected.ignoredSignatures.length,
       creditsUsed: collected.creditsUsed, reason: collected.reason
     },
     replay: replay ? {
@@ -180,10 +193,17 @@ for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex 
     break; // Do not publish a partial coin file; the next run retries this coin atomically.
   }
   await atomicJson(resolve(directory, "coins", `${String(index).padStart(4, "0")}-${launch.event.mint}.json`), record);
-  if (collected.status !== "COMPLETE") checkpoint.incompleteMints.push(launch.event.mint);
-  checkpoint.completedMints.push(launch.event.mint);
-  if (replay?.firstSetup?.setupEligible === true) checkpoint.marketPatternMints.push(launch.event.mint);
-  else checkpoint.noSetupMints.push(launch.event.mint);
+  checkpoint.completedMints = checkpoint.completedMints.filter(mint => mint !== launch.event.mint);
+  checkpoint.incompleteMints = checkpoint.incompleteMints.filter(mint => mint !== launch.event.mint);
+  checkpoint.marketPatternMints = checkpoint.marketPatternMints.filter(mint => mint !== launch.event.mint);
+  checkpoint.noSetupMints = checkpoint.noSetupMints.filter(mint => mint !== launch.event.mint);
+  if (collected.status === "COMPLETE") {
+    checkpoint.completedMints.push(launch.event.mint);
+    if (replay?.firstSetup?.setupEligible === true) checkpoint.marketPatternMints.push(launch.event.mint);
+    else checkpoint.noSetupMints.push(launch.event.mint);
+  } else {
+    checkpoint.incompleteMints.push(launch.event.mint);
+  }
   checkpoint.nextCandidateIndex = candidateIndex + 1;
   checkpoint.updatedAt = new Date().toISOString();
   await atomicJson(checkpointPath, checkpoint);
@@ -202,8 +222,10 @@ const summary = {
   cumulativeCreditsUsed: checkpoint.cumulativeCreditsUsed,
   remainingCredits: maxCredits - checkpoint.cumulativeCreditsUsed,
   nextCandidateIndex: checkpoint.nextCandidateIndex, budgetStopped,
-  status: checkpoint.nextCandidateIndex >= selectedLaunchIndexes.length ? "ALL_SELECTED_LAUNCHES_PROCESSED"
-    : budgetStopped ? "PAUSED_BUDGET_OR_MID_COIN" : "BATCH_COMPLETE",
+  status: budgetStopped ? "PAUSED_BUDGET_OR_MID_COIN"
+    : checkpoint.nextCandidateIndex >= selectedLaunchIndexes.length && checkpoint.incompleteMints.length === 0
+      ? "ALL_SELECTED_LAUNCHES_COMPLETE"
+      : checkpoint.nextCandidateIndex >= selectedLaunchIndexes.length ? "INCOMPLETE_COVERAGE" : "BATCH_COMPLETE",
   solUsdReference: solUsd.observation,
   sampleWarning: "The dataset is the highest activity-ranked 30% of the discovery sample, not a random representative sample. Signature activity is not unique buyers or confirmed buy volume; use for efficient candidate triage only, not population-wide profitability estimates."
 };
