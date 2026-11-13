@@ -72,6 +72,25 @@ describe("unsigned Pump instruction account prerequisites", () => {
     expect(mock.rentCalls.sort((a, b) => a - b)).toEqual([137, 165]);
   });
 
+  it("fails closed when PumpSwap has no configured buyback fee recipients", async () => {
+    const identity = await deriveNonSigningVirtualTraderIdentity();
+    await expect(inspectPumpSwapV2InstructionPrerequisites({
+      identity,
+      instruction: {
+        provider: "pump-sdk-4.3.1", venue: "PUMPSWAP", side: "BUY",
+        mint: MINT, user: identity.publicKey, quoteMint: QUOTE,
+        baseTokenProgram: TOKEN_PROGRAM_ID.toBase58(),
+        quoteTokenProgram: TOKEN_PROGRAM_ID.toBase58(),
+        buybackFeeRecipients: [],
+        instructions: [], requiredAccountAddressesToVerify: [],
+        slot: 1234, observedAt: new Date(NOW).toISOString(),
+        executionReady: false, paperEntryAuthorized: false,
+        blockers: ["BUYBACK_QUOTE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED"]
+      },
+      config: { apiKey: "test-key", now: () => NOW, fetcher: fetcherForMissingAccounts().fetcher }
+    })).rejects.toThrow("at least one buyback fee recipient");
+  });
+
   it("checks every configured PumpSwap buyback quote ATA and totals all missing ATA rent", async () => {
     const identity = await deriveNonSigningVirtualTraderIdentity();
     const recipients = [Keypair.generate().publicKey.toBase58(), Keypair.generate().publicKey.toBase58()];
