@@ -131,8 +131,11 @@ app.post("/internal/worker-lease", async (request, reply) => {
       return await heartbeatWorkerLease(leaseName, ownerId, typeof ttlSeconds === "number" ? ttlSeconds : 45);
     }
     return { released: await releaseWorkerLease(leaseName, ownerId) };
-  } catch {
-    return reply.code(503).send({ error: "Worker lease persistence is unavailable." });
+  } catch (error) {
+    const rawDetail = error instanceof Error ? error.message : "Unknown database error.";
+    const detail = rawDetail.replace(/postgres(?:ql)?:\/\/\\S+/gi, "[redacted connection string]").slice(0, 180);
+    request.log.error({ detail }, "Worker lease persistence failed");
+    return reply.code(503).send({ error: "Worker lease persistence is unavailable.", detail });
   }
 });
 
