@@ -1,0 +1,78 @@
+name: Historical paper replay (checkpointed)
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Nairobi calendar date to replay (YYYY-MM-DD)"
+        required: true
+        default: "2026-11-12"
+        type: string
+      previous_run_id:
+        description: "Previous run ID containing pump-backtest-state for this date; leave blank for first run"
+        required: false
+        type: string
+  push:
+    branches:
+      - batch/unsigned-execution-readiness
+    paths:
+      - ".github/workflows/historical-backtest.yml"
+      - "scripts/backtest-helius-batch.ts"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-paper-replay-${{ github.event.inputs.date || '2026-11-12' }}
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      BACKTEST_DATE: ${{ github.event.inputs.date || '2026-11-12' }}
+      PREVIOUS_RUN_ID: ${{ github.event.inputs.previous_run_id || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Restore previous checkpoint
+        if: env.PREVIOUS_RUN_ID != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-backtest-state-${{ github.event.inputs.date || '2026-11-12' }}
+          path: artifacts
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.inputs.previous_run_id }}
+
+      - name: Validate Helius secret
+        run: |
+          test -n "$HELIUS_API_KEY" || { echo "HELIUS_API_KEY repository secret is missing"; exit 1; }
+
+      - name: Discover the complete day (first run only)
+        run: |
+          if [ ! -f "artifacts/pump-launch-discovery-$BACKTEST_DATE.json" ]; then
+            npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=40000 --max-launches=100
+          else
+            echo "Restored existing discovery artifact; skipping discovery."
+          fi
+
+      - name: Replay the next 20 launches
+        run: npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=100000
+
+      - name: Save checkpoint and collected data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-${{ github.event.inputs.date || '2026-11-12' }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
