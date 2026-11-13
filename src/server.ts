@@ -8,7 +8,7 @@ import { trackingSnapshot } from "./diagnostics/tracker.js";
 import {
   acquireWorkerLease, heartbeatWorkerLease, persistPaperAuditEvents,
   releaseWorkerLease, getPersistenceStatus, getTradingDashboardSnapshot, getPaperSessionLedgerSnapshot,
-  persistHeliusBackfillArchive, getHeliusBackfillReplayDataset,
+  persistHeliusBackfillArchive, persistHeliusGapRecoveryArchive, getHeliusBackfillReplayDataset,
   getHeliusBackfillDashboardSnapshot
 } from "./persistence/postgres.js";
 import { fetchSolUsdPrice } from "./ingestion/sol-usd-price.js";
@@ -26,7 +26,7 @@ export const app = Fastify({
 app.addHook("onRequest", async (request, reply) => {
   const pathname = request.url.split("?")[0];
   if (pathname === "/health" || pathname === "/ready") return;
-  if (pathname === "/internal/paper-events" || pathname === "/internal/worker-lease" || pathname === "/internal/helius-backfill") {
+  if (pathname === "/internal/paper-events" || pathname === "/internal/worker-lease" || pathname === "/internal/helius-backfill" || pathname === "/internal/helius-gap-recovery") {
     const expected = config.PAPER_EVENT_INGEST_TOKEN;
     if (!isStrongServiceToken(expected)) return reply.code(503).send({ error: "Internal ingestion is unavailable until PAPER_EVENT_INGEST_TOKEN is configured with at least 32 characters." });
     const authorization = request.headers.authorization ?? "";
@@ -91,6 +91,26 @@ app.post("/internal/helius-backfill", async (request, reply) => {
     const conflict = message.includes("conflicts") || message.includes("invalid");
     return reply.code(conflict ? 409 : 503).send({
       error: conflict ? message : "Helius archive persistence failed; the sender should retry."
+    });
+  }
+});
+
+app.post("/internal/helius-gap-recovery", async (request, reply) => {
+  const body = request.body && typeof request.body === "object"
+    ? request.body as Record<string, unknown> : {};
+  if (typeof body.sessionId !== "string" || typeof body.mint !== "string" ||
+      !body.gap || typeof body.gap !== "object") {
+    return reply.code(400).send({ error: "sessionId, mint and independent gap recovery state are required." });
+  }
+  try {
+    await persistHeliusGapRecoveryArchive(body as never);
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const conflict = message.includes("conflicts") || message.includes("invalid") ||
+      message.includes("cannot be archived") || message.includes("must remain");
+    return reply.code(conflict ? 409 : 503).send({
+      error: conflict ? message : "Helius gap archive persistence failed; the sender should retry."
     });
   }
 });
