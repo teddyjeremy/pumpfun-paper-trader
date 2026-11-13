@@ -2976,6 +2976,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     );
     for (const gap of gaps) {
       const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+      const subscription = this.heliusState.subscriptions.find(item => item.mint === gap.mint);
       const saved = await this.ctx.storage.get<{
         bondingCurve: string;
         status: "SCANNING" | "SCANNED" | "INCOMPLETE";
@@ -2988,6 +2989,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       // Skip this already-scanned interval and continue to the next one; a
       // completed scan must not starve later interruption intervals.
       if (saved?.status === "SCANNED") continue;
+      const bondingCurve = saved?.bondingCurve ?? subscription?.bondingCurve;
+      if (!bondingCurve) continue;
 
       const throttledFetcher: typeof fetch = async (input, init) => {
         while (!this.heliusBucket.tryTake()) {
@@ -2999,7 +3002,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         return fetch(input, init);
       };
       const result = await fetchHeliusGapAddressHistory(
-        saved?.bondingCurve ?? this.heliusState.subscriptions.find(item => item.mint === gap.mint)?.bondingCurve ?? "",
+        bondingCurve,
         gap,
         { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed", fetcher: throttledFetcher },
         throttledFetcher,
@@ -3008,7 +3011,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       );
       const retryFromSavedBoundary = !result.complete && !result.resume && saved?.resume;
       const next = {
-        bondingCurve: subscription.bondingCurve,
+        bondingCurve,
         status: result.complete ? "SCANNED" as const : "SCANNING" as const,
         ...(result.resume ? { resume: result.resume } :
           retryFromSavedBoundary ? { resume: saved.resume } : {}),
