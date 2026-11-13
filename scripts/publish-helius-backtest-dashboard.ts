@@ -50,7 +50,6 @@ if (screening && (screening.date !== date || !Array.isArray(screening.results) |
 if (ranking && ranking.date !== date) throw new Error("Ranking artifact belongs to another date.");
 if (checkpoint && checkpoint.date !== date) throw new Error("Replay checkpoint belongs to another date.");
 const rankingByMint = new Map((ranking?.candidates ?? []).map(candidate => [candidate.mint, candidate]));
-const screenByIndex = new Map((screening?.results ?? []).map(row => [row.index, row.result]));
 const selected = new Set(screening?.selectedLaunchIndexes ?? []);
 const screenRows = new Map((screening?.results ?? []).map(row => [row.index, row.result]));
 const candidates = discovery.launches.map((launch, index) => {
@@ -70,7 +69,7 @@ const complete = discovery.status === "SAMPLE_COMPLETE" && screening?.status ===
 const status = complete ? "SAMPLE_COMPLETE" : discovery.status === "BUDGET_EXHAUSTED" ? "BUDGET_EXHAUSTED" :
   discovery.status === "INCOMPLETE" || screening?.status === "BUDGET_EXHAUSTED" ? "INCOMPLETE" :
   discovery.status === "SAMPLE_COMPLETE" ? "RUNNING" : "UNKNOWN";
-const creditsUsed = Number(discovery.creditsUsed ?? 0) + Number(screening?.creditsUsed ?? 0) + Number(checkpoint?.creditsUsed ?? 0);
+const creditsUsed = Math.max(Number(discovery.creditsUsed ?? 0) + Number(screening?.creditsUsed ?? 0), Number(checkpoint?.creditsUsed ?? 0));
 const summary = {
   date, provider: discovery.provider ?? "HELIUS_PARSED_EVENTS_SCAN", status,
   discoveryStatus: discovery.status, screeningStatus: screening?.status ?? null,
