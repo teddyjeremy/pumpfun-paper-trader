@@ -10,7 +10,7 @@ type BucketState = {
   index: number; startTime: number; endTime: number;
   status: "RUNNING" | "FOUND" | "EMPTY" | "INCOMPLETE";
   paginationToken: string | null; pagesScanned: number;
-  scannedTransactions: number; creditsUsed: number;
+  scannedTransactions: number; creditsUsed: number; hasUnverifiedMatch?: boolean;
   launch?: VerifiedParsedLaunch; reason: string | null;
 };
 type Artifact = {
