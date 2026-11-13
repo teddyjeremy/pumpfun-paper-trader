@@ -8,7 +8,8 @@ const ready = {
   strategyDecision: "BUY" as const,
   buyAllowed: true,
   executableQuoteAvailable: true,
-  hasBuyAndSellQuotes: true
+  hasBuyAndSellQuotes: true,
+  unsignedPlanAuthorized: true
 };
 
 describe("paper entry persistence gate", () => {
@@ -23,7 +24,8 @@ describe("paper entry persistence gate", () => {
     ["non-BUY decision", { strategyDecision: "WATCH" as const }],
     ["failed strict strategy audit", { buyAllowed: false }],
     ["stale or unavailable executable quote", { executableQuoteAvailable: false }],
-    ["missing quote leg", { hasBuyAndSellQuotes: false }]
+    ["missing quote leg", { hasBuyAndSellQuotes: false }],
+    ["unsigned plan not authorized after account, rent and payer checks", { unsignedPlanAuthorized: false }]
   ])("fails closed for %s", (_label, override) => {
     expect(canCommitPaperEntry({ ...ready, ...override })).toBe(false);
   });
