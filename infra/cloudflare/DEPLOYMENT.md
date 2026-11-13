@@ -27,6 +27,7 @@ Current documented Workers Free / Durable Objects Free allowances:
 - Workers: 100,000 requests/day, 10 ms CPU per invocation, 128 MB memory.
 - Durable Objects: 100,000 requests/day, 13,000 GB-seconds/day.
 - SQLite-backed Durable Object storage: 5 million row reads/day, 100,000 row writes/day, 5 GB stored data.
+- Each Durable Object `setAlarm()` counts as one row write; the coordinator uses a 60-second idle alarm and avoids unconditional per-minute snapshots.
 - Incoming Durable Object WebSocket messages use a 20:1 request-counting ratio.
 
 One 128 MB Durable Object kept active for 24 hours uses approximately 10,800 GB-seconds/day (0.125 GB × 86,400 seconds), about 83% of the 13,000 GB-second daily allowance. This leaves limited headroom. The one-minute Cron Trigger is limited to one coordinator and one small health/reconnect call.
