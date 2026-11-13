@@ -47,6 +47,17 @@ describe("Pump.fun CreateEvent decoder", () => {
     });
   });
 
+  it("preserves verified launch identity when a newer event appends bounded fields", () => {
+    const [event] = decodePumpCreateEvents([
+      "Program data: " + encodeBase64([...createEventPayload(), ...u64(42n)])
+    ]);
+    expect(event).toMatchObject({
+      mint: "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+      bondingCurve: "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+      trailingBytes: 8
+    });
+  });
+
   it("ignores unrelated program data and non-data log lines", () => {
     expect(decodePumpCreateEvents([
       "Program log: Instruction: Buy",
