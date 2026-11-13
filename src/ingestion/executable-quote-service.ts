@@ -385,7 +385,21 @@ export function createPumpUnsignedPlanFeeEvidenceBuilder(input: {
           plan.venue !== ("venue" in quote ? quote.venue : "PUMPSWAP")) {
         return unavailable("Unsigned plan does not match the exact quote identity.");
       }
-      return plan.feeEvidence;
+      return {
+        ...plan.feeEvidence,
+        planEvidence: {
+          provider: plan.provider,
+          venue: plan.venue,
+          side: plan.side,
+          mint: plan.mint,
+          user: plan.user,
+          requiredAccountAddressesToVerify: plan.requiredAccountAddressesToVerify,
+          rentReserveLamports: plan.rentReserveLamports,
+          executionReady: false,
+          paperEntryAuthorized: false,
+          blockers: plan.blockers
+        }
+      };
     } catch (error) {
       return unavailable(error instanceof Error
         ? error.message : "Exact unsigned-message fee plan could not be built.");
