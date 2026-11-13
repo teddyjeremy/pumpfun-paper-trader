@@ -34,9 +34,9 @@ This document is the operational checklist for reaching the first verified simul
 - [x] Persist per-mint Helius interruption intervals from the last confirmed subscription boundary through the next subscription acknowledgement; a reconnect closes the interval but does not clear the incomplete-mint flag.
 - [x] Persist the last pre-gap and first post-reconnect notification signature/slot as recovery anchors; subscription rejection also opens a durable interval.
 - [x] Added a strict gap-recovery verifier: it requires both signature/slot anchors in newest-to-oldest bonding-curve history and terminal verified/failed outcomes for every signature in the inclusive interval; successful transactions must also be archived.
-- [ ] Wire the verifier to the Worker's persisted backfill/decode/archive records and call the state-clear operation only after that proof succeeds. Until then, interrupted mints remain incomplete.
-- [x] Gap-recovery verifier and proof-gated incomplete-mint clearing tests passed [CI run 43431948846](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43431948846): 63 test files / 476 tests, TypeScript checks, and Cloudflare Worker bundle validation.
-- [ ] Backfill each persisted interruption interval by bonding-curve address and reconcile the complete signature set against archived verified/failed outcomes before marking any interval recovered.
+- [x] Wire proof-gated recovery for interruption intervals fully contained in a completed launch-window backfill; the Worker checks terminal outcomes and Neon archive acknowledgements before clearing the incomplete flag.
+- [x] Gap-recovery verifier and proof-gated incomplete-mint clearing tests passed [CI run 43431948846](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43431948846). Worker-level tests now also cover recovery only after Neon acknowledgement and refusal when one successful transaction remains unarchived.
+- [ ] Independently scan and archive interruption intervals that extend beyond the launch-window backfill. Those gaps remain incomplete; the standalone gap-history scanner is not yet wired into the Worker persistence path.
 - [x] Exit-window evidence rejects transaction buffers whose per-window event counts do not reconcile with the claimed complete-flow snapshots.
 - [ ] Demonstrate contiguous, complete launch-window event coverage with persisted provenance, including scan address, provider/commitment, page/cursor boundaries, and the exact interval recovered. A reconnect restores future subscriptions but does not prove that notifications were complete or recover events missed during the gap.
 - [ ] Ensure retry exhaustion, pagination truncation, missing transactions, and decoder errors cannot be interpreted as complete coverage. Cross-page pagination integrity is now checked, but exact interruption-interval recovery provenance is still missing.
@@ -162,6 +162,15 @@ Do not rotate the shared ingestion token without coordinated authorization to up
 - [ ] Perform the planned production deployment once.
 - [ ] Run production smoke tests with paper mode only and verify persistence/dashboard integration.
 - [ ] Keep live signing and submission disabled.
+
+## Historical backtest tooling
+
+- [x] Add a bounded standard-RPC discovery runner for a specified local calendar day, with per-request credit accounting and a hard launch sample cap.
+- [x] Require full-day pagination completion before selecting the earliest 100 launches; partial scans are not treated as a representative first-100 sample.
+- [x] Add a per-launch 10-minute bonding-curve history collector with signature/slot/block-time reconciliation and a shared credit ceiling.
+- [x] Add a replay command that runs the existing historical entry-pattern engine and preserves incomplete/risk-not-cleared outcomes.
+- [ ] Run the November 12, 2026 dataset with the configured Helius key, inspect actual credit consumption and archive the resulting artifacts. The scripts require operator execution with HELIUS_API_KEY; no API key is committed or exposed.
+- [ ] Add complete historical wallet/holder evidence and verified fee-inclusive entry/exit execution evidence before using the replay to estimate profitability.
 
 ## First-paper-trade acceptance test
 
