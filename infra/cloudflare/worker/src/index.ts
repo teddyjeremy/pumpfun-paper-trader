@@ -2917,6 +2917,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       }
       await this.scanIndependentHeliusGapHistory().catch(() => undefined);
       await this.decodeIndependentHeliusGapHistory().catch(() => undefined);
+      await this.flushIndependentHeliusGapArchives().catch(() => undefined);
       await this.recoverCoveredHeliusGaps().catch(() => undefined);
     } catch {
       this.status.lastError = "Helius queue processing failed; affected candidate data may be incomplete.";
@@ -3132,6 +3133,101 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         totalSignatures: scan.signatures.length
       }, `helius-gap-decode:${sessionId}:${gap.mint}:${gap.startedAt}:${item.signature}`);
       return; // One getTransaction request per queue cycle.
+    }
+  }
+
+  /**
+   * Ship independently decoded gap evidence to the dedicated Neon archive.
+   * Transactions are sent one at a time and marked locally archived only after
+   * the API acknowledges the idempotent database write.
+   */
+  private async flushIndependentHeliusGapArchives(): Promise<void> {
+    const sessionId = this.activeSessionId;
+    if (!sessionId || !this.postgresIngestConfigured) return;
+    for (const gap of this.heliusState.coverageGaps) {
+      if (gap.endedAt === null || gap.recoveredAt != null ||
+          !gap.startSignature || gap.startSlot === null ||
+          !gap.endSignature || gap.endSlot === null) continue;
+      const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+      const scan = await this.ctx.storage.get<{
+        status: "SCANNING" | "SCANNED" | "INCOMPLETE";
+        signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
+        pagesScanned: number;
+      }>(key);
+      if (scan?.status !== "SCANNED") continue;
+      const cursor = await this.ctx.storage.get<number>(`${key}:decode_cursor`) ?? 0;
+      const verifiedSignatures = await this.ctx.storage.get<string[]>(`${key}:verified_signatures`) ?? [];
+      const failedSignatures = await this.ctx.storage.get<string[]>(`${key}:failed_signatures`) ?? [];
+      const transactions = await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(
+        `${key}:verified_transactions`
+      ) ?? {};
+      const archivedKey = `${key}:archived_signatures`;
+      const archived = new Set(await this.ctx.storage.get<string[]>(archivedKey) ?? []);
+      const completeDecode = cursor === scan.signatures.length &&
+        verifiedSignatures.length + failedSignatures.length === scan.signatures.length;
+      const state = {
+        bondingCurve: this.heliusState.subscriptions.find(item => item.mint === gap.mint)?.bondingCurve ?? "",
+        startedAt: gap.startedAt,
+        endedAt: gap.endedAt,
+        startSignature: gap.startSignature,
+        startSlot: gap.startSlot,
+        endSignature: gap.endSignature,
+        endSlot: gap.endSlot,
+        pagesScanned: scan.pagesScanned,
+        signatures: scan.signatures,
+        decodeCursor: cursor,
+        verifiedSignatures,
+        failedSignatures,
+        status: completeDecode ? "DECODED" as const : "DECODING" as const
+      };
+      const checkpoint = await this.postPostgresIngest("/internal/helius-gap-recovery", {
+        sessionId, mint: gap.mint, gap: state
+      });
+      if (!checkpoint.ok) {
+        this.status.lastError = "Independent Helius gap checkpoint is waiting for Neon acknowledgement.";
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+      for (const signature of verifiedSignatures) {
+        if (archived.has(signature)) continue;
+        const transaction = transactions[signature];
+        if (!transaction) {
+          this.status.lastError = "Verified Helius gap transaction is missing from durable local storage.";
+          await this.ctx.storage.setAlarm(Date.now() + 30_000);
+          return;
+        }
+        const response = await this.postPostgresIngest("/internal/helius-gap-recovery", {
+          sessionId, mint: gap.mint, gap: state,
+          transaction: {
+            ...jsonSafe(transaction) as Record<string, unknown>,
+            provider: "helius", commitment: "confirmed",
+            receivedAt: transaction.receivedAt ?? new Date().toISOString()
+          }
+        });
+        if (!response.ok) {
+          this.status.lastError = "Independent Helius gap transaction is waiting for Neon acknowledgement.";
+          await this.ctx.storage.setAlarm(Date.now() + 30_000);
+          return;
+        }
+        archived.add(signature);
+        await this.ctx.storage.put(archivedKey, [...archived]);
+        return; // Bound Neon transaction writes to one per queue cycle.
+      }
+      if (completeDecode && archived.size === verifiedSignatures.length) {
+        const finalized = await this.postPostgresIngest("/internal/helius-gap-recovery", {
+          sessionId, mint: gap.mint, gap: { ...state, status: "ARCHIVED" }
+        });
+        if (!finalized.ok) {
+          this.status.lastError = "Independent Helius gap final archive acknowledgement is pending.";
+          await this.ctx.storage.setAlarm(Date.now() + 30_000);
+          return;
+        }
+        await this.ctx.storage.put(`${key}:archive_status`, {
+          status: "ARCHIVED",
+          archivedAt: new Date().toISOString(),
+          archivedSignatureCount: archived.size
+        });
+      }
     }
   }
 
