@@ -82,7 +82,7 @@ export function canMarkParsedLaunchBucketEmpty(input: {
 export function findFirstResumableParsedLaunchBucket(
   buckets: Array<{
     status: string; paginationToken: string | null; pagesScanned: number;
-    hasUnverifiedMatch?: boolean; rescanAttempts?: number;
+    hasUnverifiedMatch?: boolean; rescanAttempts?: number; reason?: string | null;
   }>,
   maxPagesPerBucket: number
 ): number | null {
@@ -93,8 +93,13 @@ export function findFirstResumableParsedLaunchBucket(
         pagesScanned: bucket.pagesScanned,
         maxPagesPerBucket
       });
+    const hasFailedSelectedMatch = bucket.hasUnverifiedMatch === true ||
+      (typeof bucket.reason === "string" &&
+        (bucket.reason.includes("Selected Create transaction") ||
+         bucket.reason.includes("Pump event log payload") ||
+         bucket.reason.includes("Pump CreateEvent")));
     const failedMatchCanBeRetried = bucket.status === "INCOMPLETE" &&
-      bucket.hasUnverifiedMatch === true && !bucket.paginationToken &&
+      hasFailedSelectedMatch && !bucket.paginationToken &&
       (bucket.rescanAttempts ?? 0) < 1;
     return cursorCanContinue || failedMatchCanBeRetried;
   });
