@@ -45,6 +45,7 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 const date = option("date", "");
 const batchSize = integer("batch-size", 20, 20);
 const maxCredits = integer("max-credits", 50_000, 50_000);
+const retryIncomplete = option("retry-incomplete", "false") === "true";
 const apiKey = process.env.HELIUS_API_KEY ?? "";
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !apiKey.trim()) {
   throw new Error("Set HELIUS_API_KEY and pass --date=YYYY-MM-DD.");
@@ -113,11 +114,13 @@ try {
 checkpoint.completedMints = checkpoint.completedMints.filter(mint => !checkpoint.incompleteMints.includes(mint));
 checkpoint.totalCreditCeiling = maxCredits;
 const incompleteMintSet = new Set(checkpoint.incompleteMints);
-const firstIncompleteCandidate = selectedLaunchIndexes.findIndex(index =>
-  incompleteMintSet.has(discovery.launches[index]!.event.mint)
-);
-if (firstIncompleteCandidate >= 0) {
-  checkpoint.nextCandidateIndex = Math.min(checkpoint.nextCandidateIndex, firstIncompleteCandidate);
+if (retryIncomplete) {
+  const firstIncompleteCandidate = selectedLaunchIndexes.findIndex(index =>
+    incompleteMintSet.has(discovery.launches[index]!.event.mint)
+  );
+  if (firstIncompleteCandidate >= 0) {
+    checkpoint.nextCandidateIndex = Math.min(checkpoint.nextCandidateIndex, firstIncompleteCandidate);
+  }
 }
 const solUsd = await fetchSolUsdPrice();
 if (solUsd.status !== "AVAILABLE") throw new Error("Fresh SOL/USD reference unavailable.");
