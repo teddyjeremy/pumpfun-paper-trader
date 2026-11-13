@@ -75,6 +75,53 @@ describe("unsigned Pump instruction account prerequisites", () => {
     expect(mock.rentCalls.sort((a, b) => a - b)).toEqual([137, 165]);
   });
 
+  it("rejects a Pump-owned 137-byte account with the wrong volume-accumulator discriminator", async () => {
+    const identity = await deriveNonSigningVirtualTraderIdentity();
+    const user = new PublicKey(identity.publicKey);
+    const volumePda = PublicKey.findProgramAddressSync(
+      [Buffer.from("user_volume_accumulator"), user.toBuffer()],
+      new PublicKey(PUMP_PROGRAM_ID)
+    )[0];
+    let accountReads = 0;
+    const invalidData = new Uint8Array(137);
+    const invalidAccountBase64 = btoa(String.fromCharCode(...invalidData));
+    const fetcher: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+      if (body.method === "getMultipleAccounts") {
+        accountReads += 1;
+        const addresses = body.params[0] as string[];
+        return Response.json({
+          jsonrpc: "2.0", id: "accounts",
+          result: {
+            context: { slot: 1234 },
+            value: addresses.map(address => accountReads === 2 && address === volumePda.toBase58()
+              ? { owner: PUMP_PROGRAM_ID, data: [invalidAccountBase64, "base64"] }
+              : null)
+          }
+        });
+      }
+      if (body.method === "getMinimumBalanceForRentExemption") {
+        return Response.json({ jsonrpc: "2.0", id: "rent", result: 2_039_280 });
+      }
+      throw new Error(`Unexpected RPC method ${body.method}`);
+    };
+    await expect(inspectPumpCurveV3InstructionPrerequisites({
+      identity,
+      instruction: {
+        provider: "pump-sdk-4.3.1", venue: "PUMP_CURVE", side: "BUY",
+        mint: MINT, user: identity.publicKey, quoteMint: QUOTE,
+        baseTokenProgram: TOKEN_PROGRAM_ID.toBase58(),
+        quoteTokenProgram: TOKEN_PROGRAM_ID.toBase58(),
+        buybackFeeRecipient: new PublicKey(new Uint8Array(32).fill(8)).toBase58(),
+        userVolumeAccumulatorAddress: volumePda.toBase58(),
+        instruction: {} as never, requiredAccountAddressesToVerify: [],
+        optionalAccountAddresses: [], slot: 1234, observedAt: new Date(NOW).toISOString(),
+        executionReady: false, paperEntryAuthorized: false, blockers: []
+      },
+      config: { apiKey: "test-key", now: () => NOW, fetcher }
+    })).rejects.toThrow(/unexpected owner, discriminator, size or snapshot context/);
+  });
+
   it("fails closed when PumpSwap has no configured buyback fee recipients", async () => {
     const identity = await deriveNonSigningVirtualTraderIdentity();
     await expect(inspectPumpSwapV2InstructionPrerequisites({
