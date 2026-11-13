@@ -37,6 +37,38 @@ describe("Helius gap address-history scan", () => {
     if (!result.complete) expect(result.reason).toContain("ended before");
   });
 
+  it("rejects malformed gap addresses, signatures and time intervals before making RPC calls", async () => {
+    let calls = 0;
+    const fetcher: typeof fetch = async () => {
+      calls += 1;
+      return Response.json({ result: [] });
+    };
+    const invalidGaps = [
+      { ...gap, mint: "not-an-address" },
+      { ...gap, startSignature: "not-a-signature" },
+      { ...gap, endedAt: "not-a-date" },
+      { ...gap, startedAt: "2026-11-13T10:02:00.000Z" },
+      { ...gap, endSlot: 99 }
+    ];
+    for (const invalidGap of invalidGaps) {
+      const result = await fetchHeliusGapAddressHistory("11111111111111111111111111111111",
+        invalidGap, { apiKey: "test", fetcher }, fetcher);
+      expect(result.complete).toBe(false);
+      expect(result.pagesScanned).toBe(0);
+    }
+    expect(calls).toBe(0);
+  });
+
+  it("rejects non-object transaction errors instead of classifying them as failed", async () => {
+    const fetcher: typeof fetch = async () => Response.json({
+      result: [{ ...row("3", 102), err: "failed" }]
+    });
+    const result = await fetchHeliusGapAddressHistory("11111111111111111111111111111111",
+      gap, { apiKey: "test", fetcher }, fetcher);
+    expect(result.complete).toBe(false);
+    if (!result.complete) expect(result.reason).toContain("lacks a valid");
+  });
+
   it("rejects reversed slot anchors", async () => {
     const fetcher: typeof fetch = async () => Response.json({ result: [row("3", 102), row("1", 101)] });
     const result = await fetchHeliusGapAddressHistory("11111111111111111111111111111111",
