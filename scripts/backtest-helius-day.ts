@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
-  fetchPumpCreateScanPage, fetchVerifiedParsedLaunch,
+  fetchPumpCreateScanPage, fetchFirstVerifiedParsedLaunch,
   findFirstResumableParsedLaunchBucket, canContinueParsedLaunchBucket, canMarkParsedLaunchBucketEmpty,
   type ParsedCreateScanPage, type VerifiedParsedLaunch
 } from "../src/ingestion/helius-parsed-launch-discovery.js";
@@ -10,7 +10,7 @@ type BucketState = {
   index: number; startTime: number; endTime: number;
   status: "RUNNING" | "FOUND" | "EMPTY" | "INCOMPLETE";
   paginationToken: string | null; pagesScanned: number;
-  scannedTransactions: number; creditsUsed: number; hasUnverifiedMatch?: boolean;
+  scannedTransactions: number; creditsUsed: number; hasUnverifiedMatch?: boolean; rescanAttempts?: number;
   launch?: VerifiedParsedLaunch; reason: string | null;
 };
 type Artifact = {
@@ -120,6 +120,22 @@ try {
 if (artifact.status === "INCOMPLETE") {
   const resumableIndex = findFirstResumableParsedLaunchBucket(artifact.buckets, maxPagesPerBucket);
   if (resumableIndex !== null) {
+    const retryBucket = artifact.buckets[resumableIndex]!;
+    const hasFailedSelectedMatch = retryBucket.hasUnverifiedMatch === true ||
+      (typeof retryBucket.reason === "string" &&
+        (retryBucket.reason.includes("Selected Create transaction") ||
+         retryBucket.reason.includes("Pump event log payload") ||
+         retryBucket.reason.includes("Pump CreateEvent")));
+    if (hasFailedSelectedMatch && !retryBucket.paginationToken &&
+        (retryBucket.rescanAttempts ?? 0) < 1) {
+      retryBucket.pagesScanned = 0;
+      retryBucket.scannedTransactions = 0;
+      retryBucket.reason = null;
+      retryBucket.status = "RUNNING";
+      retryBucket.hasUnverifiedMatch = true;
+      retryBucket.rescanAttempts = (retryBucket.rescanAttempts ?? 0) + 1;
+      artifact.buckets[resumableIndex] = retryBucket;
+    }
     artifact.nextBucketIndex = Math.min(artifact.nextBucketIndex, resumableIndex);
     artifact.status = "RUNNING";
     artifact.reason = null;
@@ -163,7 +179,7 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
   bucket.status = "RUNNING";
   while (bucket.pagesScanned < maxPagesPerBucket) {
     // Reserve the maximum possible scan charge plus one raw transaction fetch.
-    if (artifact.creditsUsed + 21 > maxCredits) {
+    if (artifact.creditsUsed + 31 > maxCredits) {
       budgetStopped = true;
       artifact.status = "BUDGET_EXHAUSTED";
       artifact.buckets[index] = bucket;
@@ -199,58 +215,48 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
     artifact.signaturesScanned += page.scannedTransactions;
     bucket.paginationToken = page.paginationToken;
     if (page.data.length > 0) {
-      const selected = page.data[0]!;
-      if (artifact.creditsUsed + 1 > maxCredits) {
-        budgetStopped = true;
-        artifact.status = "BUDGET_EXHAUSTED";
-        artifact.buckets[index] = bucket;
-        artifact.nextBucketIndex = index;
-        artifact.reason = "A selected launch awaits its one-credit raw transaction verification.";
-        break;
-      }
-      try {
-        const verified = await fetchVerifiedParsedLaunch(selected, {
-          startTime: start, endTime: end
-        }, { apiKey });
-        artifact.creditsUsed += 1;
-        bucket.creditsUsed += 1;
-        artifact.transactionFetches += 1;
-        bucket.launch = verified;
+      const verified = await fetchFirstVerifiedParsedLaunch(page.data, {
+        startTime: start, endTime: end
+      }, { apiKey });
+      artifact.creditsUsed += verified.attempts;
+      bucket.creditsUsed += verified.attempts;
+      artifact.transactionFetches += verified.attempts;
+      if (verified.launch) {
+        bucket.launch = verified.launch;
         bucket.status = "FOUND";
+        bucket.reason = null;
+        bucket.hasUnverifiedMatch = false;
         bucket.paginationToken = null;
-        artifact.launches.push(verified);
-      } catch (error) {
-        // Do not discard the time bucket when one scan match cannot be fetched
-        // or decoded. Keep its provider cursor and try the next match, bounded
-        // by the existing per-bucket page and shared credit ceilings.
-        artifact.creditsUsed += 1;
-        bucket.creditsUsed += 1;
-        artifact.transactionFetches += 1;
-        bucket.reason = error instanceof Error ? error.message : "Selected Create transaction failed verification.";
-        if (canContinueParsedLaunchBucket({
-          paginationToken: bucket.paginationToken,
-          pagesScanned: bucket.pagesScanned,
-          maxPagesPerBucket
-        })) {
-          bucket.status = "RUNNING";
-          artifact.buckets[index] = bucket;
-          artifact.nextBucketIndex = index;
-          artifact.updatedAt = new Date().toISOString();
-          await save(path, artifact);
-          continue;
-        }
-        bucket.status = "INCOMPLETE";
-        artifact.status = "INCOMPLETE";
-        artifact.reason = bucket.reason;
+        artifact.launches.push(verified.launch);
         artifact.buckets[index] = bucket;
         artifact.nextBucketIndex = index + 1;
+        artifact.launches.sort((a, b) => a.blockTime - b.blockTime || a.signature.localeCompare(b.signature));
         artifact.updatedAt = new Date().toISOString();
         await save(path, artifact);
         break;
       }
+
+      // A page can return several Create signatures. Try each bounded candidate
+      // before moving to another scan page or declaring the bucket incomplete.
+      bucket.hasUnverifiedMatch = true;
+      bucket.reason = verified.reason;
+      if (canContinueParsedLaunchBucket({
+        paginationToken: bucket.paginationToken,
+        pagesScanned: bucket.pagesScanned,
+        maxPagesPerBucket
+      })) {
+        bucket.status = "RUNNING";
+        artifact.buckets[index] = bucket;
+        artifact.nextBucketIndex = index;
+        artifact.updatedAt = new Date().toISOString();
+        await save(path, artifact);
+        continue;
+      }
+      bucket.status = "INCOMPLETE";
+      artifact.status = "INCOMPLETE";
+      artifact.reason = bucket.reason;
       artifact.buckets[index] = bucket;
       artifact.nextBucketIndex = index + 1;
-      artifact.launches.sort((a, b) => a.blockTime - b.blockTime || a.signature.localeCompare(b.signature));
       artifact.updatedAt = new Date().toISOString();
       await save(path, artifact);
       break;

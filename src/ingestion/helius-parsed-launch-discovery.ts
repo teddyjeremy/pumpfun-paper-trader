@@ -27,6 +27,35 @@ export interface VerifiedParsedLaunch {
 }
 
 
+export interface VerifiedParsedLaunchCandidatesResult {
+  launch: VerifiedParsedLaunch | null;
+  attempts: number;
+  reason: string | null;
+}
+
+/** Try a bounded page of Create signatures until one transaction can be independently verified. */
+export async function fetchFirstVerifiedParsedLaunch(
+  candidates: readonly ParsedCreateSignature[],
+  bucket: { startTime: number; endTime: number },
+  config: { apiKey: string; fetcher?: typeof fetch }
+): Promise<VerifiedParsedLaunchCandidatesResult> {
+  let attempts = 0;
+  let reason: string | null = null;
+  for (const candidate of candidates) {
+    attempts += 1;
+    try {
+      return {
+        launch: await fetchVerifiedParsedLaunch(candidate, bucket, config),
+        attempts,
+        reason: null
+      };
+    } catch (error) {
+      reason = error instanceof Error ? error.message : "Selected Create transaction failed verification.";
+    }
+  }
+  return { launch: null, attempts, reason: reason ?? "Parsed Events returned no Create signatures." };
+}
+
 /** A failed selected transaction can be skipped only while the scan supplied a safe next-page cursor. */
 export function canContinueParsedLaunchBucket(input: {
   paginationToken: string | null;
@@ -51,15 +80,29 @@ export function canMarkParsedLaunchBucketEmpty(input: {
 
 /** Find the earliest incomplete bucket whose saved cursor can still be resumed. */
 export function findFirstResumableParsedLaunchBucket(
-  buckets: Array<{ status: string; paginationToken: string | null; pagesScanned: number }>,
+  buckets: Array<{
+    status: string; paginationToken: string | null; pagesScanned: number;
+    hasUnverifiedMatch?: boolean; rescanAttempts?: number; reason?: string | null;
+  }>,
   maxPagesPerBucket: number
 ): number | null {
-  const index = buckets.findIndex(bucket => (bucket.status === "INCOMPLETE" || bucket.status === "RUNNING") &&
-    canContinueParsedLaunchBucket({
-      paginationToken: bucket.paginationToken,
-      pagesScanned: bucket.pagesScanned,
-      maxPagesPerBucket
-    }));
+  const index = buckets.findIndex(bucket => {
+    const cursorCanContinue = (bucket.status === "INCOMPLETE" || bucket.status === "RUNNING") &&
+      canContinueParsedLaunchBucket({
+        paginationToken: bucket.paginationToken,
+        pagesScanned: bucket.pagesScanned,
+        maxPagesPerBucket
+      });
+    const hasFailedSelectedMatch = bucket.hasUnverifiedMatch === true ||
+      (typeof bucket.reason === "string" &&
+        (bucket.reason.includes("Selected Create transaction") ||
+         bucket.reason.includes("Pump event log payload") ||
+         bucket.reason.includes("Pump CreateEvent")));
+    const failedMatchCanBeRetried = bucket.status === "INCOMPLETE" &&
+      hasFailedSelectedMatch && !bucket.paginationToken &&
+      (bucket.rescanAttempts ?? 0) < 1;
+    return cursorCanContinue || failedMatchCanBeRetried;
+  });
   return index < 0 ? null : index;
 }
 
@@ -101,7 +144,7 @@ export async function fetchPumpCreateScanPage(input: {
         commitment: "confirmed",
         sortOrder: "asc",
         returnShape: "signatures",
-        limit: 1,
+        limit: 10,
         budget: { maxScannedTransactions: maxScanned },
         ...(input.paginationToken ? { paginationToken: input.paginationToken } : {})
       })
