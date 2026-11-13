@@ -46,7 +46,7 @@ export async function collectCompleteWalletFundingEvidence(
   const warnings: string[] = [];
   const uniqueWallets = [...new Set(wallets.filter(wallet => ADDRESS.test(wallet)))];
   const walletSetComplete = uniqueWallets.length <= WALLET_HISTORY_MAX_WALLETS &&
-    uniqueWallets.length === wallets.filter(wallet => ADDRESS.test(wallet)).length;
+    uniqueWallets.length === wallets.length;
   if (!ADDRESS.test(mint) || uniqueWallets.length < 2) {
     return result(mint, "DATA_INCOMPLETE", false, walletSetComplete, uniqueWallets.length, 0, 0, 0,
       ["A valid mint and at least two unique wallets are required."]);
