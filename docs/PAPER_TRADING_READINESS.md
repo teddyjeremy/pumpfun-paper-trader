@@ -42,7 +42,8 @@ This document is the operational checklist for reaching the first verified simul
 - [ ] Define and compute calibrated volume thresholds from that dataset.
 - [ ] Calibrate buyer activity, liquidity, price response, wallet freshness, concentration, and entry timing thresholds.
 - [ ] Include fees, rent reserve, quote impact, slippage, and failed-entry costs in replay.
-- [x] Calibration reports sample size, win rate, net expectancy, profit factor, and chronological compounded max drawdown for training and holdout.\n- [ ] Validate the reported metrics against a real, fully evidenced historical dataset and perform sensitivity analysis across thresholds.
+- [x] Calibration reports sample size, win rate, net expectancy, profit factor, and chronological compounded max drawdown for training and holdout.
+- [ ] Validate the reported metrics against a real, fully evidenced historical dataset and perform sensitivity analysis across thresholds.
 - [ ] Validate the full set of 15 mandatory strategy rules using evidence produced by the real collectors.
 - [ ] Do not weaken mandatory rules or fabricate evidence to force BUY decisions.
 
@@ -66,7 +67,8 @@ A fee quote or unsigned instruction plan does not prove that a transaction can b
 ### 6. Worker paper lifecycle and exits
 
 - [x] Worker route requests exact round-trip quote evidence and records strategy audit evidence.
-- [x] Gated simulated entry transition is connected to the strict strategy audit.\n- [x] Simulated entries additionally require the active PostgreSQL ingestion configuration and fenced Worker lease, preventing ephemeral-only entries.
+- [x] Gated simulated entry transition is connected to the strict strategy audit.
+- [x] Simulated entries additionally require the active PostgreSQL ingestion configuration and fenced Worker lease, preventing ephemeral-only entries.
 - [x] Scheduled protective-exit cycle requests fresh full-position sell quotes.
 - [x] Portfolio marks are deferred until every open position has a fresh quote.
 - [ ] Prove one complete simulated entry and exit with the real Worker state machine.
@@ -103,7 +105,8 @@ Until these items pass, dynamic exhaustion remains disabled. Protective exits st
 - [ ] Verify `PAPER_EVENT_INGEST_TOKEN` satisfies the API's minimum length and matches the Worker configuration without exposing it in logs or chat.
 - [ ] Verify authenticated Worker-to-Vercel event ingestion returns success and persists the event.
 - [ ] Resolve any 503 response before considering the ingestion path ready.
-- [x] Add a dashboard read path for persisted Neon paper-session positions and simulated fills.\n- [ ] Verify dashboard open positions, closed trades, candidates, event history, portfolio, and health against a real persisted entry/exit.
+- [x] Add a dashboard read path for persisted Neon paper-session positions and simulated fills.
+- [ ] Verify dashboard open positions, closed trades, candidates, event history, portfolio, and health against a real persisted entry/exit.
 - [ ] Verify dashboard data reflects a real persisted simulated entry and exit in the deployed environment.
 - [ ] Verify dashboard state after Worker restart and page reload.
 
