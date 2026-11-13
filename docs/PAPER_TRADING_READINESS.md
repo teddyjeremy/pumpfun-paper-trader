@@ -2,6 +2,14 @@
 
 Last reviewed: 2026-11-13
 
+## Latest verification snapshot — 2026-11-13
+
+- [x] Latest PR head `029619fba0c00569ba71b297af92f759ebec649e` passed CI run [43477257984](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43477257984): dependency installation, `npm run check`, and Cloudflare Worker bundle validation.
+- [x] PR #77 is open and mergeable; it has not been merged or deployed.
+- [x] Bounded full-wallet-history collection is enabled in the PR configuration and enforced in Worker code: no more than 16 wallets and 2 pages per wallet per refresh. Wallet sets exceeding the cap remain incomplete.
+- [ ] Historical replay has not yet run through the new Parsed Events Scan workflow; the workflow must first be present on the default branch.
+- [ ] Live production acceptance, reviewed calibration, and a persisted simulated entry/exit lifecycle remain outstanding. `tradingReady` must remain false.
+
 ## Current decision
 
 **Paper trading is not enabled.** Keep `tradingReady=false`. The system must remain non-signing and non-submitting: no wallet private key, transaction signing, or on-chain submission is part of this paper-trading readiness work.
