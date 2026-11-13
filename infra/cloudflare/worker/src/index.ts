@@ -55,6 +55,7 @@ import { enqueueHistoricalBackfillSignatures } from "../../../../src/ingestion/h
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import { evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
 import { collectCompleteWalletFundingEvidence, type CompleteWalletFundingEvidenceResult } from "../../../../src/ingestion/complete-wallet-history.js";
+import { collectCompleteWalletTransactionHistory, type CompleteWalletTransactionHistoryResult } from "../../../../src/ingestion/complete-wallet-transaction-history.js";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
@@ -73,6 +74,29 @@ interface Env {
   HELIUS_API_KEY: string;
   PAPER_EVENT_INGEST_URL?: string;
   PAPER_EVENT_INGEST_TOKEN?: string;
+  FULL_WALLET_HISTORY_ENABLED?: string;
+  FULL_WALLET_HISTORY_MAX_PAGES?: string;
+}
+
+interface WalletLinkEvidenceSnapshot {
+  provider: "helius";
+  mint: string;
+  status: "OBSERVED" | "DATA_INCOMPLETE";
+  coverage: "FULL_WALLET_HISTORY" | "FULL_SOL_TRANSFER_HISTORY" | "INCOMPLETE";
+  dataComplete: boolean;
+  walletSetComplete: boolean;
+  requestedWallets: string[];
+  walletsCovered: string[];
+  walletsRequested: number;
+  walletsChecked: number;
+  transactionsChecked: number;
+  pagesScanned: number;
+  estimatedCredits: number;
+  links: WalletLinkEvidence[];
+  warnings: string[];
+  observedAt: string;
+  fundingEvidence: CompleteWalletFundingEvidenceResult;
+  fullWalletHistory: CompleteWalletTransactionHistoryResult | null;
 }
 
 interface CoordinatorStatus {
@@ -157,7 +181,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private heliusBucket = new TokenBucket(2, 2);
   private drainingHelius = false;
   private verifiedTransactions: Array<VerifiedPumpTransaction & { receivedAt?: string }> = [];
-  private walletLinkSnapshots: Record<string, CompleteWalletFundingEvidenceResult> = {};
+  private walletLinkSnapshots: Record<string, WalletLinkEvidenceSnapshot> = {};
   private walletHoldingsByMint: Record<string, WalletHoldingEvidence[]> = {};
   private holderRiskSnapshots: Record<string, HolderConcentrationResult> = {};
   private riskEvidenceAttemptedAtByMint: Record<string, number> = {};
@@ -547,7 +571,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.ctx.storage.get<CoordinatorStatus>("status"),
       this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
       this.ctx.storage.get<boolean>("enabled"),
-      this.ctx.storage.get<Record<string, CompleteWalletFundingEvidenceResult>>("wallet_link_snapshots"),
+      this.ctx.storage.get<Record<string, WalletLinkEvidenceSnapshot | CompleteWalletFundingEvidenceResult>>("wallet_link_snapshots"),
       this.ctx.storage.get<Record<string, WalletHoldingEvidence[]>>("wallet_holdings_by_mint"),
       this.ctx.storage.get<Record<string, HolderConcentrationResult>>("holder_risk_snapshots"),
       this.ctx.storage.get<Record<string, number>>("risk_evidence_attempted_at_by_mint"),
@@ -555,7 +579,23 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     ]);
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
     this.activeSessionId = activeSessionId ?? null;
-    this.walletLinkSnapshots = savedWalletLinks ?? {};
+    this.walletLinkSnapshots = Object.fromEntries(Object.entries(savedWalletLinks ?? {}).map(([mint, value]) => {
+      if ("fundingEvidence" in value) return [mint, value as WalletLinkEvidenceSnapshot];
+      const fundingEvidence = value as CompleteWalletFundingEvidenceResult;
+      return [mint, {
+        provider: "helius" as const, mint,
+        status: "DATA_INCOMPLETE" as const, coverage: "FULL_SOL_TRANSFER_HISTORY" as const,
+        dataComplete: false, walletSetComplete: false,
+        requestedWallets: fundingEvidence.requestedWallets ?? [],
+        walletsCovered: fundingEvidence.walletsCovered ?? [],
+        walletsRequested: fundingEvidence.walletsRequested,
+        walletsChecked: fundingEvidence.walletsChecked,
+        transactionsChecked: 0, pagesScanned: fundingEvidence.pagesScanned,
+        estimatedCredits: 0, links: fundingEvidence.links,
+        warnings: fundingEvidence.warnings, observedAt: fundingEvidence.observedAt,
+        fundingEvidence, fullWalletHistory: null
+      }];
+    }));
     this.walletHoldingsByMint = savedWalletHoldings ?? {};
     this.holderRiskSnapshots = savedHolderRisk ?? {};
     this.riskEvidenceAttemptedAtByMint = savedRiskAttempts ?? {};
