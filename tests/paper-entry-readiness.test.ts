@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { canCommitPaperEntry } from "../src/paper/paper-entry-readiness.js";
 
 const ready = {
+  systemTradingReady: true,
   sessionEnabled: true,
   workerLeaseHeld: true,
   postgresIngestConfigured: true,
@@ -18,6 +19,7 @@ describe("paper entry persistence gate", () => {
   });
 
   it.each([
+    ["system readiness prerequisites are incomplete", { systemTradingReady: false }],
     ["disabled session", { sessionEnabled: false }],
     ["missing Worker lease", { workerLeaseHeld: false }],
     ["missing PostgreSQL ingestion", { postgresIngestConfigured: false }],
