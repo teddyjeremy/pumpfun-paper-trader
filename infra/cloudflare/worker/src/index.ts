@@ -54,7 +54,7 @@ import { assessHistoricalDecodeCoverage } from "../../../../src/ingestion/helius
 import { enqueueHistoricalBackfillSignatures } from "../../../../src/ingestion/helius-backfill-queue.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import { evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
-import { collectCompleteWalletFundingEvidence, type CompleteCompleteWalletFundingEvidenceResult } from "../../../../src/ingestion/complete-wallet-history.js";
+import { collectCompleteWalletFundingEvidence, type CompleteWalletFundingEvidenceResult } from "../../../../src/ingestion/complete-wallet-history.js";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
