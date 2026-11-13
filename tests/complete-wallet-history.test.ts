@@ -59,7 +59,7 @@ describe("complete paginated wallet history", () => {
       const [wallet, options] = body.params;
       calls.push({ wallet, cursor: options.paginationToken ?? null });
       return response({
-        data: [tx((calls.length + 10).toString().repeat(64), wallet, 1_794_484_800 + calls.length)],
+        data: [tx(String(3 + calls.length).repeat(64), wallet, 1_794_484_800 + calls.length)],
         ...(wallet === walletA && !options.paginationToken ? { paginationToken: "cursor-a" } : {})
       });
     };
@@ -82,7 +82,7 @@ describe("complete paginated wallet history", () => {
       const wallet = body.params[0];
       call += 1;
       return response({
-        data: [tx((call + 10).toString().repeat(64), wallet, 1_794_484_800 + call)],
+        data: [tx(String(3 + call).repeat(64), wallet, 1_794_484_800 + call)],
         paginationToken: `cursor-${call}`
       });
     };
@@ -99,7 +99,7 @@ describe("complete paginated wallet history", () => {
     const wallets = [walletA, walletB, "Stake11111111111111111111111111111111111111",
       "SysvarRent111111111111111111111111111111111", "SysvarC1ock11111111111111111111111111111111",
       "SysvarS1otHashes111111111111111111111111111", "SysvarRecentB1ockHashes11111111111111111111",
-      "Vote111111111111111111111111111111111111111", "ComputeBudget111111111111111111111111111111"];
+      "ComputeBudget111111111111111111111111111111", "Sysvar1nstructions1111111111111111111111111"];
     const fetcher: typeof fetch = async () => response({ data: [tx("7".repeat(64), walletA, 1_794_484_800)] });
     const result = await collectCompleteWalletFundingEvidence(mint, wallets, {
       apiKey: "test-key", fetcher
