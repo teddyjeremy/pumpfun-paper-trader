@@ -8,6 +8,7 @@ type Trade = {
 };
 type CoinRecord = {
   mint: string;
+  launch?: { blockTime?: number };
   collection?: { status?: string; verifiedTransactions?: number };
   transactions?: Array<{ tradeEvents?: Trade[] }>;
 };
@@ -53,8 +54,10 @@ for (const file of files) {
     .filter(event => Number.isSafeInteger(event.time) && event.time >= 0 &&
       Number.isFinite(event.price) && event.price > 0 && Number.isFinite(event.sol) && event.sol >= 0)
     .sort((a, b) => a.time - b.time);
-  const start = trades[0]?.time;
-  const window = start === undefined ? [] : trades.filter(event => event.time >= start && event.time <= start + 30);
+  const launchTime = coin.launch?.blockTime;
+  const window = Number.isSafeInteger(launchTime)
+    ? trades.filter(event => event.time >= launchTime! && event.time <= launchTime! + 30)
+    : [];
   const buys = window.filter(event => event.isBuy);
   const sells = window.filter(event => !event.isBuy);
   const buyers = new Set(buys.map(event => event.user));
@@ -65,6 +68,7 @@ for (const file of files) {
   const peakMovePct = firstBuy && prices.length ? (Math.max(...prices) / firstBuy.price - 1) * 100 : null;
   const liquidity = last?.liquidity ?? null;
   const reasons: string[] = [];
+  if (!Number.isSafeInteger(launchTime)) reasons.push("Launch timestamp is missing; cannot evaluate the true first 30 seconds.");
   if (buyers.size < minBuyers) reasons.push(`Only ${buyers.size} unique buyers in first 30 seconds; need ${minBuyers}.`);
   if (buys.length < minBuyTrades) reasons.push(`Only ${buys.length} buy trades in first 30 seconds; need ${minBuyTrades}.`);
   if (priceMovePct === null || peakMovePct === null || peakMovePct < minMovePct) reasons.push(`Peak price movement did not reach ${minMovePct}%.`);
