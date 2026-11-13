@@ -19,7 +19,7 @@ describe("historical transaction decode coverage",()=>{
   expect(result.reason).toContain("unarchived");
  });
  it("does not complete while queue work remains",()=>{
-  const result=assessHistoricalDecodeCoverage({...base,queueSignatures:["sig-b"]});
+  const result=assessHistoricalDecodeCoverage({...base,failedSignatures:[],archivedSignatures:["sig-a","sig-b"],queueSignatures:["sig-c"]});
   expect(result.complete).toBe(false);
   expect(result.reason).toContain("transaction queue");
  });
