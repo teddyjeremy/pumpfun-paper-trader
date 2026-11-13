@@ -12,13 +12,6 @@ on:
         description: "Previous run ID containing pump-backtest-state for this date; leave blank for first run"
         required: false
         type: string
-  push:
-    branches:
-      - batch/unsigned-execution-readiness
-    paths:
-      - ".github/workflows/historical-backtest.yml"
-      - "scripts/backtest-helius-batch.ts"
-      - "package.json"
 
 permissions:
   contents: read
