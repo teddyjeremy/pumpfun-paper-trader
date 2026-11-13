@@ -37,6 +37,7 @@ jobs:
                 ? {
                     paperMode: s.mode === "paper",
                     observationPaused: true,
+                    sessionEnabled: s.enabled === true,
                     providerStreamsClosed: s.connected === false && s.subscriptionsSent === false && s.heliusConnected === false,
                     simulatedEntriesLocked: s.tradingReady === false
                   }
