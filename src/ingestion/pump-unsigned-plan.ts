@@ -114,7 +114,12 @@ function finishPlan(input: {
   return {
     provider: "pump-sdk-4.3.1", venue: input.venue, side: input.side,
     mint: input.mint, user: input.user, instructions,
-    requiredAccountAddressesToVerify: input.requiredAccountAddressesToVerify,
+    requiredAccountAddressesToVerify: [...new Set([
+      ...input.requiredAccountAddressesToVerify,
+      ...input.accountPrerequisites.ataSnapshot.requirements.map(item => item.address),
+      ...(input.accountPrerequisites.volumeAccumulator
+        ? [input.accountPrerequisites.volumeAccumulator.address] : [])
+    ])],
     accountPrerequisites: input.accountPrerequisites,
     feeEvidence: input.feeEvidence,
     rentReserveLamports: input.accountPrerequisites.totalNewRentReserveLamports,
