@@ -3,7 +3,7 @@ import {
   emptyHeliusMonitorState, enqueueHeliusNotification, enqueueHeliusSignatureWork, normalizeHeliusMonitorState,
   reconcileHeliusSubscriptions, selectHeliusCandidates, confirmHeliusSubscription,
   takeHeliusWork, retryHeliusSignatureWork, MAX_HELIUS_CANDIDATES, MAX_HELIUS_SIGNATURE_QUEUE, resetHeliusSubscriptionIds,
-  recordHeliusCoverageGap,
+  recordHeliusCoverageGap, recordHeliusNotificationBoundary,
   FRESH_LAUNCH_SLOT_RESERVE
 } from "../src/ingestion/helius-monitor.js";
 import type { DiscoveryCandidate } from "../src/ingestion/discovery-store.js";
@@ -93,15 +93,24 @@ describe("bounded Helius candidate monitor", () => {
     let state = reconcileHeliusSubscriptions(emptyHeliusMonitorState(), [candidate(0)]);
     const requestId = state.subscriptions[0]!.requestId;
     state = confirmHeliusSubscription(state, requestId, 77, "2026-11-13T10:00:00.000Z");
+    state = recordHeliusNotificationBoundary(state, 77, sig, 100, "2026-11-13T10:01:00.000Z");
     state = recordHeliusCoverageGap(state, candidate(0).mint, "2026-11-13T10:02:00.000Z");
-    expect(state.coverageGaps).toEqual([{
+    expect(state.coverageGaps[0]).toMatchObject({
       mint: candidate(0).mint,
       startedAt: "2026-11-13T10:00:00.000Z",
-      endedAt: null
-    }]);
+      endedAt: null,
+      startSignature: sig,
+      startSlot: 100,
+      endSignature: null,
+      endSlot: null
+    });
     state = confirmHeliusSubscription(state, requestId, 78, "2026-11-13T10:03:00.000Z");
     expect(state.coverageGaps[0]?.endedAt).toBe("2026-11-13T10:03:00.000Z");
     expect(state.incompleteMints).toContain(candidate(0).mint);
+    state = recordHeliusNotificationBoundary(state, 78, "4".repeat(64), 110, "2026-11-13T10:03:01.000Z");
+    expect(state.coverageGaps[0]).toMatchObject({
+      endSignature: "4".repeat(64), endSlot: 110
+    });
     state = recordHeliusCoverageGap(state, candidate(0).mint, "2026-11-13T10:04:00.000Z");
     expect(state.coverageGaps).toHaveLength(2);
     expect(state.coverageGaps[1]?.endedAt).toBeNull();
