@@ -413,6 +413,8 @@ export interface PumpSwapV2UnsignedInstruction {
   mint: string;
   user: string;
   quoteMint: string;
+  baseTokenProgram: string;
+  quoteTokenProgram: string;
   buybackFeeRecipients: string[];
   instructions: TransactionInstruction[];
   requiredAccountAddressesToVerify: string[];
@@ -506,6 +508,7 @@ export async function buildPumpSwapV2UnsignedInstructions(input: {
     provider: "pump-sdk-4.3.1", venue: "PUMPSWAP", side: input.side,
     mint: context.mint.toBase58(), user: user.toBase58(),
     quoteMint: context.quoteMint.toBase58(),
+    baseTokenProgram: baseTokenProgram.toBase58(), quoteTokenProgram: quoteTokenProgram.toBase58(),
     buybackFeeRecipients: configuredRecipients.map(recipient => recipient.toBase58()),
     instructions: rawInstructions, requiredAccountAddressesToVerify,
     slot: input.snapshot.slot, observedAt: input.snapshot.observedAt,
