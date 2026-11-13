@@ -196,7 +196,9 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   }
   assertQuote(input.buyQuote, now, "BUY", input.mint);
   assertQuote(input.sellQuote, now, "SELL", input.mint);
-  if (Math.abs(input.buyQuote.requestedUsd - stake) > 0.00000001 ||
+  // SOL lamport sizing is discrete: allow at most $0.000001 of rounding
+  // around the configured USD stake while retaining the exact SDK base-unit quote.
+  if (Math.abs(input.buyQuote.requestedUsd - stake) > 0.000001 ||
       input.buyQuote.tokenDecimals !== input.sellQuote.tokenDecimals ||
       BigInt(input.sellQuote.inputAmountBaseUnits) !== BigInt(input.buyQuote.outputAmountBaseUnits)) {
     throw new Error("Quotes must be size-specific for the exact planned stake and resulting token balance.");

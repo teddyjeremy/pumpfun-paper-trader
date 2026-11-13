@@ -79,6 +79,8 @@ A fee quote or unsigned instruction plan does not prove that a transaction can b
 
 ### 6. Worker paper lifecycle and exits
 
+- [x] Worker automatically requests a fresh exact-size SDK round-trip quote only after all thirteen non-quote strategy rules pass, a free portfolio slot exists, and the verified market venue matches the candidate.
+- [x] Automatic quote attempts are idempotently scoped to a reclaim signal; a successful quote triggers a fresh strategy audit, while failures remain blocked.
 - [x] Worker route requests exact round-trip quote evidence and records strategy audit evidence.
 - [x] Gated simulated entry transition is connected to the strict strategy audit.
 - [x] Quote validity alone cannot authorize a position; the Worker independently validates both unsigned plan evidence objects and previews the real portfolio transition before granting entry authorization.

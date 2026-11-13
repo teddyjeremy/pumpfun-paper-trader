@@ -50,6 +50,28 @@ export interface StrictStrategyAudit {
   watchReasons: string[];
   blockingUnknownRules: string[];
 }
+
+const REQUIRED_STRATEGY_RULES = Object.freeze([
+  "CANDIDATE_AGE", "IMPULSE", "PULLBACK", "RECLAIM", "THREE_FLOW_WINDOWS",
+  "DISTINCT_BUYERS", "BUYER_CONCENTRATION", "CREATOR_SELL_RISK", "WALLET_CLUSTER_RISK",
+  "ATTRIBUTION_CONFIDENCE", "PULLBACK_VOLUME_CONTRACTION", "RECLAIM_VOLUME_EXPANSION",
+  "SIGNAL_FRESHNESS", "EXECUTABLE_QUOTE", "ROUND_TRIP_COST"
+] as const);
+
+/** True only when every non-quote rule passes and both quote-dependent rules are still UNKNOWN. */
+export function canRequestExecutableQuote(audit: Pick<StrictStrategyAudit, "rules">): boolean {
+  if (!Array.isArray(audit.rules) || audit.rules.length !== REQUIRED_STRATEGY_RULES.length) return false;
+  const statuses = new Map<string, RuleStatus>();
+  for (const rule of audit.rules) {
+    if (!rule || !REQUIRED_STRATEGY_RULES.includes(rule.rule as typeof REQUIRED_STRATEGY_RULES[number]) ||
+        statuses.has(rule.rule)) return false;
+    statuses.set(rule.rule, rule.status);
+  }
+  if (statuses.size !== REQUIRED_STRATEGY_RULES.length) return false;
+  return REQUIRED_STRATEGY_RULES.slice(0, -2).every(rule => statuses.get(rule) === "PASS") &&
+    statuses.get("EXECUTABLE_QUOTE") === "UNKNOWN" &&
+    statuses.get("ROUND_TRIP_COST") === "UNKNOWN";
+}
 function result(rule: string, status: RuleStatus, actual: unknown, expected: string, reason: string): RuleResult {
   return { rule, status, actual, expected, reason };
 }

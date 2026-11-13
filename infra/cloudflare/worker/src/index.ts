@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "../../../../src/paper/session-ledger.js";
 import { updateCandidatePriceTracker, type CandidatePriceTracker } from "../../../../src/paper/candidate-price-ledger.js";
-import { evaluateStrictStrategyAudit, calculateReclaimConfirmation } from "../../../../src/paper/strategy-audit.js";
+import { evaluateStrictStrategyAudit, calculateReclaimConfirmation, canRequestExecutableQuote } from "../../../../src/paper/strategy-audit.js";
 import {
   closePaperPosition, createPaperPortfolio, markPaperPosition, openPaperPosition,
   type ExecutablePaperQuote, type PaperPortfolioState
@@ -1320,6 +1320,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     venue: "PUMP_CURVE" | "PUMPSWAP";
     buyAmountBaseUnits: string;
     poolAddress?: string;
+    precomputedReport?: unknown;
+    solUsd?: { source: "binance-spot"; symbol: "SOLUSDT"; priceUsd: number; observedAt: string; ageMs: number };
   }): Promise<unknown> {
     await this.hydrate();
     if (!this.activeSessionId) throw new Error("No active paper session.");
@@ -1338,7 +1340,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     // Build the expensive candidate feature snapshot before starting the
     // short-lived executable quote window. Reuse it for the final audit so
     // quote validation is followed by evaluation, not another RPC-heavy scan.
-    const featureReport = await this.listTradeFlows();
+    const featureReport = input.precomputedReport ?? await this.listTradeFlows();
     const requestId = crypto.randomUUID();
     const computeUnitLimit = 1_400_000;
     const config = { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const };
@@ -1365,6 +1367,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         requireExactMessageFees: true,
         buyAmountBaseUnits: input.buyAmountBaseUnits,
         computeUnitLimit,
+        ...(input.solUsd ? { solUsd: input.solUsd } : {}),
         executionDelayMs: 250,
         quoteTtlMs: 2_000,
         maxPriceImpactPct: 2,
@@ -1534,6 +1537,89 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           classification: evaluated.rejectionReasons.includes(reason) ? "REJECT" : "WATCH"
         }, `decision-reason:${triggerSignature}:${mint}:${reason}`);
       }
+      // Start an automatic quote only after all thirteen non-quote rules pass.
+      // The durable attempt key is scoped to the reclaim signal so retries,
+      // restarts and duplicate observations cannot fan out repeated SDK calls.
+      const solUsdObservation = report.solUsdPrice?.status === "AVAILABLE"
+        ? report.solUsdPrice.observation : null;
+      if (!executableQuoteAvailable && canRequestExecutableQuote(evaluated) &&
+          this.status.enabled && this.activeSessionId && this.postgresLeaseHeld &&
+          this.postgresIngestConfigured && this.env.HELIUS_API_KEY &&
+          solUsdObservation && profile?.quoteMint && isSolQuoteMint(profile.quoteMint) &&
+          profile.reclaimTime !== null && Number.isFinite(profile.reclaimTime)) {
+        const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
+        const occupiedSlots = portfolio?.positions.filter(position => position.status !== "CLOSED").length ?? 0;
+        const hasFreeSlot = Boolean(portfolio &&
+          occupiedSlots < portfolio.maxConcurrentPositions &&
+          !portfolio.enteredMints.includes(mint) &&
+          Number.isFinite(portfolio.positionSizeUsd) && portfolio.positionSizeUsd > 0 &&
+          Number.isFinite(portfolio.availableCashUsd) &&
+          portfolio.availableCashUsd >= portfolio.positionSizeUsd);
+        if (portfolio && hasFreeSlot) {
+          const attemptKey = `automatic_quote_attempt:${this.activeSessionId}:${mint}:${profile.reclaimTime}`;
+          const previousAttempt = await this.ctx.storage.get<Record<string, unknown>>(attemptKey);
+          if (!previousAttempt) {
+            try {
+              const marketState = await refreshPumpMarketStateFromHelius({
+                state: createUnverifiedMarketState(mint),
+                config: { apiKey: this.env.HELIUS_API_KEY, commitment: "confirmed" as const }
+              });
+              const venue = marketState.status === "LIVE_CURVE" ? "PUMP_CURVE"
+                : marketState.status === "MIGRATED_POOL_VERIFIED" ? "PUMPSWAP" : null;
+              const marketQuoteMint = venue === "PUMP_CURVE" ? marketState.curve?.quoteMint
+                : venue === "PUMPSWAP" ? marketState.pool?.quoteMint : null;
+              const poolAddress = venue === "PUMPSWAP" ? marketState.pool?.poolAddress : undefined;
+              if (venue && marketQuoteMint === profile.quoteMint &&
+                  (venue !== "PUMPSWAP" || poolAddress)) {
+                const rawLamports = portfolio.positionSizeUsd / solUsdObservation.priceUsd * 1_000_000_000;
+                const buyAmountLamports = Math.round(rawLamports);
+                if (Number.isSafeInteger(buyAmountLamports) && buyAmountLamports > 0 &&
+                    BigInt(buyAmountLamports) <= 18_446_744_073_709_551_615n) {
+                  await this.ctx.storage.put(attemptKey, {
+                    status: "REQUESTED", reclaimTime: profile.reclaimTime,
+                    stakeUsd: portfolio.positionSizeUsd, buyAmountBaseUnits: String(buyAmountLamports),
+                    venue, requestedAt: new Date().toISOString()
+                  });
+                  try {
+                    await this.requestExecutableRoundTripQuote({
+                      mint, venue, buyAmountBaseUnits: String(buyAmountLamports),
+                      ...(poolAddress ? { poolAddress } : {}),
+                      precomputedReport: report,
+                      solUsd: solUsdObservation
+                    });
+                  } catch (error) {
+                    const rawReason = error instanceof Error ? error.message : "Automatic quote request failed.";
+                    const reason = this.env.HELIUS_API_KEY
+                      ? rawReason.split(this.env.HELIUS_API_KEY).join("[redacted]")
+                      : rawReason;
+                    await this.ctx.storage.put(attemptKey, {
+                      status: "FAILED", reclaimTime: profile.reclaimTime,
+                      venue, failedAt: new Date().toISOString(), reason
+                    });
+                    await this.appendAudit("ERROR", mint, {
+                      triggerSignature, stage: "AUTOMATIC_ROUND_TRIP_QUOTE", reason
+                    }, `automatic-quote-error:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
+                  }
+                  // The quote method re-runs this mint's audit with the fresh
+                  // quote and can commit only after the independent plan and
+                  // durable portfolio authorization gates pass.
+                  continue;
+                }
+                await this.ctx.storage.put(attemptKey, {
+                  status: "BLOCKED", reason: "Exact stake cannot be represented as safe SOL lamports.",
+                  reclaimTime: profile.reclaimTime
+                });
+              }
+            } catch (error) {
+              const reason = error instanceof Error ? error.message : "Automatic market verification failed.";
+              await this.appendAudit("ERROR", mint, {
+                triggerSignature, stage: "AUTOMATIC_MARKET_VERIFICATION", reason
+              }, `automatic-market-error:${this.activeSessionId}:${mint}:${profile.reclaimTime}`);
+            }
+          }
+        }
+      }
+
       // The portfolio transition is reachable only after the complete strict
       // strategy audit returns BUY and both exact quote legs remain fresh.
       // This is simulated accounting only; no wallet signing/submission exists.

@@ -11,6 +11,18 @@ describe("paper portfolio accounting",()=>{
   const p=createPaperPortfolio();expect(p.availableCashUsd).toBe(2.7);
   expect(p.positionSizeUsd).toBe(1);expect(p.maxConcurrentPositions).toBe(1);
  });
+ it("accepts only sub-micro-dollar SOL lamport rounding around the configured stake",()=>{
+  const p=createPaperPortfolio();
+  const buy=quote("rounded-stake","BUY");
+  buy.requestedUsd=1.0000005;
+  const opened=openPaperPosition(p,{mint:"rounded-stake",positionId:"rounded-position",occurredAt:now,
+    buyQuote:buy,sellQuote:quote("rounded-stake","SELL"),nowMs:Date.parse(now)});
+  expect(opened.position.stakeUsd).toBe(1);
+  const tooLarge=quote("rounded-stake-large","BUY");
+  tooLarge.requestedUsd=1.000002;
+  expect(()=>openPaperPosition(p,{mint:"rounded-stake-large",positionId:"rounded-position-large",occurredAt:now,
+    buyQuote:tooLarge,sellQuote:quote("rounded-stake-large","SELL"),nowMs:Date.parse(now)})).toThrow(/exact planned stake/);
+ });
  it("requires fresh exact-size quotes and refuses repeat mints",()=>{
   const p=createPaperPortfolio();
   const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
