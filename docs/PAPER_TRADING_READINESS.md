@@ -12,7 +12,7 @@ This document is the operational checklist for reaching the first verified simul
 
 ### 1. CI and release integrity
 
-- [x] Latest PR-head CI is green on `d74f0dd46ddbecda50f9b1c8846930a90c94e7ae`: dependency installation, TypeScript checks, 58 test files / 435 tests, and Cloudflare Worker bundle.
+- [x] Latest code-changing commit verified by CI is `d74f0dd46ddbecda50f9b1c8846930a90c94e7ae`: dependency installation, TypeScript checks, 58 test files / 435 tests, and Cloudflare Worker bundle.
 - [x] PostgreSQL-backed integration tests pass in the CI test suite.
 - [ ] The final PR head is reviewed and the merge is performed only against that exact tested head.
 - [ ] Production smoke tests pass after the single planned deployment.
