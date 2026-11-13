@@ -735,6 +735,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     await this.hydrate();
+    if (this.observationPaused) {
+      this.socket?.close(1000, "Observation paused");
+      this.socket = null;
+      this.heliusSocket?.close(1000, "Observation paused");
+      this.heliusSocket = null;
+      this.status.connected = false;
+      this.status.subscriptionsSent = false;
+      this.status.heliusConnected = false;
+      return;
+    }
     // The Durable Object's alarm survives eviction, but in-memory lease state
     // does not. Reacquire the PostgreSQL fencing lease before resuming work.
     if (this.status.enabled && this.postgresIngestConfigured && !this.postgresLeaseHeld) {
@@ -910,6 +920,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async start(): Promise<CoordinatorStatus> {
     await this.hydrate();
+    if (this.observationPaused) return this.getStatus();
     if (!this.status.enabled || this.heliusSocket?.readyState !== WebSocket.OPEN) {
       this.markHeliusCoverageGap();
     }
@@ -1047,6 +1058,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async ensureRunning(): Promise<CoordinatorStatus> {
     await this.hydrate();
+    if (this.observationPaused) {
+      this.socket?.close(1000, "Observation paused");
+      this.socket = null;
+      this.heliusSocket?.close(1000, "Observation paused");
+      this.heliusSocket = null;
+      this.status.connected = false;
+      this.status.subscriptionsSent = false;
+      this.status.heliusConnected = false;
+      return this.getStatus();
+    }
     if (this.activeSessionId) {
       await this.appendAudit("SESSION_HEARTBEAT", null, {
         enabled: this.status.enabled, pumpPortalConnected: this.status.connected,
@@ -1174,9 +1195,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       pumpProgramConfigured: Boolean(this.env.PUMPFUN_PROGRAM_ID),
       quoteSdkModulesAvailable: this.status.quoteSdkModules.curve && this.status.quoteSdkModules.pumpSwap
     });
-    this.status.tradingReady = readiness.tradingReady;
-    this.status.readinessBlockers = readiness.blockers;
-    this.status.blocker = readiness.blockers[0] ??
+    const blockers = [...readiness.blockers];
+    if (this.observationPaused) {
+      blockers.unshift("Forward observation is paused while the Durable Objects free-tier daily row-write limit resets.");
+    }
+    this.status.observationPaused = this.observationPaused;
+    this.status.tradingReady = readiness.tradingReady && !this.observationPaused;
+    this.status.readinessBlockers = blockers;
+    this.status.blocker = blockers[0] ??
       "System prerequisites passed; a persistent simulated entry/exit lifecycle still needs verification.";
     return { ...this.status };
   }
