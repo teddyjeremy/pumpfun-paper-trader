@@ -85,6 +85,15 @@ describe("Helius Parsed Events historical launch discovery", () => {
     expect(body.budget.maxScannedTransactions).toBe(10_000);
   });
 
+  it("reports the exact billing field when the provider exceeds the bounded scan charge", async () => {
+    await expect(fetchPumpCreateScanPage({
+      startTime: 1_700, endTime: 1_900
+    }, { apiKey: "test", fetcher: async () => json({
+      data: [], paginationToken: null,
+      scan: { stoppedOn: "windowEnd", scannedTransactions: 10_000, matchedTransactions: 0, creditsCharged: 21 }
+    }) })).rejects.toThrow(/creditsCharged=21/);
+  });
+
   it("retains empty budget pages and their pagination cursor for continuation", async () => {
     const page = await fetchPumpCreateScanPage({
       startTime: 1_700, endTime: 1_900, paginationToken: "cursor:1"
