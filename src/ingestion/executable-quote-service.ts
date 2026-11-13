@@ -12,6 +12,9 @@ import { fetchPumpCurveSdkQuote } from "./pump-sdk-curve-quote-adapter.js";
 import { fetchPumpSwapSdkQuote } from "./pump-sdk-quote-adapter.js";
 import type { HeliusAccountReadConfig } from "./helius-accounts.js";
 import type { UnsignedInstructionFeeEvidence } from "./solana-fee-estimator.js";
+import { buildHeliusRpcUrl } from "./helius.js";
+import { buildPumpCurveV3UnsignedPlan, buildPumpSwapV2UnsignedPlan } from "./pump-unsigned-plan.js";
+import type { NonSigningVirtualTraderIdentity } from "./virtual-trader-identity.js";
 
 export type QuoteSide = "BUY" | "SELL";
 export type OfflineQuoteFetcher = (input: {
@@ -305,6 +308,87 @@ export async function fetchExecutableRoundTripQuote(input: {
       quoteTtlMs, executionDelayMs, providerFeeUsdPerTransaction: providerFeeUsd,
       priceImpactLimitPct: maxPriceImpactPct, priorityFeePercentile: percentile,
       priorityFeeScope: buyFeeEstimate && sellFeeEstimate ? "ACCOUNT_SPECIFIC" : networkFeeEstimate.priorityFeeScope
+    }
+  };
+}
+
+
+/**
+ * Creates the exact-message fee callback used by fetchExecutableRoundTripQuote.
+ * It rebuilds the unsigned venue plan from the same verified account snapshot
+ * as the quote, including ATA prerequisites, before estimating fees. The
+ * virtual payer is public-only: this helper cannot sign or submit transactions.
+ */
+export function createPumpUnsignedPlanFeeEvidenceBuilder(input: {
+  identity: NonSigningVirtualTraderIdentity;
+  config: HeliusAccountReadConfig;
+  computeUnitLimit: number;
+}): ExactUnsignedFeeEvidenceBuilder {
+  return async ({ side, quote }) => {
+    const unavailable = (reason: string): UnsignedInstructionFeeEvidence => ({
+      status: "UNAVAILABLE", reason, computeUnitLimit: input.computeUnitLimit
+    });
+    try {
+      if (quote.side !== side) {
+        return unavailable("Quote side does not match the exact-message fee request.");
+      }
+      if (!quote.snapshot || quote.snapshot.verified !== true) {
+        return unavailable("A verified same-context account snapshot is required for exact-message fee evidence.");
+      }
+      if (input.identity.kind !== "NON_SIGNING_VIRTUAL_TRADER" ||
+          input.identity.canSign !== false || input.identity.canSubmit !== false) {
+        return unavailable("A public-only non-signing virtual trader identity is required.");
+      }
+      const fetcher = input.config.fetcher ?? fetch;
+      const blockhashResponse = await fetcher(buildHeliusRpcUrl(input.config.apiKey), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: "paper-exact-message-blockhash",
+          method: "getLatestBlockhash",
+          params: [{ commitment: input.config.commitment ?? "confirmed" }]
+        })
+      });
+      if (!blockhashResponse.ok) {
+        return unavailable(`Recent blockhash RPC returned HTTP ${blockhashResponse.status}.`);
+      }
+      const envelope = await blockhashResponse.json() as {
+        error?: unknown;
+        result?: { value?: { blockhash?: unknown } };
+      };
+      const recentBlockhash = envelope.result?.value?.blockhash;
+      if (envelope.error || typeof recentBlockhash !== "string" || !recentBlockhash.trim()) {
+        return unavailable("Recent blockhash RPC response is incomplete.");
+      }
+
+      const tokenAmountBaseUnits = side === "BUY"
+        ? quote.outputAmountBaseUnits : quote.inputAmountBaseUnits;
+      const quoteAmountBaseUnits = side === "BUY"
+        ? quote.inputAmountBaseUnits : quote.outputAmountBaseUnits;
+      const common = {
+        identity: input.identity,
+        snapshot: quote.snapshot,
+        side,
+        tokenAmountBaseUnits,
+        quoteAmountBaseUnits,
+        apiKey: input.config.apiKey,
+        recentBlockhash,
+        computeUnitLimit: input.computeUnitLimit,
+        config: input.config,
+        ...(input.config.fetcher ? { fetcher: input.config.fetcher } : {}),
+        ...(input.config.now ? { nowMs: input.config.now() } : {})
+      };
+      const plan = "venue" in quote && quote.venue === "PUMP_CURVE"
+        ? await buildPumpCurveV3UnsignedPlan(common)
+        : await buildPumpSwapV2UnsignedPlan(common);
+      if (plan.side !== side || plan.mint !== quote.mint ||
+          plan.venue !== ("venue" in quote ? quote.venue : "PUMPSWAP")) {
+        return unavailable("Unsigned plan does not match the exact quote identity.");
+      }
+      return plan.feeEvidence;
+    } catch (error) {
+      return unavailable(error instanceof Error
+        ? error.message : "Exact unsigned-message fee plan could not be built.");
     }
   };
 }
