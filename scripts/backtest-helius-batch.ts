@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { collectHistoricalLaunchWindow } from "../src/ingestion/helius-launch-window.js";
 import { replayHistoricalCoin } from "../src/strategy/historical-replay.js";
 import { fetchSolUsdPrice } from "../src/ingestion/sol-usd-price.js";
+import type { HistoricalLaunchActivityScreenResult } from "../src/ingestion/helius-launch-screen.js";
 
 type Launch = {
   signature: string; slot: number; blockTime: number;
@@ -11,10 +12,12 @@ type Launch = {
 type Discovery = {
   requestedLocalDate: string; status: string; creditsUsed: number; launches: Launch[];
 };
+type Screening = { date: string; status: string; selectedLaunchIndexes: number[]; results: Array<{ index: number; result: HistoricalLaunchActivityScreenResult }> };
 type Checkpoint = {
-  schemaVersion: 1; date: string; discoveryLaunchCount: number;
+  schemaVersion: 2; date: string; discoveryLaunchCount: number;
   discoveryCredits: number; totalCreditCeiling: number;
-  nextIndex: number; completedMints: string[]; incompleteMints: string[];
+  selectedLaunchIndexes: number[]; nextCandidateIndex: number;
+  completedMints: string[]; incompleteMints: string[];
   cumulativeCreditsUsed: number; updatedAt: string;
 };
 
@@ -46,6 +49,7 @@ if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !apiKey.trim()) {
 const directory = resolve("artifacts");
 const discoveryPath = resolve(directory, `pump-launch-discovery-${date}.json`);
 const checkpointPath = resolve(directory, "checkpoint.json");
+const screeningPath = resolve(directory, `pump-launch-screen-${date}.json`);
 await mkdir(resolve(directory, "coins"), { recursive: true });
 const discovery = JSON.parse(await readFile(discoveryPath, "utf8")) as Discovery;
 if (discovery.requestedLocalDate !== date || discovery.status !== "DAY_EXHAUSTED" ||
@@ -57,14 +61,28 @@ if (new Set(discovery.launches.map(row => row.event.mint)).size !== discovery.la
   throw new Error("Discovery contains duplicate mints.");
 }
 
+const screening = JSON.parse(await readFile(screeningPath, "utf8")) as Screening;
+if (screening.date !== date || screening.status !== "COMPLETE" ||
+    !Array.isArray(screening.selectedLaunchIndexes) ||
+    screening.selectedLaunchIndexes.length > Math.floor(discovery.launches.length * 0.3) ||
+    screening.selectedLaunchIndexes.some(index => !Number.isSafeInteger(index) || index < 0 || index >= discovery.launches.length) ||
+    new Set(screening.selectedLaunchIndexes).size !== screening.selectedLaunchIndexes.length) {
+  throw new Error("A complete, valid activity-screen artifact selecting at most 30% of launches is required.");
+}
+const selectedLaunchIndexes = screening.selectedLaunchIndexes;
+if (selectedLaunchIndexes.length === 0) {
+  throw new Error("No launches met the minimum historical activity screen; refusing to spend credits on inactive/uncertain coins.");
+}
+
 let checkpoint: Checkpoint;
 try {
   checkpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as Checkpoint;
-  if (checkpoint.schemaVersion !== 1 || checkpoint.date !== date ||
+  if (checkpoint.schemaVersion !== 2 || checkpoint.date !== date ||
       checkpoint.discoveryLaunchCount !== discovery.launches.length ||
       checkpoint.discoveryCredits !== discovery.creditsUsed ||
       checkpoint.totalCreditCeiling !== maxCredits ||
-      checkpoint.nextIndex < 0 || checkpoint.nextIndex > discovery.launches.length ||
+      JSON.stringify(checkpoint.selectedLaunchIndexes) !== JSON.stringify(selectedLaunchIndexes) ||
+      checkpoint.nextCandidateIndex < 0 || checkpoint.nextCandidateIndex > selectedLaunchIndexes.length ||
       checkpoint.cumulativeCreditsUsed < discovery.creditsUsed ||
       checkpoint.cumulativeCreditsUsed > maxCredits) {
     throw new Error("Checkpoint does not match this discovery artifact/date/credit ceiling.");
@@ -72,20 +90,21 @@ try {
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   checkpoint = {
-    schemaVersion: 1, date, discoveryLaunchCount: discovery.launches.length,
+    schemaVersion: 2, date, discoveryLaunchCount: discovery.launches.length,
     discoveryCredits: discovery.creditsUsed, totalCreditCeiling: maxCredits,
-    nextIndex: 0, completedMints: [], incompleteMints: [],
+    selectedLaunchIndexes, nextCandidateIndex: 0, completedMints: [], incompleteMints: [],
     cumulativeCreditsUsed: discovery.creditsUsed, updatedAt: new Date().toISOString()
   };
   await atomicJson(checkpointPath, checkpoint);
 }
 const solUsd = await fetchSolUsdPrice();
 if (solUsd.status !== "AVAILABLE") throw new Error("Fresh SOL/USD reference unavailable.");
-const startIndex = checkpoint.nextIndex;
-const endIndex = Math.min(startIndex + batchSize, discovery.launches.length);
+const startIndex = checkpoint.nextCandidateIndex;
+const endIndex = Math.min(startIndex + batchSize, selectedLaunchIndexes.length);
 let budgetStopped = false;
 
-for (let index = startIndex; index < endIndex; index += 1) {
+for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex += 1) {
+  const index = selectedLaunchIndexes[candidateIndex]!;
   const launch = discovery.launches[index]!;
   const remaining = maxCredits - checkpoint.cumulativeCreditsUsed;
   if (remaining < 1) { budgetStopped = true; break; }
@@ -126,7 +145,7 @@ for (let index = startIndex; index < endIndex; index += 1) {
   }
   if (collected.status !== "COMPLETE") checkpoint.incompleteMints.push(launch.event.mint);
   checkpoint.completedMints.push(launch.event.mint);
-  checkpoint.nextIndex = index + 1;
+  checkpoint.nextCandidateIndex = candidateIndex + 1;
   checkpoint.updatedAt = new Date().toISOString();
   await atomicJson(checkpointPath, checkpoint);
 }
@@ -134,17 +153,18 @@ for (let index = startIndex; index < endIndex; index += 1) {
 checkpoint.updatedAt = new Date().toISOString();
 await atomicJson(checkpointPath, checkpoint);
 const summary = {
-  date, batchSize, startIndex, endIndex: checkpoint.nextIndex,
-  discoveredLaunches: discovery.launches.length,
+  date, batchSize, startCandidateIndex: startIndex, endCandidateIndex: checkpoint.nextCandidateIndex,
+  discoveredLaunches: discovery.launches.length, selectedLaunches: selectedLaunchIndexes.length,
+  selectedLaunchIndexes,
   completedMints: checkpoint.completedMints.length,
   incompleteMints: checkpoint.incompleteMints,
   cumulativeCreditsUsed: checkpoint.cumulativeCreditsUsed,
   remainingCredits: maxCredits - checkpoint.cumulativeCreditsUsed,
-  nextIndex: checkpoint.nextIndex, budgetStopped,
-  status: checkpoint.nextIndex >= discovery.launches.length ? "ALL_LAUNCHES_PROCESSED"
+  nextCandidateIndex: checkpoint.nextCandidateIndex, budgetStopped,
+  status: checkpoint.nextCandidateIndex >= selectedLaunchIndexes.length ? "ALL_SELECTED_LAUNCHES_PROCESSED"
     : budgetStopped ? "PAUSED_BUDGET_OR_MID_COIN" : "BATCH_COMPLETE",
   solUsdReference: solUsd.observation,
-  sampleWarning: "Discovery currently selects the earliest launches in the day, not a time-stratified/random control sample. Use for pipeline validation only; do not tune strategy thresholds or infer profitability from this biased sample."
+  sampleWarning: "The dataset is the highest activity-ranked 30% of the discovery sample, not a random representative sample. Signature activity is not unique buyers or confirmed buy volume; use for efficient candidate triage only, not population-wide profitability estimates."
 };
 await atomicJson(resolve(directory, `batch-summary-${date}.json`), summary);
 process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
