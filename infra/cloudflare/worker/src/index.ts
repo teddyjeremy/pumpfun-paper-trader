@@ -815,10 +815,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const keepLease = this.postgresLeaseHeld || this.status.enabled;
     await this.acquirePostgresWorkerLease();
     if (!this.postgresLeaseHeld) throw new Error("Worker could not acquire its Neon lease.");
-    const heartbeat = await this.heartbeatPostgresWorkerLease();
-    if (!heartbeat) throw new Error("Worker Neon lease heartbeat failed.");
 
-    const sessionId = `smoke-test-worker-${crypto.randomUUID()}`;
+    try {
+      const heartbeat = await this.heartbeatPostgresWorkerLease();
+      if (!heartbeat) throw new Error("Worker Neon lease heartbeat failed.");
+      const sessionId = `smoke-test-worker-${crypto.randomUUID()}`;
     const startedAt = new Date().toISOString();
     const stoppedAt = new Date(Date.parse(startedAt) + 1).toISOString();
     const strategyVersion = "smoke-ingestion-v1";
@@ -835,7 +836,6 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       }
     ];
 
-    try {
       const firstResponse = await this.postPostgresIngest("/internal/paper-events", { sessionId, events });
       if (!firstResponse.ok) throw new Error("Worker event ingestion was rejected.");
       const first = await firstResponse.json() as { ok?: boolean; inserted?: number; lastSequence?: number };
