@@ -54,7 +54,7 @@ export function findFirstResumableParsedLaunchBucket(
   buckets: Array<{ status: string; paginationToken: string | null; pagesScanned: number }>,
   maxPagesPerBucket: number
 ): number | null {
-  const index = buckets.findIndex(bucket => bucket.status === "INCOMPLETE" &&
+  const index = buckets.findIndex(bucket => (bucket.status === "INCOMPLETE" || bucket.status === "RUNNING") &&
     canContinueParsedLaunchBucket({
       paginationToken: bucket.paginationToken,
       pagesScanned: bucket.pagesScanned,
