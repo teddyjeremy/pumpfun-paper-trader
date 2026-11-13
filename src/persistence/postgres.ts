@@ -1067,3 +1067,51 @@ export async function getHeliusBackfillDashboardSnapshot(sessionId: string): Pro
     verifiedTransactionCount: Number(row.verified_transaction_count)
   }));
 }
+
+
+export async function getHistoricalBacktestDashboardSnapshot(date?: string) {
+  if (!pool) return { available: false, reason: "DATABASE_URL is not configured", runs: [], candidates: [] };
+  try {
+    const runsResult = await pool.query(
+      `SELECT date,provider,status,discovery_status,screening_status,discovered_count,screened_count,
+        selected_count,replayed_count,complete_count,incomplete_count,qualified_count,rejected_count,
+        credits_used,artifact_run_id,summary,updated_at
+       FROM historical_backtest_runs
+       WHERE ($1::text IS NULL OR date=$1)
+       ORDER BY date DESC LIMIT 10`,
+      [date ?? null]
+    );
+    const latestDate = date ?? (runsResult.rows[0]?.date ? String(runsResult.rows[0].date) : null);
+    const candidatesResult = latestDate
+      ? await pool.query(
+          `SELECT discovery_index,mint,screen_status,activity_score,selected,replay_status,metrics,updated_at
+           FROM historical_backtest_candidates WHERE date=$1
+           ORDER BY selected DESC,discovery_index ASC LIMIT 100`,
+          [latestDate]
+        )
+      : { rows: [] };
+    return {
+      available: true,
+      runs: runsResult.rows.map(row => ({
+        date: String(row.date), provider: String(row.provider), status: String(row.status),
+        discoveryStatus: row.discovery_status === null ? null : String(row.discovery_status),
+        screeningStatus: row.screening_status === null ? null : String(row.screening_status),
+        discoveredCount: Number(row.discovered_count), screenedCount: Number(row.screened_count),
+        selectedCount: Number(row.selected_count), replayedCount: Number(row.replayed_count),
+        completeCount: Number(row.complete_count), incompleteCount: Number(row.incomplete_count),
+        qualifiedCount: Number(row.qualified_count), rejectedCount: Number(row.rejected_count),
+        creditsUsed: Number(row.credits_used), artifactRunId: row.artifact_run_id === null ? null : String(row.artifact_run_id),
+        summary: row.summary, updatedAt: new Date(String(row.updated_at)).toISOString()
+      })),
+      candidates: candidatesResult.rows.map(row => ({
+        discoveryIndex: Number(row.discovery_index), mint: String(row.mint),
+        screenStatus: row.screen_status === null ? null : String(row.screen_status),
+        activityScore: row.activity_score === null ? null : Number(row.activity_score),
+        selected: row.selected === true, replayStatus: String(row.replay_status),
+        metrics: row.metrics, updatedAt: new Date(String(row.updated_at)).toISOString()
+      }))
+    };
+  } catch {
+    return { available: false, reason: "Historical research tables are not migrated or the database query failed", runs: [], candidates: [] };
+  }
+}
