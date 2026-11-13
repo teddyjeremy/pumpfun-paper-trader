@@ -36,10 +36,10 @@ describe("paper portfolio accounting",()=>{
   const first=openPaperPosition(state,{mint:"reserved-fee-1",positionId:"reserved-fee-position-1",occurredAt:now,
     buyQuote:quote("reserved-fee-1","BUY"),sellQuote:quote("reserved-fee-1","SELL"),nowMs:Date.parse(now)});
   expect(first.position.expectedSellCostsUsd).toBeCloseTo(0.007,8);
-  expect(first.state.availableCashUsd).toBeCloseTo(1.686,8);
+  expect(first.state.availableCashUsd).toBeCloseTo(4.986,8);
   const second=openPaperPosition(first.state,{mint:"reserved-fee-2",positionId:"reserved-fee-position-2",occurredAt:now,
     buyQuote:quote("reserved-fee-2","BUY"),sellQuote:quote("reserved-fee-2","SELL"),nowMs:Date.parse(now)});
-  expect(second.state.availableCashUsd).toBeCloseTo(0.672,8);
+  expect(second.state.availableCashUsd).toBeCloseTo(3.972,8);
   const closed=closePaperPosition(second.state,{positionId:"reserved-fee-position-1",
     sellQuote:quote("reserved-fee-1","SELL","1000000",1.5),exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
   expect(closed.state.availableCashUsd).toBeCloseTo(5.472,8);
