@@ -64,10 +64,12 @@ const candidates = discovery.launches.map((launch, index) => {
   };
 });
 const replayed = candidates.filter(row => row.replayStatus !== "PENDING" && row.replayStatus !== "NOT_SELECTED").length;
+const replayFinished = checkpoint?.nextCandidateIndex === selected.size && Boolean(ranking);
 const complete = discovery.status === "SAMPLE_COMPLETE" && screening?.status === "COMPLETE" &&
-  checkpoint?.nextCandidateIndex === selected.size && Boolean(ranking);
-const status = complete ? "SAMPLE_COMPLETE" : discovery.status === "BUDGET_EXHAUSTED" ? "BUDGET_EXHAUSTED" :
-  discovery.status === "INCOMPLETE" || screening?.status === "BUDGET_EXHAUSTED" ? "INCOMPLETE" :
+  replayFinished && ranking?.incompleteCoins === 0;
+const status = complete ? "SAMPLE_COMPLETE" :
+  discovery.status === "BUDGET_EXHAUSTED" || screening?.status === "BUDGET_EXHAUSTED" ? "BUDGET_EXHAUSTED" :
+  discovery.status === "INCOMPLETE" || (replayFinished && (ranking?.incompleteCoins ?? 0) > 0) ? "INCOMPLETE" :
   discovery.status === "SAMPLE_COMPLETE" ? "RUNNING" : "UNKNOWN";
 const creditsUsed = Math.max(Number(discovery.creditsUsed ?? 0) + Number(screening?.creditsUsed ?? 0), Number(checkpoint?.creditsUsed ?? 0));
 const summary = {
