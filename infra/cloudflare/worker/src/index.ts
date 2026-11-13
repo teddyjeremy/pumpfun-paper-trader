@@ -813,17 +813,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       throw new Error("Worker-to-Neon ingestion is not configured.");
     }
     const keepLease = this.postgresLeaseHeld || this.status.enabled;
-    await this.acquirePostgresWorkerLease();
-    if (!this.postgresLeaseHeld) throw new Error("Worker could not acquire its Neon lease.");
-
     try {
+      await this.acquirePostgresWorkerLease();
+      if (!this.postgresLeaseHeld) throw new Error("Worker could not acquire its Neon lease.");
       const heartbeat = await this.heartbeatPostgresWorkerLease();
       if (!heartbeat) throw new Error("Worker Neon lease heartbeat failed.");
       const sessionId = `smoke-test-worker-${crypto.randomUUID()}`;
-    const startedAt = new Date().toISOString();
-    const stoppedAt = new Date(Date.parse(startedAt) + 1).toISOString();
-    const strategyVersion = "smoke-ingestion-v1";
-    const events: StoredAuditEvent[] = [
+      const startedAt = new Date().toISOString();
+      const stoppedAt = new Date(Date.parse(startedAt) + 1).toISOString();
+      const strategyVersion = "smoke-ingestion-v1";
+      const events: StoredAuditEvent[] = [
       {
         sessionId, sequence: 1, eventId: `smoke-started:${sessionId}`,
         kind: "SESSION_STARTED", occurredAt: startedAt, mint: null,
