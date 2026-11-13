@@ -80,6 +80,7 @@ import { createUnverifiedMarketState } from "../../../../src/paper/pump-market-s
 import { refreshPumpMarketStateFromHelius } from "../../../../src/ingestion/helius-pump-market.js";
 import { buildPumpCurveExitWindowEvidence } from "../../../../src/strategy/pump-curve-exit-window-evidence.js";
 import { buildExecutablePaperQuote } from "../../../../src/ingestion/executable-paper-quote.js";
+import { canCommitPaperEntry } from "../../../../src/paper/paper-entry-readiness.js";
 
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
@@ -1525,8 +1526,17 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       // The portfolio transition is reachable only after the complete strict
       // strategy audit returns BUY and both exact quote legs remain fresh.
       // This is simulated accounting only; no wallet signing/submission exists.
-      if (this.status.enabled && evaluated.decision === "BUY" && evaluated.buyAllowed &&
-          executableQuoteAvailable && cachedQuote && typeof cachedQuote === "object") {
+      if (canCommitPaperEntry({
+          sessionEnabled: this.status.enabled,
+          workerLeaseHeld: this.postgresLeaseHeld,
+          postgresIngestConfigured: this.postgresIngestConfigured,
+          strategyDecision: evaluated.decision,
+          buyAllowed: evaluated.buyAllowed,
+          executableQuoteAvailable,
+          hasBuyAndSellQuotes: Boolean(cachedQuote && typeof cachedQuote === "object" &&
+            (cachedQuote as { result?: { buyQuote?: unknown; initialSellQuote?: unknown } }).result?.buyQuote &&
+            (cachedQuote as { result?: { buyQuote?: unknown; initialSellQuote?: unknown } }).result?.initialSellQuote)
+        }) && cachedQuote && typeof cachedQuote === "object") {
         const quoteResult = (cachedQuote as {
           result?: {
             buyQuote?: ExecutablePaperQuote;
