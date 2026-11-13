@@ -77,6 +77,24 @@ describe("bounded Helius historical backfill", () => {
     expect(result.signaturesToFetch.map(item => item.signature)).toEqual([newer, create]);
   });
 
+  it("rejects duplicate or out-of-order address-history records", () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    const duplicate = applyAddressSignaturesPage(initial, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null },
+      { signature: newer, slot: 12, blockTime: 1060, err: null }
+    ]);
+    const outOfOrder = applyAddressSignaturesPage(initial, [
+      { signature: newer, slot: 12, blockTime: 1060, err: null },
+      { signature: older, slot: 13, blockTime: 1061, err: null }
+    ]);
+    expect(duplicate.status).toBe("INCOMPLETE");
+    expect(duplicate.state.reason).toMatch(/duplicate/i);
+    expect(outOfOrder.status).toBe("INCOMPLETE");
+    expect(outOfOrder.state.reason).toMatch(/ordered newest-to-oldest/i);
+  });
+
   it("continues pagination when the create signature is not in the page", () => {
     const initial = createHistoricalBackfillState({
       mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
