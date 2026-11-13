@@ -1055,6 +1055,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       return this.getStatus();
     }
 
+    // A Durable Object may be evicted and rehydrated while its session is
+    // still enabled. Reacquire the fenced DB lease before reconnecting provider
+    // streams; never collect live data while persistence ownership is absent.
+    if (!this.postgresLeaseHeld) {
+      const leaseAcquired = await this.acquirePostgresWorkerLease();
+      if (!leaseAcquired) {
+        this.status.lastError = "PostgreSQL worker lease is unavailable; provider streams remain stopped.";
+        await this.persist();
+        return this.getStatus();
+      }
+    }
+
     // Expire stale candidates even if the provider is quiet, then flush state.
     const previousCandidates = this.discovery.candidates;
     const beforeExpiry = previousCandidates.length;
