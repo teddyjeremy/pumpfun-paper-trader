@@ -4,9 +4,9 @@ Last reviewed: 2026-11-13
 
 ## Latest verification snapshot — 2026-11-13
 
-- [x] Latest PR head `029619fba0c00569ba71b297af92f759ebec649e` passed CI run [43477257984](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43477257984): dependency installation, `npm run check`, and Cloudflare Worker bundle validation.
+- [x] Latest PR head `cdf63a1ad1de6fb54ceb5d3882ad707cf1d854a0` passed CI run [43479837204](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43479837204): dependency installation, `npm run check`, and Cloudflare Worker bundle validation.
 - [x] PR #77 is open and mergeable; it has not been merged or deployed.
-- [x] Bounded full-wallet-history collection is enabled in the PR configuration and enforced in Worker code: no more than 16 wallets and 2 pages per wallet per refresh. Wallet sets exceeding the cap remain incomplete.
+- [x] Operator-approved bounded full-wallet-history collection is enabled in the PR branch configuration and enforced in Worker code: no more than 16 wallets and 2 pages per wallet per refresh. Wallet sets exceeding the cap remain incomplete. This branch setting is not deployed; production remains unchanged until the planned release.
 - [ ] Historical replay has not yet run through the new Parsed Events Scan workflow; the workflow must first be present on the default branch.
 - [ ] Live production acceptance, reviewed calibration, and a persisted simulated entry/exit lifecycle remain outstanding. `tradingReady` must remain false.
 
@@ -26,7 +26,7 @@ This document is the operational checklist for reaching the first verified simul
 - [x] Production Worker deployment succeeded in [Cloudflare deployment workflow 43378493964](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43378493964); deployed version is `1dac036e-76c4-4ff6-90bc-37345d114c3b` from main commit `ec643a090e17caf229e7959f089a338b98d8809c`.
 - [ ] Production Worker smoke health and a complete simulated entry/exit lifecycle remain unverified. The deployed main-branch code still reports `tradingReady=false`; PR #77 is not deployed.
 - [x] PostgreSQL-backed integration tests pass in the CI test suite.
-- [ ] The final PR head is reviewed and the merge is performed only against that exact tested head.
+- [ ] The final PR head is reviewed and the merge is performed only against that exact tested head. Current PR head is `cdf63a1ad1de6fb54ceb5d3882ad707cf1d854a0`; latest CI is green, but the PR remains open.
 - [ ] Production smoke tests pass after the single planned deployment.
 
 ### 2. Historical data completeness
