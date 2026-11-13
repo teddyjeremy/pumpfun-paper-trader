@@ -54,7 +54,7 @@ import { assessHistoricalDecodeCoverage } from "../../../../src/ingestion/helius
 import { enqueueHistoricalBackfillSignatures } from "../../../../src/ingestion/helius-backfill-queue.js";
 import { evaluateCreatorSellRisk } from "../../../../src/ingestion/creator-risk.js";
 import { evaluateWalletClusterRisk, type WalletHoldingEvidence, type WalletLinkEvidence } from "../../../../src/ingestion/wallet-cluster-risk.js";
-import { collectWalletFundingEvidence, type WalletFundingEvidenceResult } from "../../../../src/ingestion/wallet-link-collector.js";
+import { collectCompleteWalletFundingEvidence, type CompleteCompleteWalletFundingEvidenceResult } from "../../../../src/ingestion/complete-wallet-history.js";
 import {
   applyDiscoveryEvent,
   emptyDiscoveryStore,
@@ -157,7 +157,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private heliusBucket = new TokenBucket(2, 2);
   private drainingHelius = false;
   private verifiedTransactions: Array<VerifiedPumpTransaction & { receivedAt?: string }> = [];
-  private walletLinkSnapshots: Record<string, WalletFundingEvidenceResult> = {};
+  private walletLinkSnapshots: Record<string, CompleteWalletFundingEvidenceResult> = {};
   private walletHoldingsByMint: Record<string, WalletHoldingEvidence[]> = {};
   private holderRiskSnapshots: Record<string, HolderConcentrationResult> = {};
   private riskEvidenceAttemptedAtByMint: Record<string, number> = {};
@@ -547,7 +547,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.ctx.storage.get<CoordinatorStatus>("status"),
       this.ctx.storage.get<DiscoveryStoreState>("discovery_state"),
       this.ctx.storage.get<boolean>("enabled"),
-      this.ctx.storage.get<Record<string, WalletFundingEvidenceResult>>("wallet_link_snapshots"),
+      this.ctx.storage.get<Record<string, CompleteWalletFundingEvidenceResult>>("wallet_link_snapshots"),
       this.ctx.storage.get<Record<string, WalletHoldingEvidence[]>>("wallet_holdings_by_mint"),
       this.ctx.storage.get<Record<string, HolderConcentrationResult>>("holder_risk_snapshots"),
       this.ctx.storage.get<Record<string, number>>("risk_evidence_attempted_at_by_mint"),
