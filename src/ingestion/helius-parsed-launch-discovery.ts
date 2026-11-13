@@ -80,9 +80,8 @@ export async function fetchPumpCreateScanPage(input: {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new Error("Malformed Parsed Events Scan response.");
   }
-  const envelope = payload as Record<string, unknown>;
-  const result = envelope.result as Record<string, unknown> | undefined;
-  const scan = result?.scan as Record<string, unknown> | undefined;
+  const result = payload as Record<string, unknown>;
+  const scan = result.scan as Record<string, unknown> | undefined;
   if (!result || !scan || !Array.isArray(result.data) ||
       !["windowEnd", "limit", "budget", "deadline"].includes(String(scan.stoppedOn)) ||
       !Number.isSafeInteger(scan.scannedTransactions) || (scan.scannedTransactions as number) < 0 ||
