@@ -5,15 +5,15 @@
  * same two events to prove persistence and idempotency. No market streams start,
  * no positions/quotes/fills are created, and no Solana transaction is signed or sent.
  */
-const required = ["PAPER_WORKER_URL", "PAPER_WORKER_CONTROL_TOKEN", "PAPER_EVENT_INGEST_URL"];
+const required = ["PAPER_WORKER_CONTROL_TOKEN"];
 const missing = required.filter((key) => !process.env[key]);
 if (missing.length) {
   console.error(`Missing required environment variables: ${missing.join(", ")}`);
   process.exit(2);
 }
 
-const workerUrl = new URL(process.env.PAPER_WORKER_URL);
-const apiUrl = new URL(process.env.PAPER_EVENT_INGEST_URL);
+const workerUrl = new URL(process.env.PAPER_WORKER_URL ?? "https://pumpfun-paper-worker.teddyjeremy12.workers.dev");
+const apiUrl = new URL(process.env.PAPER_EVENT_INGEST_URL ?? "https://pumpfun-paper-trader-six.vercel.app");
 if (workerUrl.protocol !== "https:" || apiUrl.protocol !== "https:") {
   console.error("Production smoke tests require HTTPS endpoints.");
   process.exit(2);
