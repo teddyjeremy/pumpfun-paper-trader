@@ -27,17 +27,29 @@ export function assessHeliusGapRecovery(
   input: HeliusGapRecoveryInput
 ): HeliusGapRecoveryResult {
   const { gap } = input;
-  if (!gap.endedAt || !gap.startSignature || !gap.endSignature ||
-      !Number.isSafeInteger(gap.startSlot) || !Number.isSafeInteger(gap.endSlot)) {
-    return { recovered: false, reason: "Interruption is missing a closed time interval or both signature/slot anchors.", recoveredSignatures: 0 };
+  const startedAtMs = Date.parse(gap.startedAt);
+  const endedAtMs = Date.parse(gap.endedAt ?? "");
+  const addressPattern = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  const signaturePattern = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
+  if (!addressPattern.test(gap.mint) || !gap.endedAt ||
+      !Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs) || endedAtMs < startedAtMs ||
+      !gap.startSignature || !signaturePattern.test(gap.startSignature) ||
+      !gap.endSignature || !signaturePattern.test(gap.endSignature) ||
+      gap.startSignature === gap.endSignature ||
+      gap.startSlot === null || gap.startSlot === undefined ||
+      gap.endSlot === null || gap.endSlot === undefined ||
+      !Number.isSafeInteger(gap.startSlot) || !Number.isSafeInteger(gap.endSlot) ||
+      gap.startSlot < 0 || gap.endSlot < gap.startSlot) {
+    return { recovered: false, reason: "Interruption is missing valid, ordered time, address, signature, or slot anchors.", recoveredSignatures: 0 };
   }
   const all = input.signatures;
   const seen = new Set<string>();
   let previous: AddressSignatureInfo | null = null;
   for (const item of all) {
-    if (!item.signature || seen.has(item.signature) ||
+    if (!signaturePattern.test(item.signature) || seen.has(item.signature) ||
         !Number.isSafeInteger(item.slot) || item.slot < 0 ||
-        (item.blockTime !== null && (!Number.isSafeInteger(item.blockTime) || item.blockTime < 0))) {
+        (item.blockTime !== null && (!Number.isSafeInteger(item.blockTime) || item.blockTime < 0)) ||
+        !(item.err === null || (typeof item.err === "object" && !Array.isArray(item.err)))) {
       return { recovered: false, reason: "Address-history scan contains duplicate or malformed signature records.", recoveredSignatures: 0 };
     }
     if (previous && (item.slot > previous.slot ||
