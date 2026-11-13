@@ -50,7 +50,7 @@ describe("selective Helius transaction fetch", () => {
       expect(body.method).toBe("getTransaction");
       expect(body.params[0]).toBe(signature);
       expect(body.params[1]).toMatchObject({
-        encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0
+        encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 1
       });
       return Response.json({ jsonrpc: "2.0", id: signature, result: null });
     });
