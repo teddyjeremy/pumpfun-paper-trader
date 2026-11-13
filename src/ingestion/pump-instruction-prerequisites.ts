@@ -138,7 +138,10 @@ export async function inspectPumpCurveV3InstructionPrerequisites(input: {
     removeBlocker(blockers, "USER_VOLUME_ACCUMULATOR_STATE_AND_RENT_NOT_VERIFIED");
   } else if (volumeAccumulator.minimumRentLamports !== null) {
     removeBlocker(blockers, "USER_VOLUME_ACCUMULATOR_STATE_AND_RENT_NOT_VERIFIED");
-    blockers.push("USER_VOLUME_ACCUMULATOR_RENT_RESERVE_NOT_RECORDED_IN_PAPER_PORTFOLIO");
+    blockers.push(
+      "USER_VOLUME_ACCUMULATOR_RENT_RESERVE_NOT_RECORDED_IN_PAPER_PORTFOLIO",
+      "USER_VOLUME_ACCUMULATOR_INIT_INSTRUCTION_NOT_INCLUDED"
+    );
   }
   blockers.push("VIRTUAL_PAYER_BALANCE_NOT_VERIFIED");
   return {
