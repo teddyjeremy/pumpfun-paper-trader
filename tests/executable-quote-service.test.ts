@@ -33,7 +33,8 @@ function exactFeeEvidence(networkFeeLamports:string,priorityFeeLamports:string):
     computeUnitLimit:200_000,estimate
   };
 }
-\ndescribe("executable quote service",()=>{
+
+describe("executable quote service",()=>{
   it("requires an exact-size fresh sell quote on the same venue and quote mint",async()=>{
     let calls=0;
     const result=await fetchExecutableRoundTripQuote({
