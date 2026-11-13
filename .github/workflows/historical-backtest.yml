@@ -17,7 +17,7 @@ on:
       previous_run_id:
         description: "Previous run ID containing pump-backtest-state for this date"
         required: false
-        default: "43502921401"
+        default: "43503737277"
         type: string
 
 permissions:
@@ -35,7 +35,7 @@ jobs:
     env:
       HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
       BACKTEST_DATE: ${{ github.event.inputs.date || '2026-11-12' }}
-      PREVIOUS_RUN_ID: ${{ github.event.inputs.previous_run_id || '43502921401' }}
+      PREVIOUS_RUN_ID: ${{ github.event.inputs.previous_run_id || '43503737277' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -77,7 +77,7 @@ jobs:
       - name: Replay all selected launches in resumable batches of 20
         run: |
           while true; do
-            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=30000
+            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=50000
             NEXT=$(node -e 'const c=require("./artifacts/checkpoint.json"); process.stdout.write(String(c.nextCandidateIndex))')
             TOTAL=$(node -e 'const s=require("./artifacts/pump-launch-screen-"+process.env.BACKTEST_DATE+".json"); process.stdout.write(String(s.selectedLaunchIndexes.length))')
             if [ "$NEXT" -ge "$TOTAL" ]; then
