@@ -6,9 +6,10 @@ import { buildExitWindowObservations } from "./exit-window-builder.js";
 import type { ExitWindowObservation } from "./dynamic-exits.js";
 
 /**
- * Builds only venue-correct, fully covered 2-second Pump curve observations.
- * PumpTradeEvent currently describes the bonding-curve program; it must never
- * be relabelled as PumpSwap flow after migration. Missing evidence stays absent.
+ * Builds venue-correct 2-second Pump curve observations only when the upstream
+ * collector explicitly proves complete event-stream coverage. Fresh observed
+ * events alone cannot prove that no trades were missed. PumpTradeEvent must
+ * never be relabelled as PumpSwap flow after migration.
  */
 export function buildPumpCurveExitWindowEvidence(input: {
   marketState: PumpMarketState;
@@ -20,7 +21,7 @@ export function buildPumpCurveExitWindowEvidence(input: {
   if (marketState.status !== "LIVE_CURVE" || !quoteMint || !flow ||
       flow.mint !== marketState.mint || flow.quoteMint !== quoteMint ||
       flow.windowSeconds !== 2 || flow.sampleIntervalSeconds !== 1 ||
-      !flow.dataComplete) return [];
+      !flow.dataComplete || flow.coverage !== "VERIFIED_COMPLETE_EVENT_STREAM") return [];
 
   const latest = flow.windows.slice(-3);
   if (latest.length !== 3 ||
