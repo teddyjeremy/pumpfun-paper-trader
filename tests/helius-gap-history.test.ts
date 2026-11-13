@@ -29,6 +29,37 @@ describe("Helius gap address-history scan", () => {
     if (result.complete) expect(result.signatures.map(item => item.signature)).toEqual([sig("3"), sig("2"), sig("1")]);
   });
 
+  it("returns a durable cursor at the page bound and resumes without rescanning earlier pages", async () => {
+    const all = Array.from({ length: 12 }, (_, index) => row(String(index + 1), 200 - index));
+    const requests: Array<string | null> = [];
+    const fetcher: typeof fetch = async (_input, init) => {
+      const request = JSON.parse(String(init?.body));
+      const before = request.params[1].before ?? null;
+      requests.push(before);
+      const start = before ? all.findIndex(item => item.signature === before) + 1 : 0;
+      return Response.json({ result: all.slice(start, start + 1) });
+    };
+    const first = await fetchHeliusGapAddressHistory(
+      "11111111111111111111111111111111",
+      { ...gap, startSignature: all[11]!.signature, startSlot: all[11]!.slot,
+        endSignature: all[0]!.signature, endSlot: all[0]!.slot },
+      { apiKey: "test", fetcher }, fetcher, 1
+    );
+    expect(first.complete).toBe(false);
+    if (first.complete) return;
+    expect(first.resume?.before).toBe(all[9]!.signature);
+    const second = await fetchHeliusGapAddressHistory(
+      "11111111111111111111111111111111",
+      { ...gap, startSignature: all[11]!.signature, startSlot: all[11]!.slot,
+        endSignature: all[0]!.signature, endSlot: all[0]!.slot },
+      { apiKey: "test", fetcher }, fetcher, 1, first.resume
+    );
+    expect(second.complete).toBe(true);
+    if (second.complete) expect(second.signatures.map(item => item.signature))
+      .toEqual(all.map(item => item.signature));
+    expect(requests[10]).toBe(all[9]!.signature);
+  });
+
   it("fails closed when the address history ends before the older anchor", async () => {
     const fetcher: typeof fetch = async () => Response.json({ result: [row("3", 102), row("2", 101)] });
     const result = await fetchHeliusGapAddressHistory("11111111111111111111111111111111", gap,
