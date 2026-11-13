@@ -96,6 +96,7 @@ interface Env {
   HELIUS_API_KEY: string;
   PAPER_EVENT_INGEST_URL?: string;
   PAPER_EVENT_INGEST_TOKEN?: string;
+  PAPER_EVENT_INGEST_TOKEN_V2?: string;
   FULL_WALLET_HISTORY_ENABLED?: string;
   FULL_WALLET_HISTORY_MAX_PAGES?: string;
   REVIEWED_VOLUME_THRESHOLDS_JSON?: string;
@@ -233,12 +234,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
 
   private get postgresIngestConfigured(): boolean {
-    return Boolean(this.env.PAPER_EVENT_INGEST_URL && this.env.PAPER_EVENT_INGEST_TOKEN);
+    return Boolean(this.env.PAPER_EVENT_INGEST_URL && (this.env.PAPER_EVENT_INGEST_TOKEN_V2 || this.env.PAPER_EVENT_INGEST_TOKEN));
   }
 
   private async postPostgresIngest(path: string, body: unknown): Promise<Response> {
     const baseUrl = this.env.PAPER_EVENT_INGEST_URL;
-    const token = this.env.PAPER_EVENT_INGEST_TOKEN;
+    const token = this.env.PAPER_EVENT_INGEST_TOKEN_V2 || this.env.PAPER_EVENT_INGEST_TOKEN;
     if (!baseUrl || !token) throw new Error("PostgreSQL event ingestion is not configured.");
     const url = new URL(path, baseUrl).toString();
     return fetch(url, {
@@ -252,7 +253,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private async acquirePostgresWorkerLease(): Promise<void> {
-    if (!this.env.PAPER_EVENT_INGEST_URL && !this.env.PAPER_EVENT_INGEST_TOKEN) return;
+    if (!this.env.PAPER_EVENT_INGEST_URL && !(this.env.PAPER_EVENT_INGEST_TOKEN_V2 || this.env.PAPER_EVENT_INGEST_TOKEN)) return;
     if (!this.postgresIngestConfigured) {
       throw new Error("PAPER_EVENT_INGEST_URL and PAPER_EVENT_INGEST_TOKEN must both be configured.");
     }
