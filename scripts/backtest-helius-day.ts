@@ -43,7 +43,7 @@ const output = {
   requestedLocalDate: date,
   utcOffsetMinutes: offsetMinutes,
   timezoneInterpretation: "Fixed UTC offset supplied by operator; no daylight-saving inference.",
-  sampleOrder: "Newest launches first; SAMPLE_CAP_REACHED is not full-day coverage.",
+  sampleOrder: "Earliest launches from the requested local day; DAY_EXHAUSTED is required to trust this sample.",
   creditMetering: "One credit per standard getSignaturesForAddress or getTransaction RPC request.",
   ...result,
   launches: result.launches.map(launch => ({
