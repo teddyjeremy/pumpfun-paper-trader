@@ -25,6 +25,8 @@ export interface HistoricalBackfillState {
   pagesScanned: number;
   scannedCount: number;
   before: string | null;
+  lastPageSlot: number | null;
+  lastPageBlockTime: number | null;
   status: BackfillStatus;
   reason: string | null;
 }
@@ -69,6 +71,8 @@ export function createHistoricalBackfillState(input: {
     pagesScanned: 0,
     scannedCount: 0,
     before: null,
+    lastPageSlot: null,
+    lastPageBlockTime: null,
     status: input.launchBlockTime === null ? "INCOMPLETE" : "PENDING",
     reason: input.launchBlockTime === null ? "Verified launch block time is unavailable." : null
   };
@@ -164,6 +168,16 @@ export function applyAddressSignaturesPage(
     }
   }
 
+  if (current.before !== null && parsed.some(item => item.signature === current.before)) {
+    return incomplete("Helius repeated a signature from the preceding pagination page.");
+  }
+  const firstOnPage = parsed[0]!;
+  if ((current.lastPageSlot !== null && firstOnPage.slot > current.lastPageSlot) ||
+      (current.lastPageBlockTime !== null && firstOnPage.blockTime !== null &&
+        firstOnPage.blockTime > current.lastPageBlockTime)) {
+    return incomplete("Helius address-history pagination moved backwards in page order.");
+  }
+
   const launchTime = current.launchBlockTime;
   if (launchTime === null) return incomplete("Verified launch block time is unavailable.");
   const endTime = launchTime + current.horizonSeconds;
@@ -213,6 +227,8 @@ export function applyAddressSignaturesPage(
       pagesScanned: current.pagesScanned + 1,
       scannedCount,
       before: null,
+      lastPageSlot: parsed[parsed.length - 1]!.slot,
+      lastPageBlockTime: parsed[parsed.length - 1]!.blockTime,
       status: "READY_TO_FETCH",
       reason: null
     };
