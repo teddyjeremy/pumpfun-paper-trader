@@ -312,6 +312,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         throw new Error("PostgreSQL did not acknowledge the complete paper audit batch.");
       }
       await this.ctx.storage.put(cursorKey, lastEvent.sequence);
+      if (this.status.lastError === "Paper event ingestion failed; durable outbox will retry.") {
+        this.status.lastError = null;
+      }
       const meta = await this.ctx.storage.get<AuditSessionMeta>(`audit_session:${sessionId}`);
       if (meta && meta.eventCount > lastEvent.sequence) {
         await this.ctx.storage.setAlarm(Date.now() + 1_000);
@@ -319,6 +322,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     } catch {
       // The durable audit pages are the outbox. Do not advance the cursor on
       // failure; a retry is safe because PostgreSQL deduplicates event ids.
+      this.status.lastError = "Paper event ingestion failed; durable outbox will retry.";
       await this.ctx.storage.setAlarm(Date.now() + 30_000).catch(() => undefined);
     } finally {
       this.postgresFlushInFlight = false;
