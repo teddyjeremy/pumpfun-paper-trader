@@ -75,7 +75,6 @@ export async function discoverPumpLaunchesInTimeRange(
   let transactionFetches = 0;
   let before: string | null = null;
   let previousOldest: { signature: string; slot: number; blockTime: number } | null = null;
-  const seen = new Set<string>();
   const launches: HistoricalLaunchDiscovery[] = [];
   let lastRequestAt = 0;
 
@@ -115,6 +114,7 @@ export async function discoverPumpLaunchesInTimeRange(
       }
 
       const parsed: Array<{ signature: string; slot: number; blockTime: number | null; err: unknown }> = [];
+      const pageSeen = new Set<string>();
       for (const raw of page) {
         if (!raw || typeof raw !== "object") throw new Error("Malformed signature record.");
         const row = raw as Record<string, unknown>;
@@ -124,8 +124,8 @@ export async function discoverPumpLaunchesInTimeRange(
             !Object.prototype.hasOwnProperty.call(row, "err")) {
           throw new Error("Signature record lacks a valid signature, slot, blockTime or err field.");
         }
-        if (seen.has(row.signature)) throw new Error("Duplicate signature across program-history pages.");
-        seen.add(row.signature);
+        if (pageSeen.has(row.signature)) throw new Error("Duplicate signature within program-history page.");
+        pageSeen.add(row.signature);
         parsed.push({ signature: row.signature, slot: row.slot as number,
           blockTime: row.blockTime as number | null, err: row.err });
       }
@@ -138,6 +138,9 @@ export async function discoverPumpLaunchesInTimeRange(
         }
       }
       const first = parsed[0]!;
+      if (previousOldest && first.signature === previousOldest.signature) {
+        throw new Error("Helius repeated the previous page cursor instead of advancing.");
+      }
       if (previousOldest && (first.slot > previousOldest.slot ||
           (first.blockTime !== null && previousOldest.blockTime !== null && first.blockTime > previousOldest.blockTime))) {
         throw new Error("Program-signature pagination crossed its prior page boundary.");
