@@ -123,7 +123,7 @@ export async function collectCompleteWalletTransactionHistory(
         const meta = asRecord(transaction?.meta);
         const txRoot = asRecord(transaction?.transaction);
         const message = asRecord(txRoot?.message);
-        if (typeof signature !== "string" || !SIGNATURE.test(signature) ||
+        if (!transaction || typeof signature !== "string" || !SIGNATURE.test(signature) ||
             !Number.isSafeInteger(slot) || (slot as number) < 0 ||
             !Number.isSafeInteger(blockTime) || (blockTime as number) < 0 ||
             !meta || !Object.prototype.hasOwnProperty.call(meta, "err") ||
