@@ -17,6 +17,27 @@ describe("paper portfolio accounting",()=>{
   expect(opened.state.availableCashUsd).toBe(1.693);
   expect(()=>openPaperPosition(opened.state,{mint:"mint",positionId:"p2",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)})).toThrow(/only be bought once/);
  });
+ it("locks refundable ATA rent separately from trade costs and releases it on close",()=>{
+  const p=createPaperPortfolio();
+  const opened=openPaperPosition(p,{mint:"rent-mint",positionId:"rent-position",occurredAt:now,
+    buyQuote:quote("rent-mint","BUY"),sellQuote:quote("rent-mint","SELL"),rentReserveUsd:0.2,nowMs:Date.parse(now)});
+  expect(opened.state.availableCashUsd).toBeCloseTo(1.493,8);
+  expect(opened.state.reservedAccountRentUsd).toBeCloseTo(0.2,8);
+  expect(opened.position.rentReserveUsd).toBeCloseTo(0.2,8);
+  const closed=closePaperPosition(opened.state,{positionId:"rent-position",sellQuote:quote("rent-mint","SELL","1000000",1.5),
+    exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
+  expect(closed.state.reservedAccountRentUsd).toBe(0);
+  expect(closed.state.availableCashUsd).toBeCloseTo(3.186,8);
+  expect(closed.position.rentReserveUsd).toBeCloseTo(0.2,8);
+ });
+
+ it("blocks an entry when stake, fees and refundable rent cannot all be reserved",()=>{
+  const p=createPaperPortfolio();
+  expect(()=>openPaperPosition(p,{mint:"rent-mint",positionId:"rent-position",occurredAt:now,
+    buyQuote:quote("rent-mint","BUY"),sellQuote:quote("rent-mint","SELL"),rentReserveUsd:2,nowMs:Date.parse(now)}))
+    .toThrow(/stake and refundable account rent reserve/);
+ });
+
  it("rejects quotes with missing or non-finite notional evidence",()=>{
   const p=createPaperPortfolio();
   const buy=quote("mint","BUY"); buy.requestedUsd=Number.NaN;
