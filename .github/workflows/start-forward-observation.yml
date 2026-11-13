@@ -1,0 +1,64 @@
+name: Start forward paper observation session
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/start-forward-observation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  start-observation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WORKER_URL: https://pumpfun-paper-worker.teddyjeremy12.workers.dev
+      CONTROL_TOKEN: ${{ secrets.PAPER_WORKER_CONTROL_TOKEN }}
+    steps:
+      - name: Wait for Worker deployment and Durable Object code update
+        run: sleep 360
+
+      - name: Verify the reviewed-calibration gate is closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CONTROL_TOKEN" || { echo "PAPER_WORKER_CONTROL_TOKEN is missing"; exit 1; }
+          STATUS=$(curl --fail --silent --show-error -H "Authorization: Bearer $CONTROL_TOKEN" "$WORKER_URL/status")
+          printf '%s' "$STATUS" | node -e '
+            let raw = "";
+            process.stdin.on("data", chunk => raw += chunk);
+            process.stdin.on("end", () => {
+              const s = JSON.parse(raw);
+              const blockers = Array.isArray(s.readinessBlockers) ? s.readinessBlockers : [];
+              const calibrationBlocked = blockers.some(x => String(x).includes("Reviewed chronological volume calibration is not configured"));
+              if (s.mode !== "paper" || s.tradingReady !== false || !calibrationBlocked) {
+                console.error("Refusing to start observation session: paper mode or calibration lock is not confirmed.");
+                process.exit(1);
+              }
+              process.stdout.write("PASS: paper mode confirmed; reviewed-calibration gate prevents simulated entries.");
+            });
+          '
+
+      - name: Start forward observation session
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error -X POST -H "Authorization: Bearer $CONTROL_TOKEN" "$WORKER_URL/start" >/dev/null
+          sleep 15
+          STATUS=$(curl --fail --silent --show-error -H "Authorization: Bearer $CONTROL_TOKEN" "$WORKER_URL/status")
+          printf '%s' "$STATUS" | node -e '
+            let raw = "";
+            process.stdin.on("data", chunk => raw += chunk);
+            process.stdin.on("end", () => {
+              const s = JSON.parse(raw);
+              const blockers = Array.isArray(s.readinessBlockers) ? s.readinessBlockers : [];
+              const calibrationBlocked = blockers.some(x => String(x).includes("Reviewed chronological volume calibration is not configured"));
+              if (s.mode !== "paper" || s.enabled !== true || s.tradingReady !== false || !calibrationBlocked) {
+                console.error("Observation-only session did not remain behind the calibration safety gate.");
+                process.exit(1);
+              }
+              process.stdout.write("PASS: forward market-data session is enabled in paper mode; simulated entries remain locked pending reviewed calibration.");
+            });
+          '
