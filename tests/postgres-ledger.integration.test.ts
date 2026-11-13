@@ -214,6 +214,23 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       launch_block_time: "1762941600", decoded_complete: true,
       verified_transaction_count: 1, transactions: 1
     });
+    await ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
+      ...entryEvent,
+      sequence: 3,
+      eventId: "integration-wallet-risk-3",
+      kind: "RISK_EVIDENCE",
+      mint: backfillMint,
+      occurredAt: "2026-11-12T10:00:04.000Z",
+      data: {
+        evidenceType: "WALLET_CLUSTER",
+        fundingEvidence: {
+          status: "OBSERVED", dataComplete: true, walletSetComplete: true,
+          observedAt: "2026-11-12T10:00:03.900Z",
+          requestedWallets: ["11111111111111111111111111111111"],
+          walletsCovered: ["11111111111111111111111111111111"], links: []
+        }
+      }
+    }]);
     const replayDataset = await ledgerPersistence!.getHeliusBackfillReplayDataset(sessionId);
     expect(replayDataset).toHaveLength(1);
     expect(replayDataset[0]).toMatchObject({
@@ -221,6 +238,11 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       signatureCount: 1, verifiedTransactionCount: 1
     });
     expect(replayDataset[0]?.transactions).toHaveLength(1);
+    expect(replayDataset[0]?.riskEvidence).toHaveLength(1);
+    expect(replayDataset[0]?.riskEvidence[0]).toMatchObject({
+      occurredAt: "2026-11-12T10:00:04.000Z",
+      payload: { evidenceType: "WALLET_CLUSTER" }
+    });
 
     await expect(ledgerPersistence!.persistHeliusBackfillArchive({
       sessionId, mint: backfillMint, state,
