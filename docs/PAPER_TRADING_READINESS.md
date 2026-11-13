@@ -31,6 +31,8 @@ This document is the operational checklist for reaching the first verified simul
 - [x] Decode completion is tied to the exact persisted signature window; a changed window revokes the previous completion, and replay reads exclude archived transactions outside the current window.
 - [ ] Confirm the live backfill worker archives every expected signature and records verified/failed terminal outcomes.
 - [x] Worker marks monitored mints incomplete immediately on Helius WebSocket transport errors, connection failures, and socket closure; transport errors force the close/reconnect path.
+- [x] Persist per-mint Helius interruption intervals from the last confirmed subscription boundary through the next subscription acknowledgement; a reconnect closes the interval but does not clear the incomplete-mint flag.
+- [ ] Backfill each persisted interruption interval by bonding-curve address and reconcile the complete signature set against archived verified/failed outcomes before marking any interval recovered.
 - [x] Exit-window evidence rejects transaction buffers whose per-window event counts do not reconcile with the claimed complete-flow snapshots.
 - [ ] Demonstrate contiguous, complete launch-window event coverage with persisted provenance, including scan address, provider/commitment, page/cursor boundaries, and the exact interval recovered. A reconnect restores future subscriptions but does not prove that notifications were complete or recover events missed during the gap.
 - [ ] Ensure retry exhaustion, pagination truncation, missing transactions, and decoder errors cannot be interpreted as complete coverage. Cross-page pagination integrity is now checked, but exact interruption-interval recovery provenance is still missing.
