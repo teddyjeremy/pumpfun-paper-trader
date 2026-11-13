@@ -19,7 +19,8 @@
     "backtest:discover": "tsx scripts/backtest-helius-day.ts",
     "backtest:replay": "tsx scripts/backtest-helius-day-replay.ts",
     "backtest:batch": "tsx scripts/backtest-helius-batch.ts",
-    "backtest:screen": "tsx scripts/backtest-helius-screen.ts"
+    "backtest:screen": "tsx scripts/backtest-helius-screen.ts",
+    "backtest:rank": "tsx scripts/backtest-helius-rank.ts"
   },
   "dependencies": {
     "fastify": "^5.2.1",
