@@ -1,5 +1,5 @@
 import { buildHeliusRpcUrl, PUMP_FUN_PROGRAM_ID } from "./helius.js";
-import { decodeSuccessfulPumpTransaction, type PumpCreateEvent } from "./pump-events.js";
+import { decodePumpCreateEvents, type PumpCreateEvent } from "./pump-events.js";
 
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -212,12 +212,22 @@ export async function fetchVerifiedParsedLaunch(
       !meta.logMessages.every(line => typeof line === "string")) {
     throw new Error("Selected Create transaction did not return successful complete logs.");
   }
-  const decoded = decodeSuccessfulPumpTransaction(result);
-  if (decoded.status !== "DECODED" || decoded.signature !== input.signature || decoded.slot !== input.slot) {
-    throw new Error(decoded.status === "DATA_INCOMPLETE"
-      ? decoded.reason : "Selected Create transaction identity failed independent decoding.");
+  const signatures = (tx.transaction as { signatures?: unknown } | undefined)?.signatures;
+  if (!Array.isArray(signatures) || signatures[0] !== input.signature) {
+    throw new Error("Selected Create transaction signature disagrees with Parsed Events evidence.");
   }
-  const event = decoded.createEvents.find(item =>
+
+  // Launch discovery needs only the independently verified CreateEvent. Do not
+  // make it depend on decoding every TradeEvent in the same transaction: the
+  // deployed Pump TradeEvent layout has an unresolved schema mismatch, and
+  // trade-flow replay must remain incomplete until that layout is verified.
+  let createEvents: PumpCreateEvent[];
+  try {
+    createEvents = decodePumpCreateEvents(meta.logMessages as string[]);
+  } catch {
+    throw new Error("Selected transaction contains a malformed Pump CreateEvent payload.");
+  }
+  const event = createEvents.find(item =>
     ADDRESS.test(item.mint) && ADDRESS.test(item.bondingCurve) &&
     Number(item.timestamp) >= bucket.startTime && Number(item.timestamp) < bucket.endTime
   );
