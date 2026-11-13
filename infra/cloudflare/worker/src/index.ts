@@ -1451,6 +1451,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const monitoredMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))]
       .filter(mint => !onlyMint || mint === onlyMint);
     if (monitoredMints.length === 0) return;
+    // Refresh global runtime prerequisites before spending quote RPC credits or
+    // committing a simulated fill. Candidate-level rules remain independently
+    // evaluated below; this gate prevents stale connection/config state passing.
+    const runtimeStatus = await this.getStatus();
     const report = (precomputedReport ?? await this.listTradeFlows()) as {
       solUsdPrice?: Awaited<ReturnType<typeof fetchSolUsdPrice>>;
       flows: Array<{ mint: string; quoteMint: string | null; microTradeFilterStatus: "APPLIED" | "UNAVAILABLE" | "UNSUPPORTED_QUOTE"; dataComplete: boolean; latestThreeWindowFlowPass: boolean; windows: Array<{buySellRatio:number|null;flowWindowPass:boolean;uniqueBuyers:number;uniqueSellers:number}>; distinctBuyersAcrossLatestThree:number; largestBuyerShareAcrossLatestThreeBps:number|null }>;
@@ -1564,6 +1568,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const solUsdObservation = report.solUsdPrice?.status === "AVAILABLE"
         ? report.solUsdPrice.observation : null;
       if (!executableQuoteAvailable && canRequestExecutableQuote(evaluated) &&
+          runtimeStatus.tradingReady &&
           this.status.enabled && this.activeSessionId && this.postgresLeaseHeld &&
           this.postgresIngestConfigured && this.env.HELIUS_API_KEY &&
           solUsdObservation && profile?.quoteMint && isSolQuoteMint(profile.quoteMint) &&
@@ -1707,6 +1712,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         }, `paper-entry-authorization-error:${triggerSignature}:${mint}`);
       }
       if (canCommitPaperEntry({
+          systemTradingReady: runtimeStatus.tradingReady,
           sessionEnabled: this.status.enabled,
           workerLeaseHeld: this.postgresLeaseHeld,
           postgresIngestConfigured: this.postgresIngestConfigured,
