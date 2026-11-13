@@ -1,4 +1,4 @@
-import { readdir, readFile, mkdir, rename, writeFile } from "node:fs/promises";
+import { readFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 type Trade = {
