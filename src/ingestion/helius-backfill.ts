@@ -152,6 +152,18 @@ export function applyAddressSignaturesPage(
     return incomplete("The create signature was not found before the address history ended.");
   }
 
+  if (new Set(parsed.map(item => item.signature)).size !== parsed.length) {
+    return incomplete("Helius returned duplicate signatures within an address-history page.");
+  }
+  for (let index = 1; index < parsed.length; index += 1) {
+    const newer = parsed[index - 1]!;
+    const older = parsed[index]!;
+    if (older.slot > newer.slot ||
+        (newer.blockTime !== null && older.blockTime !== null && older.blockTime > newer.blockTime)) {
+      return incomplete("Helius address-history page is not ordered newest-to-oldest.");
+    }
+  }
+
   const launchTime = current.launchBlockTime;
   if (launchTime === null) return incomplete("Verified launch block time is unavailable.");
   const endTime = launchTime + current.horizonSeconds;
