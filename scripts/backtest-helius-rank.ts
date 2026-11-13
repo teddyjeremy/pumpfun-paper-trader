@@ -7,6 +7,7 @@ type Trade = {
   realSolReserves: string; quoteMint: string;
 };
 type CoinRecord = {
+  index: number;
   mint: string;
   launch?: { blockTime?: number };
   collection?: { status?: string; verifiedTransactions?: number };
@@ -33,11 +34,28 @@ const minMovePct = Number(arg("min-move-pct", "10"));
 const minLiquiditySol = Number(arg("min-liquidity-sol", "5"));
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(minMovePct) || minMovePct < 0 ||
     !Number.isFinite(minLiquiditySol) || minLiquiditySol < 0) throw new Error("Invalid ranking date or thresholds.");
-const directory = resolve("artifacts", "coins");
-const files = (await readdir(directory)).filter(name => name.endsWith(".json")).sort();
+const artifactsDir = resolve("artifacts");
+const discovery = JSON.parse(await readFile(resolve(artifactsDir, `pump-launch-discovery-${date}.json`), "utf8")) as { requestedLocalDate: string; launches: Array<{ event: { mint: string } }> };
+const screening = JSON.parse(await readFile(resolve(artifactsDir, `pump-launch-screen-${date}.json`), "utf8")) as { date: string; status: string; selectedLaunchIndexes: number[] };
+const checkpoint = JSON.parse(await readFile(resolve(artifactsDir, "checkpoint.json"), "utf8")) as { date: string; selectedLaunchIndexes: number[]; nextCandidateIndex: number };
+if (discovery.requestedLocalDate !== date || screening.date !== date || screening.status !== "COMPLETE" ||
+    checkpoint.date !== date || JSON.stringify(screening.selectedLaunchIndexes) !== JSON.stringify(checkpoint.selectedLaunchIndexes)) {
+  throw new Error("Ranking requires matching discovery, screening and replay checkpoints for this date.");
+}
+const directory = resolve(artifactsDir, "coins");
+const selected = screening.selectedLaunchIndexes.slice(0, checkpoint.nextCandidateIndex);
+const files = selected.map(index => {
+  const mint = discovery.launches[index]?.event.mint;
+  if (!mint) throw new Error(`Selected launch index ${index} is missing from discovery.`);
+  return { index, file: `${String(index).padStart(4, "0")}-${mint}.json` };
+});
 const candidates: Candidate[] = [];
-for (const file of files) {
-  const coin = JSON.parse(await readFile(resolve(directory, file), "utf8")) as CoinRecord;
+for (const selectedFile of files) {
+  const file = selectedFile.file;
+  let coin: CoinRecord;
+  try { coin = JSON.parse(await readFile(resolve(directory, file), "utf8")) as CoinRecord; }
+  catch { candidates.push({ mint: discovery.launches[selectedFile.index]!.event.mint, status: "INCOMPLETE", uniqueBuyers30s: 0, buyTrades30s: 0, sellTrades30s: 0, buyVolumeSol30s: 0, priceMovePct30s: null, peakPriceMovePct30s: null, realSolLiquidityAt30s: null, reasons: ["Selected coin has not yet produced a complete per-coin artifact."] }); continue; }
+  if (coin.index !== selectedFile.index || coin.mint !== discovery.launches[selectedFile.index]!.event.mint) throw new Error(`Coin artifact identity mismatch: ${file}`);
   if (coin.collection?.status !== "COMPLETE" || !Array.isArray(coin.transactions)) {
     candidates.push({ mint: coin.mint, status: "INCOMPLETE", uniqueBuyers30s: 0, buyTrades30s: 0,
       sellTrades30s: 0, buyVolumeSol30s: 0, priceMovePct30s: null, peakPriceMovePct30s: null,
@@ -86,7 +104,7 @@ candidates.sort((a, b) => Number(b.status === "QUALIFIED") - Number(a.status ===
 const complete = candidates.filter(row => row.status !== "INCOMPLETE").length;
 const output = {
   date, windowSeconds: 30, thresholds: { minBuyers, minBuyTrades, minMovePct, minLiquiditySol },
-  filesProcessed: files.length, completeCoins: complete, incompleteCoins: candidates.length - complete,
+  selectedCoins: selected.length, filesProcessed: files.length, completeCoins: complete, incompleteCoins: candidates.length - complete,
   qualifiedCoins: candidates.filter(row => row.status === "QUALIFIED").length,
   rejectedCoins: candidates.filter(row => row.status === "REJECTED").length,
   candidates,
@@ -98,6 +116,6 @@ const path = resolve(outputDir, `pump-candidate-ranking-${date}.json`);
 const temp = `${path}.tmp`;
 await writeFile(temp, JSON.stringify(output, null, 2) + "\n");
 await rename(temp, path);
-process.stdout.write(JSON.stringify({ date, filesProcessed: files.length, completeCoins: complete,
+process.stdout.write(JSON.stringify({ date, selectedCoins: selected.length, filesProcessed: files.length, completeCoins: complete,
   incompleteCoins: candidates.length - complete, qualifiedCoins: output.qualifiedCoins,
   rejectedCoins: output.rejectedCoins, artifact: path }, null, 2) + "\n");
