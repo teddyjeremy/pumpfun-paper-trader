@@ -81,6 +81,8 @@ import { refreshPumpMarketStateFromHelius } from "../../../../src/ingestion/heli
 import { buildPumpCurveExitWindowEvidence } from "../../../../src/strategy/pump-curve-exit-window-evidence.js";
 import { buildExecutablePaperQuote } from "../../../../src/ingestion/executable-paper-quote.js";
 import { canCommitPaperEntry } from "../../../../src/paper/paper-entry-readiness.js";
+import { authorizePaperEntryFromVerifiedPlan } from "../../../../src/ingestion/paper-entry-authorization.js";
+import type { UnsignedInstructionFeeEvidence } from "../../../../src/ingestion/solana-fee-estimator.js";
 
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
@@ -1528,6 +1530,39 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       // The portfolio transition is reachable only after the complete strict
       // strategy audit returns BUY and both exact quote legs remain fresh.
       // This is simulated accounting only; no wallet signing/submission exists.
+      const quoteResult = cachedQuote && typeof cachedQuote === "object"
+        ? (cachedQuote as {
+            result?: {
+              buyQuote?: ExecutablePaperQuote;
+              initialSellQuote?: ExecutablePaperQuote;
+              solUsdPriceUsd?: number;
+              exactFeeEvidence?: {
+                buy: UnsignedInstructionFeeEvidence;
+                sell: UnsignedInstructionFeeEvidence;
+              };
+            };
+          }).result
+        : undefined;
+      const portfolio = quoteResult?.buyQuote && quoteResult.initialSellQuote
+        ? await this.getPaperPortfolio() as PaperPortfolioState | null
+        : null;
+      const paperAuthorization = evaluated.decision === "BUY" &&
+          quoteResult?.buyQuote && quoteResult.initialSellQuote
+        ? authorizePaperEntryFromVerifiedPlan({
+            mint, portfolio,
+            buyQuote: quoteResult.buyQuote,
+            sellQuote: quoteResult.initialSellQuote,
+            exactFeeEvidence: quoteResult.exactFeeEvidence,
+            solUsdPriceUsd: quoteResult.solUsdPriceUsd ?? Number.NaN,
+            nowMs: Date.now()
+          })
+        : null;
+      if (evaluated.decision === "BUY" && !paperAuthorization?.authorized) {
+        await this.appendAudit("ERROR", mint, {
+          triggerSignature, stage: "PAPER_ENTRY_AUTHORIZATION",
+          reason: paperAuthorization?.reason ?? "Verified round-trip quote or active portfolio is unavailable."
+        }, `paper-entry-authorization-error:${triggerSignature}:${mint}`);
+      }
       if (canCommitPaperEntry({
           sessionEnabled: this.status.enabled,
           workerLeaseHeld: this.postgresLeaseHeld,
@@ -1535,72 +1570,33 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           strategyDecision: evaluated.decision,
           buyAllowed: evaluated.buyAllowed,
           executableQuoteAvailable,
-          hasBuyAndSellQuotes: Boolean(cachedQuote && typeof cachedQuote === "object" &&
-            (cachedQuote as { result?: { buyQuote?: unknown; initialSellQuote?: unknown } }).result?.buyQuote &&
-            (cachedQuote as { result?: { buyQuote?: unknown; initialSellQuote?: unknown } }).result?.initialSellQuote),
-          // Quote validity is not execution authorization. The unsigned plan
-          // must explicitly clear every account, rent, payer and portfolio gate.
-          unsignedPlanAuthorized: Boolean(cachedQuote && typeof cachedQuote === "object" &&
-            (cachedQuote as { result?: { paperEntryAuthorized?: boolean } }).result?.paperEntryAuthorized === true)
-        }) && cachedQuote && typeof cachedQuote === "object") {
-        const quoteResult = (cachedQuote as {
-          result?: {
-            buyQuote?: ExecutablePaperQuote;
-            initialSellQuote?: ExecutablePaperQuote;
-            solUsdPriceUsd?: number;
-            exactFeeEvidence?: {
-              buy?: { planEvidence?: { rentReserveLamports: number | null } };
-              sell?: { planEvidence?: { rentReserveLamports: number | null } };
-            };
-          };
-        }).result;
-        if (quoteResult?.buyQuote && quoteResult.initialSellQuote) {
-          const buyRentLamports = quoteResult.exactFeeEvidence?.buy?.planEvidence?.rentReserveLamports;
-          const sellRentLamports = quoteResult.exactFeeEvidence?.sell?.planEvidence?.rentReserveLamports;
-          const solUsdPriceUsd = quoteResult.solUsdPriceUsd;
-          if (buyRentLamports === null || buyRentLamports === undefined ||
-              sellRentLamports === null || sellRentLamports === undefined ||
-              !Number.isSafeInteger(buyRentLamports) || buyRentLamports < 0 ||
-              !Number.isSafeInteger(sellRentLamports) || sellRentLamports < 0 ||
-              !Number.isFinite(solUsdPriceUsd) || solUsdPriceUsd! <= 0) {
-            await this.appendAudit("ERROR", mint, {
-              triggerSignature, stage: "PAPER_RENT_RESERVE",
-              reason: "Both unsigned plans must provide verified rent lamports and a fresh SOL/USD reference."
-            }, `paper-rent-reserve-error:${triggerSignature}:${mint}`);
-            return;
+          hasBuyAndSellQuotes: Boolean(quoteResult?.buyQuote && quoteResult.initialSellQuote),
+          // The quote itself remains unauthorized. This independent preview
+          // verifies every non-portfolio account prerequisite and runs the
+          // exact portfolio entry guard against stake, both fee legs and rent.
+          unsignedPlanAuthorized: paperAuthorization?.authorized === true
+        }) && quoteResult?.buyQuote && quoteResult.initialSellQuote &&
+        paperAuthorization?.authorized === true && portfolio &&
+        !portfolio.enteredMints.includes(mint)) {
+        try {
+          await this.recordPaperEntry({
+            mint,
+            positionId: `paper-entry:${this.activeSessionId}:${mint}:${quoteResult.buyQuote.quoteId}`,
+            buyQuote: quoteResult.buyQuote,
+            sellQuote: quoteResult.initialSellQuote,
+            rentReserveUsd: paperAuthorization.rentReserveUsd
+          });
+          const committedSessionId = this.activeSessionId;
+          if (committedSessionId) {
+            this.ctx.waitUntil(this.flushAuditEventsToPostgres(committedSessionId));
           }
-          // Buy and sell plans refer to the same virtual trader accounts. Use
-          // the larger snapshot requirement, not their sum, to avoid double
-          // reserving rent for the same ATAs and volume accumulator.
-          const rentReserveLamports = Math.max(buyRentLamports, sellRentLamports);
-          const rentReserveUsd = rentReserveLamports / 1_000_000_000 * solUsdPriceUsd!;
-          if (!Number.isFinite(rentReserveUsd) || rentReserveUsd < 0) {
-            throw new Error("Converted refundable rent reserve is invalid.");
-          }
-          const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
-          if (portfolio && !portfolio.enteredMints.includes(mint)) {
-            try {
-              await this.recordPaperEntry({
-                mint,
-                positionId: `paper-entry:${this.activeSessionId}:${mint}:${quoteResult.buyQuote.quoteId}`,
-                buyQuote: quoteResult.buyQuote,
-                sellQuote: quoteResult.initialSellQuote,
-                rentReserveUsd
-              });
-              const committedSessionId = this.activeSessionId;
-              if (committedSessionId) {
-                this.ctx.waitUntil(this.flushAuditEventsToPostgres(committedSessionId));
-              }
-            } catch (error) {
-              await this.appendAudit("ERROR", mint, {
-                triggerSignature, stage: "STRICT_PAPER_ENTRY_TRANSITION",
-                reason: error instanceof Error ? error.message : "Paper entry transition failed closed."
-              }, `paper-entry-error:${triggerSignature}:${mint}`);
-            }
-          }
+        } catch (error) {
+          await this.appendAudit("ERROR", mint, {
+            triggerSignature, stage: "STRICT_PAPER_ENTRY_TRANSITION",
+            reason: error instanceof Error ? error.message : "Paper entry transition failed closed."
+          }, `paper-entry-error:${triggerSignature}:${mint}`);
         }
-      }
-    }
+      }    }
   }
 
   private async recordCandidateTradePrice(
