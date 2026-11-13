@@ -449,10 +449,10 @@ export async function buildPumpCurveV3UnsignedInstruction(input: {
 
   const tokenProgram = new PublicKey(requiredAccount(input.snapshot, "baseMint").owner);
   const quoteTokenProgram = new PublicKey(SPL_TOKEN_PROGRAM_ID);
-  const nativeSolQuote = context.quoteMint.equals(SystemProgram.programId);
-  // Pump V3 instruction accounts always use WSOL as quote_mint, even when the
-  // curve account stores Pubkey::default to represent native SOL.
-  const instructionQuoteMint = nativeSolQuote ? new PublicKey(NATIVE_SOL_MINT) : context.quoteMint;
+  const solPairedQuote = isSolQuoteMint(context.quoteMint.toBase58());
+  // Pump V3 instruction accounts always use WSOL for SOL-paired curves, even
+  // when a legacy curve stores Pubkey::default to represent native SOL.
+  const instructionQuoteMint = solPairedQuote ? new PublicKey(NATIVE_SOL_MINT) : context.quoteMint;
   const params = {
     user, mint: context.mint, amount: tokenAmount, quoteAmount,
     tokenProgram, quoteMint: instructionQuoteMint, quoteTokenProgram,
@@ -475,7 +475,7 @@ export async function buildPumpCurveV3UnsignedInstruction(input: {
     getAssociatedTokenAddressSync(context.mint, user, false, tokenProgram).toBase58()
   ];
   const optionalAccountAddresses: string[] = [];
-  if (nativeSolQuote) {
+  if (solPairedQuote) {
     // For native-SOL curves the program takes WSOL ATA addresses but does not
     // use or require those accounts to exist; the buyback recipient is a wallet.
     optionalAccountAddresses.push(
