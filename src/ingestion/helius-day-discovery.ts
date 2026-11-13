@@ -223,10 +223,18 @@ export async function discoverPumpLaunchesInTimeRange(
           const eventTime = Number(event.timestamp);
           if (eventTime < startTime || eventTime >= endTime ||
               !ADDRESS.test(event.mint) || !ADDRESS.test(event.bondingCurve)) continue;
-          launches.push({ signature: item.signature, slot: item.slot, blockTime: item.blockTime, event });
+          // Keep one deterministic launch from each equal-width time bucket.
+          // This prevents the sample from being dominated by the earliest part
+          // of the day while keeping memory and deep-replay costs strictly bounded.
+          const bucket = Math.min(config.maxLaunches - 1,
+            Math.floor((eventTime - startTime) * config.maxLaunches / (endTime - startTime)));
+          const occupied = launches.some(existing =>
+            Math.min(config.maxLaunches - 1,
+              Math.floor((Number(existing.event.timestamp) - startTime) * config.maxLaunches / (endTime - startTime))) === bucket
+          );
+          if (!occupied) launches.push({ signature: item.signature, slot: item.slot, blockTime: item.blockTime, event });
           launches.sort((a, b) => a.blockTime - b.blockTime ||
             Number(a.event.timestamp - b.event.timestamp) || a.signature.localeCompare(b.signature));
-          if (launches.length > config.maxLaunches) launches.pop();
         }
       }
       const oldest = parsed[parsed.length - 1]!;
