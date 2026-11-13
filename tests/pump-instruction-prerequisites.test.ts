@@ -85,11 +85,7 @@ describe("unsigned Pump instruction account prerequisites", () => {
     let rpcCalls = 0;
     const fetcher: typeof fetch = async () => {
       rpcCalls += 1;
-      if (rpcCalls > 1) throw new Error("Accumulator RPC must not run for a non-canonical PDA.");
-      return Response.json({
-        jsonrpc: "2.0", id: "accounts",
-        result: { context: { slot: 1234 }, value: [null] }
-      });
+      throw new Error("RPC must not run for a non-canonical accumulator PDA.");
     };
     await expect(inspectPumpCurveV3InstructionPrerequisites({
       identity,
@@ -106,7 +102,7 @@ describe("unsigned Pump instruction account prerequisites", () => {
       },
       config: { apiKey: "test-key", now: () => NOW, fetcher }
     })).rejects.toThrow(/does not match the canonical user PDA/);
-    expect(rpcCalls).toBe(1);
+    expect(rpcCalls).toBe(0);
   });
 
   it("rejects a Pump-owned 137-byte account with the wrong volume-accumulator discriminator", async () => {
