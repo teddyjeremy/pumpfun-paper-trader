@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/verify-forward-observation.yml"
+      - "infra/cloudflare/worker/src/**"
 
 permissions:
   contents: read
@@ -30,16 +31,25 @@ jobs:
               const s = JSON.parse(raw);
               const blockers = Array.isArray(s.readinessBlockers) ? s.readinessBlockers : [];
               const calibrationBlocked = blockers.some(x => String(x).includes("Reviewed chronological volume calibration is not configured"));
+              const leaseBlocked = blockers.some(x => String(x).includes("Fenced PostgreSQL Worker lease is not held"));
               const checks = {
                 paperMode: s.mode === "paper",
                 sessionEnabled: s.enabled === true,
-                discoveryConnected: s.discoveryConnected === true,
-                discoverySubscribed: s.discoverySubscribed === true,
+                discoveryConnected: s.connected === true,
+                discoverySubscribed: s.subscriptionsSent === true,
                 heliusConnected: s.heliusConnected === true,
-                persistenceLeaseHeld: s.persistenceLeaseHeld === true,
+                persistenceLeaseHeld: !leaseBlocked,
                 simulatedEntriesLocked: s.tradingReady === false && calibrationBlocked
               };
-              process.stdout.write(JSON.stringify(checks));
+              process.stdout.write(JSON.stringify({
+                checks,
+                blockers,
+                lastError: typeof s.lastError === "string" ? s.lastError.slice(0, 240) : null,
+                reconnectAttempts: s.reconnectAttempts,
+                nextReconnectAt: s.nextReconnectAt,
+                connectedAt: s.connectedAt,
+                lastMessageAt: s.lastMessageAt
+              }));
               if (Object.values(checks).some(value => value !== true)) {
                 console.error("Forward observation session is not fully connected or its entry gate is not closed.");
                 process.exit(1);
