@@ -68,6 +68,7 @@ A fee quote or unsigned instruction plan does not prove that a transaction can b
 
 - [x] Worker route requests exact round-trip quote evidence and records strategy audit evidence.
 - [x] Gated simulated entry transition is connected to the strict strategy audit.
+- [x] Entry transition additionally requires `paperEntryAuthorized=true` from the unsigned plan; quote validity alone cannot authorize a position.
 - [x] Simulated entries additionally require the active PostgreSQL ingestion configuration and fenced Worker lease, preventing ephemeral-only entries.
 - [x] Scheduled protective-exit cycle requests fresh full-position sell quotes.
 - [x] Portfolio marks are deferred until every open position has a fresh quote.
@@ -144,7 +145,7 @@ If any item fails, keep `tradingReady=false` and report the exact blocker. Do no
 - Historical buyer-set provenance and complete wallet transaction-history clearance are not yet proven end to end.
 - Worker does not yet supply empirically calibrated strategy volume thresholds.
 - Complete contiguous rolling event-stream coverage is not yet available; PumpSwap event decoding and multi-window exhaustion evidence remain outstanding.
-- Simulated payer balance and complete final account-state/rent checks remain to be proven.
+- Simulated payer balance and complete final account-state/rent checks remain to be proven; unsigned plans still return `paperEntryAuthorized=false`, so the new entry gate intentionally blocks every entry until those checks are implemented and verified.
 - Production Neon lifecycle, idempotent persistence, and Worker restart recovery remain unverified.
 - Vercel ingestion authentication and dashboard display of persisted simulated trades remain unverified.
 - The latest CI run must be green on the final PR head before merge.
