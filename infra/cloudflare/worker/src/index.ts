@@ -1365,9 +1365,29 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async collectWalletLinks(mint: string): Promise<unknown> {
     await this.hydrate();
-    const launch = this.verifiedTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
+    const sessionId = this.activeSessionId;
+    const backfill = sessionId
+      ? await this.ctx.storage.get<HistoricalBackfillState>(`helius_backfill:${sessionId}:${mint}`)
+      : undefined;
+    const decodeCoverage = sessionId && backfill
+      ? await this.getHistoricalDecodeCoverage(sessionId, mint, backfill)
+      : null;
+    const archived = sessionId
+      ? await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(
+          `helius_verified_historical_transactions:${sessionId}:${mint}`)
+      : undefined;
+    const transactionsBySignature = new Map<string, VerifiedPumpTransaction>();
+    for (const transaction of Object.values(archived ?? {})) {
+      if (transaction.mint === mint) transactionsBySignature.set(transaction.signature, transaction);
+    }
+    for (const transaction of this.verifiedTransactions) {
+      if (transaction.mint === mint) transactionsBySignature.set(transaction.signature, transaction);
+    }
+    const candidateTransactions = [...transactionsBySignature.values()];
+    const tradeCoverageComplete = backfill?.status === "COMPLETE" && decodeCoverage?.complete === true;
+    const launch = candidateTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
     const volumes = new Map<string, bigint>();
-    for (const transaction of this.verifiedTransactions) for (const trade of transaction.tradeEvents) {
+    for (const transaction of candidateTransactions) for (const trade of transaction.tradeEvents) {
       if (trade.mint !== mint || trade.quoteAmount <= 0n) continue;
       volumes.set(trade.user, (volumes.get(trade.user) ?? 0n) + trade.quoteAmount);
     }
@@ -1377,12 +1397,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     const wallets = [...new Set([...(launch?.creator ? [launch.creator] : []), ...rankedWallets])];
     const result = await collectCompleteWalletFundingEvidence(mint, wallets, {
       apiKey: this.env.HELIUS_API_KEY,
+      walletSetVerifiedComplete: tradeCoverageComplete,
       fetcher: this.rateLimitedHeliusFetcher()
     });
     this.walletLinkSnapshots[mint] = result;
     this.reconcileHelius();
     await this.persist();
-    const risk = evaluateWalletClusterRisk(this.verifiedTransactions, {
+    const risk = evaluateWalletClusterRisk(candidateTransactions, {
       mint,
       creator: launch?.creator ?? null,
       totalSupply: launch?.tokenTotalSupply.toString() ?? null,
