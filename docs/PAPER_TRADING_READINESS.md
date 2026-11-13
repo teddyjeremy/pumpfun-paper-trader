@@ -12,7 +12,7 @@ This document is the operational checklist for reaching the first verified simul
 
 ### 1. CI and release integrity
 
-- [x] Latest PR-head CI is green on `cd48a2c65f72b5b731ffdf65a81294bc9559110d`: dependency installation, TypeScript checks, 58 test files / 427 tests, and Cloudflare Worker bundle.
+- [x] Latest PR-head CI is green on `d74f0dd46ddbecda50f9b1c8846930a90c94e7ae`: dependency installation, TypeScript checks, 58 test files / 435 tests, and Cloudflare Worker bundle.
 - [x] PostgreSQL-backed integration tests pass in the CI test suite.
 - [ ] The final PR head is reviewed and the merge is performed only against that exact tested head.
 - [ ] Production smoke tests pass after the single planned deployment.
@@ -58,6 +58,7 @@ This document is the operational checklist for reaching the first verified simul
 - [ ] Verify user volume accumulator initialization instruction and rent handling on the final message.
 - [ ] Verify all required ATA creation instructions are included exactly once and rent is reserved.
 - [ ] Complete extension-aware Token-2022 account sizing or reject missing Token-2022 accounts.
+- [x] Portfolio entry guard checks available cash against stake, both buy/sell fee estimates, and refundable rent before opening; regression-tested for an insufficient sell-fee budget.
 - [ ] Verify simulated payer balance, portfolio reserve, and transaction fee budget before an entry.
 - [ ] Prove BUY and exact-size SELL quote legs are fresh, same-mint/same-venue, unexpired, and have matching exact-message fee evidence.
 - [ ] Explicitly reject unsupported curve versions, cashback/unsupported pool variants, and incomplete account snapshots.
@@ -145,7 +146,7 @@ If any item fails, keep `tradingReady=false` and report the exact blocker. Do no
 - Historical buyer-set provenance and complete wallet transaction-history clearance are not yet proven end to end.
 - Worker does not yet supply empirically calibrated strategy volume thresholds.
 - Complete contiguous rolling event-stream coverage is not yet available; PumpSwap event decoding and multi-window exhaustion evidence remain outstanding.
-- Simulated payer balance and complete final account-state/rent checks remain to be proven; unsigned plans still return `paperEntryAuthorized=false`, so the new entry gate intentionally blocks every entry until those checks are implemented and verified.
+- The portfolio now checks the full round-trip cash budget, but verified virtual-payer balance evidence and the end-to-end account-state/rent-to-portfolio path remain unproven; unsigned plans still return `paperEntryAuthorized=false`, so every entry remains blocked.
 - Production Neon lifecycle, idempotent persistence, and Worker restart recovery remain unverified.
 - Vercel ingestion authentication and dashboard display of persisted simulated trades remain unverified.
 - The latest CI run must be green on the final PR head before merge.
