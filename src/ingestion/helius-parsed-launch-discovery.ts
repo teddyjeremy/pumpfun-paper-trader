@@ -27,6 +27,35 @@ export interface VerifiedParsedLaunch {
 }
 
 
+export interface VerifiedParsedLaunchCandidatesResult {
+  launch: VerifiedParsedLaunch | null;
+  attempts: number;
+  reason: string | null;
+}
+
+/** Try a bounded page of Create signatures until one transaction can be independently verified. */
+export async function fetchFirstVerifiedParsedLaunch(
+  candidates: readonly ParsedCreateSignature[],
+  bucket: { startTime: number; endTime: number },
+  config: { apiKey: string; fetcher?: typeof fetch }
+): Promise<VerifiedParsedLaunchCandidatesResult> {
+  let attempts = 0;
+  let reason: string | null = null;
+  for (const candidate of candidates) {
+    attempts += 1;
+    try {
+      return {
+        launch: await fetchVerifiedParsedLaunch(candidate, bucket, config),
+        attempts,
+        reason: null
+      };
+    } catch (error) {
+      reason = error instanceof Error ? error.message : "Selected Create transaction failed verification.";
+    }
+  }
+  return { launch: null, attempts, reason: reason ?? "Parsed Events returned no Create signatures." };
+}
+
 /** A failed selected transaction can be skipped only while the scan supplied a safe next-page cursor. */
 export function canContinueParsedLaunchBucket(input: {
   paginationToken: string | null;
@@ -101,7 +130,7 @@ export async function fetchPumpCreateScanPage(input: {
         commitment: "confirmed",
         sortOrder: "asc",
         returnShape: "signatures",
-        limit: 1,
+        limit: 10,
         budget: { maxScannedTransactions: maxScanned },
         ...(input.paginationToken ? { paginationToken: input.paginationToken } : {})
       })
