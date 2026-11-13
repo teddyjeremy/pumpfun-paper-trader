@@ -39,7 +39,7 @@ if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !apiKey.trim()) throw new Error("Set HE
 const dir = resolve("artifacts");
 await mkdir(dir, { recursive: true });
 const discovery = JSON.parse(await readFile(resolve(dir, `pump-launch-discovery-${date}.json`), "utf8")) as Discovery;
-if (discovery.requestedLocalDate !== date || discovery.status !== "DAY_EXHAUSTED" ||
+if (discovery.requestedLocalDate !== date || !(discovery.status === "DAY_EXHAUSTED" || discovery.status === "SAMPLE_COMPLETE") ||
     !Array.isArray(discovery.launches) || !Number.isSafeInteger(discovery.creditsUsed)) {
   throw new Error("A complete day-discovery artifact is required before activity screening.");
 }
