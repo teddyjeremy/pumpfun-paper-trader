@@ -44,7 +44,7 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 
 const date = option("date", "");
 const batchSize = integer("batch-size", 20, 20);
-const maxCredits = integer("max-credits", 100_000, 100_000);
+const maxCredits = integer("max-credits", 30_000, 30_000);
 const apiKey = process.env.HELIUS_API_KEY ?? "";
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !apiKey.trim()) {
   throw new Error("Set HELIUS_API_KEY and pass --date=YYYY-MM-DD.");
@@ -117,7 +117,10 @@ for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex 
   const index = selectedLaunchIndexes[candidateIndex]!;
   const launch = discovery.launches[index]!;
   const remaining = maxCredits - checkpoint.cumulativeCreditsUsed;
-  if (remaining < 1) { budgetStopped = true; break; }
+  // A coin is an atomic work unit: at most two 100-signature pages plus 120 transaction fetches.
+  // Never start a coin unless its worst-case collection budget is reserved.
+  const maxCreditsPerCoin = 122;
+  if (remaining < maxCreditsPerCoin) { budgetStopped = true; break; }
   const collected = await collectHistoricalLaunchWindow({
     mint: launch.event.mint, bondingCurve: launch.event.bondingCurve,
     createSignature: launch.signature, launchBlockTime: launch.blockTime,
@@ -172,12 +175,11 @@ for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex 
     } : null,
     transactions: collected.transactions
   };
-  await atomicJson(resolve(directory, "coins", `${String(index).padStart(4, "0")}-${launch.event.mint}.json`), record);
-
   if (collected.status === "BUDGET_EXHAUSTED") {
     budgetStopped = true;
-    break; // Retry this mint next run; the collector currently cannot resume mid-coin.
+    break; // Do not publish a partial coin file; the next run retries this coin atomically.
   }
+  await atomicJson(resolve(directory, "coins", `${String(index).padStart(4, "0")}-${launch.event.mint}.json`), record);
   if (collected.status !== "COMPLETE") checkpoint.incompleteMints.push(launch.event.mint);
   checkpoint.completedMints.push(launch.event.mint);
   if (replay?.firstSetup?.setupEligible === true) checkpoint.marketPatternMints.push(launch.event.mint);
