@@ -210,6 +210,14 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
     throw new Error("Round-trip execution cost exceeds the paper entry limits.");
   }
   const buyCosts = quoteFeesUsd(input.buyQuote);
+  const expectedSellCosts = quoteFeesUsd(input.sellQuote);
+  // Require the starting paper cash to cover the complete round trip before
+  // opening: stake, both sides' transaction/venue fees, and refundable rent.
+  // Sell fees are later deducted from sell proceeds, not charged twice here.
+  const requiredEntryBudget = stake + buyCosts + expectedSellCosts + rentReserveUsd;
+  if (state.availableCashUsd + 1e-8 < requiredEntryBudget) {
+    throw new Error("Insufficient available paper cash for stake, buy and sell fees, and refundable account rent reserve.");
+  }
   const tokens = BigInt(input.buyQuote.outputAmountBaseUnits);
   const tokenDecimals = input.buyQuote.tokenDecimals;
   const humanTokens = humanTokenAmount(tokens.toString(), tokenDecimals);
