@@ -75,7 +75,9 @@ try {
   if (previous.provider === "HELIUS_PARSED_EVENTS_SCAN") {
     if (previous.schemaVersion !== 2 || previous.requestedLocalDate !== date ||
         previous.startTime !== startTime || previous.endTime !== endTime ||
-        previous.maxLaunches !== maxLaunches || previous.maxPagesPerBucket !== maxPagesPerBucket ||
+        previous.maxLaunches !== maxLaunches ||
+        !Number.isSafeInteger(previous.maxPagesPerBucket) ||
+        previous.maxPagesPerBucket! > maxPagesPerBucket ||
         !Array.isArray(previous.buckets) || !Number.isSafeInteger(previous.nextBucketIndex) ||
         previous.nextBucketIndex! < 0 || previous.nextBucketIndex! > maxLaunches ||
         !Number.isSafeInteger(previous.creditsUsed) || previous.creditsUsed! < 0 ||
@@ -83,6 +85,8 @@ try {
       throw new Error("Existing Parsed Events checkpoint does not match this date, bucket layout or credit ceiling.");
     }
     artifact = previous as Artifact;
+    // A resumed checkpoint may safely raise its page ceiling; never lower it.
+    artifact.maxPagesPerBucket = maxPagesPerBucket;
     artifact.maxCredits = maxCredits;
   } else {
     legacyPriorCreditsUsed = Number.isSafeInteger(previous.creditsUsed) && previous.creditsUsed! > 0
