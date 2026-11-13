@@ -10,9 +10,9 @@ A four-hour run is an operational observation window, not proof of profitability
 
 ## Phase 0 — release and environment preflight
 
-1. Confirm PR #77 is merged only after every required CI job passes on the exact reviewed head.
-2. Apply the ordered Neon migrations, including the PR's new `0008` and `0009` migrations, against the intended production database; verify the migration ledger before deploying code that depends on them.
-3. Perform the single planned Vercel and Cloudflare production deployment. Do not create repeated preview/production deployments during preparation.
+1. PR #77 (Worker readiness) and PR #78 (historical dashboard integration) are merged. The production Vercel deployment for the PR #78 merge is READY; the Cloudflare Worker deployment from PR #77 succeeded. PR #79 is documentation-only and remains open.
+2. The ordered Neon migration workflow completed successfully in [run 43487821121](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43487821121), applying the pending migrations through `0010`. Verify the production migration ledger and database connectivity during acceptance; do not rerun migrations unless the workflow identifies pending migrations.
+3. The required Vercel and Cloudflare releases are already deployed. Do not trigger another production deployment for documentation-only changes or repeatedly redeploy during preparation.
 4. Confirm the production Worker reports `mode=paper` and `tradingReady=false` until all runtime gates pass. A `true` value means system prerequisites only; it is not proof of a complete persisted trade lifecycle.
 5. Confirm the production Worker and Vercel API use HTTPS.
 6. Confirm these secrets are configured in their intended environments without printing or copying their values:
@@ -21,10 +21,13 @@ A four-hour run is an operational observation window, not proof of profitability
    - Vercel: `DATABASE_URL`, `PAPER_EVENT_INGEST_TOKEN`
    - Reviewed calibration: `REVIEWED_VOLUME_THRESHOLDS_JSON` only after a real, complete replay has been independently reviewed and approved. Do not fabricate this payload.
 6. Verify the Neon migration version and that the dashboard read path can query session, position, quote and trade projections.
-7. Run `npm run smoke:ingestion` only from an authorized environment containing `PAPER_WORKER_URL`, `PAPER_WORKER_CONTROL_TOKEN`, `PAPER_EVENT_INGEST_URL`, and `PAPER_EVENT_INGEST_TOKEN`. This smoke test only checks health and acquires/heartbeats/releases a unique short-lived lease; it creates no trades.
+7. Run `npm run smoke:ingestion` only from an authorized environment containing `PAPER_WORKER_URL`, `PAPER_WORKER_CONTROL_TOKEN`, `PAPER_EVENT_INGEST_URL`, and `PAPER_EVENT_INGEST_TOKEN`. This smoke test checks Worker/API health and acquires/heartbeats/releases a unique short-lived Neon lease; it does **not** prove paper-event persistence or create trades. Those require separate acceptance evidence.
 8. Require all checks to pass. HTTP 401/403/503, lease contention, missing migrations, unknown runtime state, or a secret mismatch is a stop condition.
 
 ## Phase 1 — paper-only lifecycle acceptance
+
+The Nov 12 historical replay is running independently in [GitHub Actions run 43488935615](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43488935615). It must not share or mutate the forward Worker portfolio, lease, or session checkpoint.
+
 
 Before the forward session, run the CI and integration suite and demonstrate against the deployed Worker/Neon environment:
 
