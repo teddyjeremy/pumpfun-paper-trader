@@ -53,7 +53,7 @@ jobs:
         run: |
           DISCOVERY="artifacts/pump-launch-discovery-$BACKTEST_DATE.json"
           if [ ! -f "$DISCOVERY" ] || ! node -e 'const d=require("./"+process.argv[1]); process.exit(d.provider === "HELIUS_PARSED_EVENTS_SCAN" && d.status === "SAMPLE_COMPLETE" ? 0 : 1)' "$DISCOVERY"; then
-            npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=10000 --max-launches=100 --max-pages-per-bucket=5
+            npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=5000 --max-launches=100 --max-pages-per-bucket=5
           else
             echo "Restored complete discovery artifact; skipping discovery."
           fi
@@ -64,7 +64,7 @@ jobs:
       - name: Replay all selected launches in resumable batches of 20
         run: |
           while true; do
-            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=100000
+            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=30000
             NEXT=$(node -e 'const c=require("./artifacts/checkpoint.json"); process.stdout.write(String(c.nextCandidateIndex))')
             TOTAL=$(node -e 'const s=require("./artifacts/pump-launch-screen-"+process.env.BACKTEST_DATE+".json"); process.stdout.write(String(s.selectedLaunchIndexes.length))')
             if [ "$NEXT" -ge "$TOTAL" ]; then
