@@ -24,7 +24,7 @@ const option = (name: string, fallback: string) =>
   process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
 const date = option("date", "");
 const runId = option("run-id", "");
-if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || !/^\\d+$/.test(runId)) {
+if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date) || !/^[0-9]+$/.test(runId)) {
   throw new Error("Pass --date=YYYY-MM-DD and --run-id=<GitHub Actions run ID>.");
 }
 const databaseUrl = process.env.DATABASE_URL;
