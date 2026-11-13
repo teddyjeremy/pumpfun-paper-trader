@@ -121,6 +121,45 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     }
   });
 
+  it("reacquires the fenced lease after a Durable Object restart before reconnecting", async () => {
+    const storage = new MemoryDurableStorage();
+    const sessionId = "worker-restart-lease-session";
+    const startedAt = new Date().toISOString();
+    await storage.put("active_audit_session_id", sessionId);
+    await storage.put("enabled", true);
+    await storage.put("audit_session_ids", [sessionId]);
+    await storage.put(`audit_session:${sessionId}`, {
+      sessionId, startedAt, stoppedAt: null, strategyVersion: "strict-v1",
+      eventCount: 1, initialBankrollUsd: 2.7, topUpAmountUsd: 2.7,
+      topUpThresholdUsd: 1, topUpCount: 0, totalTopUpsUsd: 0
+    });
+    await storage.put(`audit_events:${sessionId}:00000000`, []);
+    const ctx = context(storage);
+    let leaseCalls = 0;
+    vi.stubGlobal("WebSocket", FakeWebSocket as never);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/internal/worker-lease") {
+        leaseCalls += 1;
+        return Response.json({ acquired: true });
+      }
+      return Response.json({ ok: true, inserted: 0, duplicates: 0, lastSequence: 1 });
+    }));
+    try {
+      const worker = new PumpFunCoordinator(ctx as never, {
+        PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+        PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64),
+        HELIUS_API_KEY: "test-helius-key"
+      } as never);
+      const status = await worker.ensureRunning();
+      expect(leaseCalls).toBe(1);
+      expect(status.enabled).toBe(true);
+      expect(status.readinessBlockers).not.toContain("Fenced PostgreSQL Worker lease is not held.");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("does not enable provider streams when the fenced persistence lease is rejected", async () => {
     const storage = new MemoryDurableStorage();
     const ctx = context(storage);
