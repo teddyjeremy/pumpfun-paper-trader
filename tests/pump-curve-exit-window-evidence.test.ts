@@ -88,6 +88,16 @@ describe("Pump curve exit-window evidence", () => {
     })).toEqual([]);
   });
 
+  it("rejects a transaction buffer that does not reconcile with complete-flow window counts", () => {
+    const incompleteTransactions = transaction();
+    incompleteTransactions.tradeEvents = incompleteTransactions.tradeEvents.slice(1);
+    expect(buildPumpCurveExitWindowEvidence({
+      marketState: market(),
+      flow: flow({ coverage: "VERIFIED_COMPLETE_EVENT_STREAM" }),
+      transactions: [incompleteTransactions]
+    })).toEqual([]);
+  });
+
   it("keeps incomplete, gapped, or mismatched flow evidence unknown", () => {
     expect(buildPumpCurveExitWindowEvidence({
       marketState: market(), flow: flow({ coverage: "VERIFIED_COMPLETE_EVENT_STREAM", dataComplete: false }),
