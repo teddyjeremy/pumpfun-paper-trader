@@ -1658,12 +1658,31 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     // A clean cluster result is PASS_COMPLETE only when the buyer set was
     // fully backfilled, every wallet transaction history exhausted pagination,
     // and the holder census is a stable full-token-account snapshot.
-    const launchByMint = new Map(this.verifiedTransactions.flatMap(tx => tx.createEvents)
-      .map(event => [event.mint, event] as const));
+    const archivedWalletRiskTransactions = new Map<string, VerifiedPumpTransaction[]>();
+    if (this.activeSessionId) {
+      const completeHistoryMints = candidateMints.filter(mint =>
+        this.walletLinkSnapshots[mint]?.coverage === "FULL_WALLET_HISTORY");
+      const archivedRows = await Promise.all(completeHistoryMints.map(async mint => ({
+        mint,
+        rows: await this.ctx.storage.get<Record<string, VerifiedPumpTransaction>>(
+          `helius_verified_historical_transactions:${this.activeSessionId}:${mint}`)
+      })));
+      for (const item of archivedRows) {
+        archivedWalletRiskTransactions.set(item.mint, Object.values(item.rows ?? {}));
+      }
+    }
     const walletClusterRisk = candidateMints.map(mint => {
-      const launch = launchByMint.get(mint);
       const snapshot = this.walletLinkSnapshots[mint];
-      const evaluatedRisk = evaluateWalletClusterRisk(this.verifiedTransactions, {
+      const transactionsBySignature = new Map<string, VerifiedPumpTransaction>();
+      for (const transaction of archivedWalletRiskTransactions.get(mint) ?? []) {
+        if (transaction.mint === mint) transactionsBySignature.set(transaction.signature, transaction);
+      }
+      for (const transaction of this.verifiedTransactions) {
+        if (transaction.mint === mint) transactionsBySignature.set(transaction.signature, transaction);
+      }
+      const candidateTransactions = [...transactionsBySignature.values()];
+      const launch = candidateTransactions.flatMap(tx => tx.createEvents).find(event => event.mint === mint);
+      const evaluatedRisk = evaluateWalletClusterRisk(candidateTransactions, {
         mint,
         creator: launch?.creator ?? null,
         totalSupply: launch?.tokenTotalSupply.toString() ?? null,
