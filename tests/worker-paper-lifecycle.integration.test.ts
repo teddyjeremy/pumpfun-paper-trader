@@ -67,6 +67,51 @@ function quote(
 }
 
 describe("Cloudflare Worker paper lifecycle durability", () => {
+
+  it("proves Worker-to-Neon persistence and idempotency without starting market streams", async () => {
+    const storage = new MemoryDurableStorage();
+    const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+    let eventWrites = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      calls.push({ path: url.pathname, body });
+      if (url.pathname === "/internal/worker-lease") {
+        if (body.action === "release") return Response.json({ released: true });
+        return Response.json({ acquired: true });
+      }
+      if (url.pathname === "/internal/paper-events") {
+        eventWrites += 1;
+        return Response.json(eventWrites === 1
+          ? { ok: true, inserted: 2, duplicates: 0, lastSequence: 2 }
+          : { ok: true, inserted: 0, duplicates: 2, lastSequence: 2 });
+      }
+      return new Response("not found", { status: 404 });
+    }));
+    try {
+      const worker = new PumpFunCoordinator(context(storage) as never, {
+        PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+        PAPER_EVENT_INGEST_TOKEN: "t".repeat(40)
+      } as never);
+      const result = await worker.smokeIngestion();
+      expect(result).toMatchObject({
+        ok: true, eventPersisted: true, idempotentReplay: true,
+        leaseAcquired: true, leaseHeartbeat: true,
+        leaseRetained: false, leaseReleased: true
+      });
+      expect(result.sessionId).toMatch(/^smoke-test-worker-/);
+      expect(calls.filter(call => call.path === "/internal/paper-events")).toHaveLength(2);
+      const [first, replay] = calls.filter(call => call.path === "/internal/paper-events");
+      expect(first?.body).toEqual(replay?.body);
+      const events = first?.body.events as Array<{ kind: string; data: { smokeTest?: boolean } }>;
+      expect(events.map(event => event.kind)).toEqual(["SESSION_STARTED", "SESSION_STOPPED"]);
+      expect(events.every(event => event.data.smokeTest === true)).toBe(true);
+      expect(calls.some(call => call.path === "/internal/worker-lease" && call.body.action === "release")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("persists entry and exit transitions across a new coordinator instance", async () => {
     const storage = new MemoryDurableStorage();
     const sessionId = "worker-lifecycle-session";
