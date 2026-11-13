@@ -66,7 +66,7 @@ A fee quote or unsigned instruction plan does not prove that a transaction can b
 ### 6. Worker paper lifecycle and exits
 
 - [x] Worker route requests exact round-trip quote evidence and records strategy audit evidence.
-- [x] Gated simulated entry transition is connected to the strict strategy audit.
+- [x] Gated simulated entry transition is connected to the strict strategy audit.\n- [x] Simulated entries additionally require the active PostgreSQL ingestion configuration and fenced Worker lease, preventing ephemeral-only entries.
 - [x] Scheduled protective-exit cycle requests fresh full-position sell quotes.
 - [x] Portfolio marks are deferred until every open position has a fresh quote.
 - [ ] Prove one complete simulated entry and exit with the real Worker state machine.
