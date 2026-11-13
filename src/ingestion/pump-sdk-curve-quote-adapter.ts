@@ -369,6 +369,8 @@ export interface PumpCurveV3UnsignedInstruction {
   mint: string;
   user: string;
   quoteMint: string;
+  baseTokenProgram: string;
+  quoteTokenProgram: string;
   buybackFeeRecipient: string;
   instruction: TransactionInstruction;
   requiredAccountAddressesToVerify: string[];
@@ -491,7 +493,9 @@ export async function buildPumpCurveV3UnsignedInstruction(input: {
   return {
     provider: "pump-sdk-4.3.1", venue: "PUMP_CURVE", side: input.side,
     mint: context.mint.toBase58(), user: user.toBase58(),
-    quoteMint: instructionQuoteMint.toBase58(), buybackFeeRecipient: recipient.toBase58(),
+    quoteMint: instructionQuoteMint.toBase58(),
+    baseTokenProgram: tokenProgram.toBase58(), quoteTokenProgram: quoteTokenProgram.toBase58(),
+    buybackFeeRecipient: recipient.toBase58(),
     instruction, requiredAccountAddressesToVerify, optionalAccountAddresses,
     slot: input.snapshot.slot, observedAt: input.snapshot.observedAt,
     executionReady: false, paperEntryAuthorized: false,
