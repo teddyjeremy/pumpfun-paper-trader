@@ -100,9 +100,21 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     expect(entry.status).toBe("APPLIED");
     expect(entry.state.positions[0]).toMatchObject({ status: "OPEN", rentReserveUsd: 0.2 });
 
+    // Simulate eviction while the position is still open; the recovered
+    // instance must retain the full position before it is allowed to exit.
+    const openRestartContext = context(storage);
+    const openRestartWorker = new PumpFunCoordinator(openRestartContext as never, {} as never);
+    const recoveredOpen = await openRestartWorker.getPaperPortfolio() as {
+      positions: Array<{ positionId: string; status: string; rentReserveUsd: number }>;
+    };
+    expect(recoveredOpen.positions).toHaveLength(1);
+    expect(recoveredOpen.positions[0]).toMatchObject({
+      positionId: "worker-lifecycle-position", status: "OPEN", rentReserveUsd: 0.2
+    });
+
     const exitTime = new Date().toISOString();
     const sellQuote = quote(mint, "SELL", exitTime, "1000000", 1.2);
-    const exit = await firstWorker.recordPaperExit({
+    const exit = await openRestartWorker.recordPaperExit({
       positionId: "worker-lifecycle-position", sellQuote, exitReason: "TEST_EXIT"
     }) as { status: string; state: { positions: Array<{ status: string; exitReason: string | null }> } };
 
