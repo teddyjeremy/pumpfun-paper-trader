@@ -372,6 +372,7 @@ export interface PumpCurveV3UnsignedInstruction {
   baseTokenProgram: string;
   quoteTokenProgram: string;
   buybackFeeRecipient: string;
+  userVolumeAccumulatorAddress: string;
   instruction: TransactionInstruction;
   requiredAccountAddressesToVerify: string[];
   optionalAccountAddresses: string[];
@@ -473,8 +474,12 @@ export async function buildPumpCurveV3UnsignedInstruction(input: {
     throw new Error("Pump SDK returned an invalid curve instruction.");
   }
 
+  const userVolumeAccumulator = PublicKey.findProgramAddressSync(
+    [Buffer.from("user_volume_accumulator"), user.toBuffer()], new PublicKey(PUMP_PROGRAM_ID)
+  )[0];
   const requiredAccountAddressesToVerify = [
-    getAssociatedTokenAddressSync(context.mint, user, false, tokenProgram).toBase58()
+    getAssociatedTokenAddressSync(context.mint, user, false, tokenProgram).toBase58(),
+    userVolumeAccumulator.toBase58()
   ];
   const optionalAccountAddresses: string[] = [];
   if (solPairedQuote) {
@@ -494,6 +499,7 @@ export async function buildPumpCurveV3UnsignedInstruction(input: {
     provider: "pump-sdk-4.3.1", venue: "PUMP_CURVE", side: input.side,
     mint: context.mint.toBase58(), user: user.toBase58(),
     quoteMint: instructionQuoteMint.toBase58(),
+    userVolumeAccumulatorAddress: userVolumeAccumulator.toBase58(),
     baseTokenProgram: tokenProgram.toBase58(), quoteTokenProgram: quoteTokenProgram.toBase58(),
     buybackFeeRecipient: recipient.toBase58(),
     instruction, requiredAccountAddressesToVerify, optionalAccountAddresses,
@@ -503,6 +509,7 @@ export async function buildPumpCurveV3UnsignedInstruction(input: {
       "USER_BASE_ATA_EXISTENCE_AND_STATE_NOT_VERIFIED",
       "BUYBACK_FEE_RECIPIENT_ACCOUNT_EXISTENCE_AND_STATE_NOT_VERIFIED",
       "ATA_RENT_AND_VIRTUAL_PAYER_BALANCE_NOT_VERIFIED",
+      "USER_VOLUME_ACCUMULATOR_STATE_AND_RENT_NOT_VERIFIED",
       "EXACT_UNSIGNED_TRANSACTION_FEE_MESSAGE_NOT_ATTACHED",
       "PAPER_ENTRY_AUTHORIZATION_NOT_GRANTED"
     ]
