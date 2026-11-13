@@ -1,6 +1,11 @@
 name: Historical paper replay (checkpointed)
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/historical-backtest.yml"
+      - "scripts/backtest-helius-day.ts"
   workflow_dispatch:
     inputs:
       date:
@@ -9,8 +14,9 @@ on:
         default: "2026-11-12"
         type: string
       previous_run_id:
-        description: "Previous run ID containing pump-backtest-state for this date; leave blank for first run"
+        description: "Previous run ID containing pump-backtest-state for this date"
         required: false
+        default: "43488935615"
         type: string
 
 permissions:
@@ -28,7 +34,7 @@ jobs:
     env:
       HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
       BACKTEST_DATE: ${{ github.event.inputs.date || '2026-11-12' }}
-      PREVIOUS_RUN_ID: ${{ github.event.inputs.previous_run_id || '' }}
+      PREVIOUS_RUN_ID: ${{ github.event.inputs.previous_run_id || '43488935615' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,7 +49,7 @@ jobs:
           name: pump-backtest-state-${{ github.event.inputs.date || '2026-11-12' }}
           path: artifacts
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.inputs.previous_run_id }}
+          run-id: ${{ env.PREVIOUS_RUN_ID }}
 
       - name: Validate Helius secret
         run: |
@@ -59,7 +65,7 @@ jobs:
         run: |
           DISCOVERY="artifacts/pump-launch-discovery-$BACKTEST_DATE.json"
           if [ ! -f "$DISCOVERY" ] || ! node -e 'const d=require("./"+process.argv[1]); process.exit(d.provider === "HELIUS_PARSED_EVENTS_SCAN" && d.status === "SAMPLE_COMPLETE" ? 0 : 1)' "$DISCOVERY"; then
-            npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=5000 --max-launches=100 --max-pages-per-bucket=5
+            npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=15000 --max-launches=100 --max-pages-per-bucket=10
           else
             echo "Restored complete discovery artifact; skipping discovery."
           fi
@@ -70,7 +76,7 @@ jobs:
       - name: Replay all selected launches in resumable batches of 20
         run: |
           while true; do
-            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=30000
+            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=50000
             NEXT=$(node -e 'const c=require("./artifacts/checkpoint.json"); process.stdout.write(String(c.nextCandidateIndex))')
             TOTAL=$(node -e 'const s=require("./artifacts/pump-launch-screen-"+process.env.BACKTEST_DATE+".json"); process.stdout.write(String(s.selectedLaunchIndexes.length))')
             if [ "$NEXT" -ge "$TOTAL" ]; then
