@@ -32,6 +32,8 @@ export async function fetchHeliusGapAddressHistory(
       !gap.startSignature || !SIGNATURE.test(gap.startSignature) ||
       !gap.endSignature || !SIGNATURE.test(gap.endSignature) ||
       gap.startSignature === gap.endSignature ||
+      gap.startSlot === null || gap.startSlot === undefined ||
+      gap.endSlot === null || gap.endSlot === undefined ||
       !Number.isSafeInteger(gap.startSlot) || !Number.isSafeInteger(gap.endSlot) ||
       gap.startSlot < 0 || gap.endSlot < gap.startSlot ||
       !Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs) || endedAtMs < startedAtMs) {
