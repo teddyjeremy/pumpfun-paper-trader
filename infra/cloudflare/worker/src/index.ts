@@ -3151,7 +3151,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           !gap.startSignature || gap.startSlot === null ||
           !gap.endSignature || gap.endSlot === null) continue;
       const key = `helius_gap_history:${sessionId}:${gap.mint}:${gap.startedAt}`;
+      const archiveStatus = await this.ctx.storage.get<{ status: string }>(`${key}:archive_status`);
+      if (archiveStatus?.status === "ARCHIVED") continue;
       const scan = await this.ctx.storage.get<{
+        bondingCurve: string;
         status: "SCANNING" | "SCANNED" | "INCOMPLETE";
         signatures: import("../../../../src/ingestion/helius-backfill.js").AddressSignatureInfo[];
         pagesScanned: number;
