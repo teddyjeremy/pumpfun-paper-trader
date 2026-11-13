@@ -32,7 +32,7 @@ This document is the operational checklist for reaching the first verified simul
 
 - [x] Two-pass holder census implementation with pagination, stable supply/slot checks, owner aggregation, and fail-closed incomplete states.
 - [x] Wallet evidence distinguishes full SOL-transfer history from full wallet transaction history.
-- [ ] Production Cloudflare Worker does not have `FULL_WALLET_HISTORY_ENABLED` configured. The full transaction-history collector remains off; enabling it can consume Helius credits and needs an explicit bounded budget decision.
+- [ ] Production Cloudflare Worker does not yet have `FULL_WALLET_HISTORY_ENABLED`; PR #77 now sets it to `true` with `FULL_WALLET_HISTORY_MAX_PAGES=2` for the next deployment. Collection is bounded to at most 16 wallets and 2 pages per wallet; a candidate is refreshed at most once per minute, normally every 10 minutes or earlier when its observed wallet set changes. This will consume Helius credits after deployment, so the PR remains unmerged pending review of that bounded usage.
 - [x] Historical risk evidence is replayed as a timestamped timeline; later evidence cannot clear an earlier candidate and incomplete refreshes revoke prior clearance.
 - [ ] Connect complete buyer-set provenance from fully decoded launch-window events to wallet-history collection.
 - [ ] Prove complete transaction history for every wallet used in the candidate's risk decision; sampled signatures are not sufficient.
@@ -166,7 +166,7 @@ If any item fails, keep `tradingReady=false` and report the exact blocker. Do no
 ## Current known blockers
 
 - Historical buyer-set provenance and complete wallet transaction-history clearance are not yet proven end to end.
-- Production full wallet transaction-history collection is still disabled because the Cloudflare Worker has no `FULL_WALLET_HISTORY_ENABLED` binding; the opt-in collector's Helius credit budget has not been approved.
+- Production full wallet transaction-history collection is still disabled until PR #77 is reviewed and deployed; the branch config enables the bounded collector (16 wallets, 2 pages each) and its Helius credit usage needs approval.
 - No empirically validated and operator-reviewed volume calibration is configured in production; the Worker now accepts only an explicit approved payload and remains fail-closed without it.
 - Complete contiguous rolling event-stream coverage is not yet available; PumpSwap event decoding and multi-window exhaustion evidence remain outstanding.
 - The Worker now treats the paper portfolio as the simulated payer budget and previews stake, both exact fee legs, and refundable ATA/accumulator rent before an entry. Actual Worker-to-Vercel/Neon ingestion and production account-state/rent reconciliation remain unverified; quote-only unsigned plans continue to return `paperEntryAuthorized=false`.
