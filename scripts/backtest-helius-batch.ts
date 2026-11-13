@@ -40,7 +40,7 @@ const date = option("date", "");
 const batchSize = integer("batch-size", 20, 20);
 const maxCredits = integer("max-credits", 100_000, 100_000);
 const apiKey = process.env.HELIUS_API_KEY ?? "";
-if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || !apiKey.trim()) {
+if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !apiKey.trim()) {
   throw new Error("Set HELIUS_API_KEY and pass --date=YYYY-MM-DD.");
 }
 const directory = resolve("artifacts");
