@@ -816,9 +816,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       throw new Error("Worker-to-Neon ingestion is not configured.");
     }
     const keepLease = this.status.enabled;
+    let stage = "NEON_LEASE_ACQUIRE";
     try {
       await this.acquirePostgresWorkerLease();
       if (!this.postgresLeaseHeld) throw new Error("Worker could not acquire its Neon lease.");
+      stage = "NEON_LEASE_HEARTBEAT";
       const heartbeat = await this.heartbeatPostgresWorkerLease();
       if (!heartbeat) throw new Error("Worker Neon lease heartbeat failed.");
       const sessionId = `smoke-test-worker-${crypto.randomUUID()}`;
@@ -838,15 +840,17 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       }
     ];
 
+      stage = "AUDIT_EVENT_PERSISTENCE";
       const firstResponse = await this.postPostgresIngest("/internal/paper-events", { sessionId, events });
-      if (!firstResponse.ok) throw new Error("Worker event ingestion was rejected.");
+      if (!firstResponse.ok) throw new Error(`Worker event ingestion was rejected (HTTP ${firstResponse.status}).`);
       const first = await firstResponse.json() as { ok?: boolean; inserted?: number; lastSequence?: number };
       if (first.ok !== true || first.inserted !== 2 || first.lastSequence !== 2) {
         throw new Error("Worker event ingestion did not acknowledge both persisted events.");
       }
 
+      stage = "AUDIT_EVENT_IDEMPOTENCY";
       const replayResponse = await this.postPostgresIngest("/internal/paper-events", { sessionId, events });
-      if (!replayResponse.ok) throw new Error("Worker idempotent event replay was rejected.");
+      if (!replayResponse.ok) throw new Error(`Worker idempotent event replay was rejected (HTTP ${replayResponse.status}).`);
       const replay = await replayResponse.json() as {
         ok?: boolean; inserted?: number; duplicates?: number; lastSequence?: number;
       };
@@ -858,6 +862,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         leaseAcquired: true, leaseHeartbeat: true,
         leaseRetained: keepLease, leaseReleased: !keepLease
       };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown smoke-test failure.";
+      throw new Error(`${stage}: ${detail}`);
     } finally {
       if (!keepLease && this.postgresLeaseHeld) await this.releasePostgresWorkerLease();
     }
@@ -3531,8 +3538,15 @@ export default {
     if (url.pathname === "/smoke-ingestion" && request.method === "POST") {
       try {
         return Response.json(await coordinator.smokeIngestion());
-      } catch {
-        return Response.json({ error: "Worker-to-Vercel/Neon ingestion smoke test failed." }, { status: 503 });
+      } catch (error) {
+        // This route is control-token authenticated. Return only the bounded
+        // stage/message emitted by the smoke check; never include request
+        // headers, environment values or credential material.
+        const detail = error instanceof Error ? error.message.slice(0, 240) : "Unknown ingestion failure.";
+        return Response.json({
+          error: "Worker-to-Vercel/Neon ingestion smoke test failed.",
+          detail
+        }, { status: 503 });
       }
     }
     if (url.pathname === "/start" && request.method === "POST") {
