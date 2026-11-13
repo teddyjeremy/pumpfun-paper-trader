@@ -117,7 +117,7 @@ export async function fetchAndVerifyPumpTransaction(
         params: [signature, {
           encoding: "json",
           commitment,
-          maxSupportedTransactionVersion: 0
+          maxSupportedTransactionVersion: 1
         }]
       })
     });
