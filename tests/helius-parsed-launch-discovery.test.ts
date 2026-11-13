@@ -7,6 +7,7 @@ import { PUMP_FUN_PROGRAM_ID } from "../src/ingestion/helius.js";
 
 const signature = "5".repeat(88);
 const discriminator = [27, 114, 169, 77, 222, 235, 99, 118];
+const tradeDiscriminator = [189, 219, 127, 211, 78, 230, 97, 238];
 const u32 = (n: number) => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
 const u64 = (n: bigint) => Array.from({ length: 8 }, (_, i) => Number((n >> BigInt(i * 8)) & 255n));
 const string = (value: string) => {
@@ -22,6 +23,12 @@ function createLog(timestamp: number): string {
     ...u64(793_100_000_000_000n), ...u64(1_000_000_000_000_000n), ...pubkey(5),
     0, 0, ...pubkey(0), ...u64(0n), ...u64(0n), 0, 0
   ];
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return "Program data: " + btoa(binary);
+}
+function opaqueTradeLogWithUnverifiedLayout(): string {
+  const bytes = [...tradeDiscriminator, 1, 2, 3, 4, 5, 6, 7, 8];
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return "Program data: " + btoa(binary);
@@ -85,6 +92,15 @@ describe("Helius Parsed Events historical launch discovery", () => {
     expect(body.budget.maxScannedTransactions).toBe(10_000);
   });
 
+  it("reports the exact billing field when the provider exceeds the bounded scan charge", async () => {
+    await expect(fetchPumpCreateScanPage({
+      startTime: 1_700, endTime: 1_900
+    }, { apiKey: "test", fetcher: async () => json({
+      data: [], paginationToken: null,
+      scan: { stoppedOn: "windowEnd", scannedTransactions: 10_000, matchedTransactions: 0, creditsCharged: 21 }
+    }) })).rejects.toThrow(/creditsCharged=21/);
+  });
+
   it("retains empty budget pages and their pagination cursor for continuation", async () => {
     const page = await fetchPumpCreateScanPage({
       startTime: 1_700, endTime: 1_900, paginationToken: "cursor:1"
@@ -104,7 +120,8 @@ describe("Helius Parsed Events historical launch discovery", () => {
         transaction: { signatures: [signature] },
         meta: { err: null, logMessages: [
           `Program ${PUMP_FUN_PROGRAM_ID} invoke [1]`,
-          createLog(1_800)
+          createLog(1_800),
+          opaqueTradeLogWithUnverifiedLayout()
         ] }
       }
     }));

@@ -35,7 +35,8 @@ async function request(base, path, token, body) {
   try { payload = text ? JSON.parse(text) : {}; }
   catch { throw new Error(`${path} returned non-JSON HTTP ${response.status}`); }
   if (!response.ok) {
-    throw new Error(`${path} returned HTTP ${response.status}: ${payload.error ?? "request failed"}`);
+    const detail = typeof payload.detail === "string" ? `; detail=${payload.detail.slice(0, 240)}` : "";
+    throw new Error(`${path} returned HTTP ${response.status}: ${payload.error ?? "request failed"}${detail}`);
   }
   return payload;
 }
