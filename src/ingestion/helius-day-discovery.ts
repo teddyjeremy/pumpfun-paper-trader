@@ -47,8 +47,8 @@ export interface HistoricalDayDiscoveryConfig {
  * Discover Pump.fun CreateEvents in a bounded historical interval using only
  * standard Helius RPC. Every RPC call is counted as one Free-plan credit.
  *
- * The scanner walks newest-to-oldest but retains the earliest maxLaunches
- * launches. DAY_EXHAUSTED proves the full requested interval was traversed;
+ * The standard-RPC fallback walks newest-to-oldest and retains at most one
+ * launch per equal-width time bucket. DAY_EXHAUSTED proves the full interval was traversed;
  * budget exhaustion never returns a complete day sample. Missing transaction data,
  * pagination anomalies and decoder failures stop the scan as INCOMPLETE.
  */
