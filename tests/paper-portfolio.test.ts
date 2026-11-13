@@ -37,12 +37,14 @@ describe("paper portfolio accounting",()=>{
     buyQuote:quote("reserved-fee-1","BUY"),sellQuote:quote("reserved-fee-1","SELL"),nowMs:Date.parse(now)});
   expect(first.position.expectedSellCostsUsd).toBeCloseTo(0.007,8);
   expect(first.state.availableCashUsd).toBeCloseTo(4.986,8);
+  const secondBuy=quote("reserved-fee-2","BUY");
+  secondBuy.requestedUsd=first.state.positionSizeUsd;
   const second=openPaperPosition(first.state,{mint:"reserved-fee-2",positionId:"reserved-fee-position-2",occurredAt:now,
-    buyQuote:quote("reserved-fee-2","BUY"),sellQuote:quote("reserved-fee-2","SELL"),nowMs:Date.parse(now)});
-  expect(second.state.availableCashUsd).toBeCloseTo(3.972,8);
+    buyQuote:secondBuy,sellQuote:quote("reserved-fee-2","SELL"),nowMs:Date.parse(now)});
+  expect(second.state.availableCashUsd).toBeCloseTo(3.472,8);
   const closed=closePaperPosition(second.state,{positionId:"reserved-fee-position-1",
     sellQuote:quote("reserved-fee-1","SELL","1000000",1.5),exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
-  expect(closed.state.availableCashUsd).toBeCloseTo(5.472,8);
+  expect(closed.state.availableCashUsd).toBeCloseTo(4.972,8);
  });
  
  it("requires cash to cover the expected sell fee before an entry",()=>{
