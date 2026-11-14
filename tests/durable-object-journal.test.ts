@@ -196,7 +196,7 @@ describe("Durable Object audit storage contract", () => {
     storage.seed(stateKey, completed.state);
     storage.seed("helius_monitor_state", monitor);
 
-    const first = harness(storage).coordinator as unknown as {
+    const first = harness(storage, { PAPER_ENABLE_HISTORICAL_BACKFILL: "true" }).coordinator as unknown as {
       activeSessionId: string | null;
       heliusState: HeliusMonitorState;
       advanceHistoricalBackfill: () => Promise<boolean>;
@@ -213,7 +213,7 @@ describe("Durable Object audit storage contract", () => {
     // Drain one item, evict the coordinator, and resume from the durable cursor.
     savedMonitor = takeHeliusWork(savedMonitor!).state;
     storage.seed("helius_monitor_state", savedMonitor);
-    const restarted = harness(storage).coordinator as unknown as {
+    const restarted = harness(storage, { PAPER_ENABLE_HISTORICAL_BACKFILL: "true" }).coordinator as unknown as {
       activeSessionId: string | null;
       heliusState: HeliusMonitorState;
       advanceHistoricalBackfill: () => Promise<boolean>;
