@@ -94,6 +94,8 @@ interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
   CONTROL_TOKEN: string;
   PAPER_WORKER_PAUSED?: string;
+  PAPER_ENABLE_HISTORICAL_BACKFILL?: string;
+  PAPER_ENABLE_GAP_RECOVERY?: string;
   HELIUS_API_KEY: string;
   PAPER_EVENT_INGEST_URL?: string;
   PAPER_EVENT_INGEST_TOKEN?: string;
@@ -241,6 +243,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   private get storagePaused(): boolean {
     return this.env.PAPER_WORKER_PAUSED === "true";
+  }
+
+  private get historicalBackfillEnabled(): boolean {
+    return this.env.PAPER_ENABLE_HISTORICAL_BACKFILL === "true";
+  }
+
+  private get gapRecoveryEnabled(): boolean {
+    return this.env.PAPER_ENABLE_GAP_RECOVERY === "true";
   }
 
   private async postPostgresIngest(path: string, body: unknown): Promise<Response> {
@@ -806,7 +816,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     if (this.status.enabled && this.postgresLeaseHeld) {
       if (this.pendingWrites > 0 &&
-          (this.pendingWrites >= PERSIST_EVERY_EVENTS || Date.now() - this.lastPersistAtMs >= 60_000)) {
+          (this.pendingWrites >= PERSIST_EVERY_EVENTS || Date.now() - this.lastPersistAtMs >= 300_000)) {
         await this.persist().catch(() => undefined);
       }
       await this.drainHeliusQueue();
@@ -1134,7 +1144,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         monitoredCandidates: this.heliusState.subscriptions.length,
         queuedSignatures: this.heliusState.queue.length,
         droppedSignatures: this.heliusState.droppedSignatures
-      }, `heartbeat:${Math.floor(Date.now() / 60_000)}`);
+      }, `heartbeat:${Math.floor(Date.now() / 300_000)}`);
     }
     if (!this.status.enabled) {
       if (this.socket) {
@@ -1150,7 +1160,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         helius.close(1000, "Coordinator disabled");
       }
       this.status.heliusConnected = false;
-      await this.persist();
+      if (this.pendingWrites >= PERSIST_EVERY_EVENTS || Date.now() - this.lastPersistAtMs >= 300_000) {
+        await this.persist();
+      }
       return this.getStatus();
     }
 
@@ -1165,7 +1177,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.reconcileHelius();
       this.pendingWrites += 1;
     }
-    await this.persist();
+    if (this.pendingWrites >= PERSIST_EVERY_EVENTS || Date.now() - this.lastPersistAtMs >= 300_000) {
+      await this.persist();
+    }
 
     if (this.heliusSocket?.readyState === WebSocket.OPEN &&
         this.heliusConnectedAtMs > 0 && Date.now() - this.heliusConnectedAtMs >= 14 * 60 * 1000) {
@@ -2969,6 +2983,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   /** Advance one resumable address-history page and enqueue its verified launch-window signatures. */
   private async advanceHistoricalBackfill(): Promise<boolean> {
+    if (!this.historicalBackfillEnabled) return false;
     const sessionId = this.activeSessionId;
     if (!sessionId) return false;
     const listKey = `helius_backfill_mints:${sessionId}`;
@@ -3069,9 +3084,11 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         });
         if (result.status === "VERIFIED") {
           this.verifiedTransactions = [...this.verifiedTransactions, { ...result.transaction, receivedAt: new Date().toISOString() }].slice(-2_000);
-          await this.beginHistoricalBackfill(result.transaction);
-          await this.recordVerifiedHistoricalSignature(result.transaction);
-          await this.archiveVerifiedHistoricalTransaction(result.transaction);
+          if (this.historicalBackfillEnabled) {
+            await this.beginHistoricalBackfill(result.transaction);
+            await this.recordVerifiedHistoricalSignature(result.transaction);
+            await this.archiveVerifiedHistoricalTransaction(result.transaction);
+          }
           await this.appendAudit("OBSERVATION", work.mint, {
             signature: work.signature, slot: work.slot, transaction: jsonSafe(result.transaction),
             retentionPolicy: "LATEST_2000_TRANSACTION_SNAPSHOT_PLUS_APPEND_ONLY_AUDIT"
@@ -3128,11 +3145,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           }
         }
         if (!workDequeued) this.heliusState = takeHeliusWork(this.heliusState).state;
-        await this.ctx.storage.put({
-          helius_monitor_state: this.heliusState,
-          verified_transactions: this.verifiedTransactions,
-          status: this.status
-        });
+        // Keep high-volume verified transaction state in memory and checkpoint
+        // it in bounded batches; Neon is the durable historical archive.
+        this.markDirty();
         activeWork = null;
         processedItems += 1;
       }
@@ -3193,6 +3208,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
    * acknowledgements are separate proof requirements.
    */
   private async scanIndependentHeliusGapHistory(): Promise<void> {
+    if (!this.gapRecoveryEnabled) return;
     const sessionId = this.activeSessionId;
     if (!sessionId || !this.status.enabled) return;
     const gaps = this.heliusState.coverageGaps.filter(item =>
@@ -3271,6 +3287,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
    * Neon archival is a separate acknowledgement gate before recovery.
    */
   private async decodeIndependentHeliusGapHistory(): Promise<void> {
+    if (!this.gapRecoveryEnabled) return;
     const sessionId = this.activeSessionId;
     if (!sessionId || !this.status.enabled) return;
     for (const gap of this.heliusState.coverageGaps) {
@@ -3368,6 +3385,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
    * the API acknowledges the idempotent database write.
    */
   private async flushIndependentHeliusGapArchives(): Promise<void> {
+    if (!this.gapRecoveryEnabled) return;
     const sessionId = this.activeSessionId;
     if (!sessionId || !this.postgresIngestConfigured) return;
     for (const gap of this.heliusState.coverageGaps) {
@@ -3466,6 +3484,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
    * window remain incomplete; reconnects never clear them.
    */
   private async recoverCoveredHeliusGaps(): Promise<void> {
+    if (!this.gapRecoveryEnabled) return;
     const sessionId = this.activeSessionId;
     if (!sessionId) return;
     const gaps = this.heliusState.coverageGaps.filter(gap =>
