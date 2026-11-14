@@ -71,7 +71,8 @@ for (const selectedFile of files) {
     })
     .filter((event): event is NonNullable<typeof event> => event !== null)
     .filter(event => Number.isSafeInteger(event.time) && event.time >= 0 &&
-      Number.isFinite(event.price) && event.price > 0 && Number.isFinite(event.sol) && event.sol >= 0)
+      event.price !== null && Number.isFinite(event.price) && event.price > 0 &&
+      Number.isFinite(event.sol) && event.sol >= 0)
     .sort((a, b) => a.time - b.time);
   const launchTime = coin.launch?.blockTime;
   const window = Number.isSafeInteger(launchTime)
