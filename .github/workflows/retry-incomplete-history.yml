@@ -1,3 +1,4 @@
+# The two date-scoped jobs share a hard 8,000-credit incremental ceiling each.
 name: Retry incomplete historical coins (bounded, no rediscovery)
 
 on:
