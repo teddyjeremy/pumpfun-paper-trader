@@ -1,0 +1,43 @@
+name: Historical profitability — Nov 13 partial expanded sample
+
+on:
+  push:
+    paths:
+      - ".github/workflows/historical-profitability-nov13-partial.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  profitability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+
+      - name: Download the saved Nov 13 partial historical dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-13-expanded
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 43574027915
+          path: artifacts
+
+      - name: Run strict-v1 entry audit and dynamic-exit price-path research
+        run: npm run backtest:profitability -- --date=2026-11-13 --round-trip-cost-pct=4
+
+      - name: Save Nov 13 partial profitability report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-profitability-2026-11-13-partial
+          path: artifacts/pump-profitability-backtest-2026-11-13.json
+          if-no-files-found: error
+          retention-days: 30
