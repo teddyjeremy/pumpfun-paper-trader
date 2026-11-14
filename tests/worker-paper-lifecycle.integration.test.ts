@@ -8,8 +8,14 @@ class MemoryDurableStorage {
   async get<T>(key: string): Promise<T | undefined> {
     return this.values.get(key) as T | undefined;
   }
-  async put<T>(key: string, value: T): Promise<void> {
-    this.values.set(key, structuredClone(value));
+  async put<T>(keyOrValues: string | Record<string, unknown>, value?: T): Promise<void> {
+    if (typeof keyOrValues === "string") {
+      this.values.set(keyOrValues, structuredClone(value));
+      return;
+    }
+    for (const [key, item] of Object.entries(keyOrValues)) {
+      this.values.set(key, structuredClone(item));
+    }
   }
   async setAlarm(_scheduledTime: number): Promise<void> { return; }
   async delete(key: string): Promise<boolean> {
