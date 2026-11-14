@@ -6,7 +6,7 @@ function arg(name: string): string {
   return process.argv.find(value => value.startsWith(prefix))?.slice(prefix.length) ?? "";
 }
 const dates = arg("dates").split(",").filter(Boolean);
-if (dates.length === 0 || dates.some(date => !/^\\d{4}-\\d{2}-\\d{2}$/.test(date))) {
+if (dates.length === 0 || dates.some(date => !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
   throw new Error("Pass --dates=YYYY-MM-DD[,YYYY-MM-DD].");
 }
 const ruleNames = [
@@ -73,5 +73,5 @@ const report = {
 };
 await mkdir("artifacts", { recursive: true });
 const output = resolve("artifacts", `pump-rule-sensitivity-${dates.join("-")}.json`);
-await writeFile(output, JSON.stringify(report, null, 2) + "\\n");
-process.stdout.write(JSON.stringify({ ...report, artifact: output }, null, 2) + "\\n");
+await writeFile(output, JSON.stringify(report, null, 2) + "\n");
+process.stdout.write(JSON.stringify({ ...report, artifact: output }, null, 2) + "\n");
