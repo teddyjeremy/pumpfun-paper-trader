@@ -12,7 +12,7 @@ permissions:
 jobs:
   profitability:
     runs-on: ubuntu-latest
-    timeout-minutes: 33
+    timeout-minutes: 34
     steps:
       - uses: actions/checkout@v4
         with:
