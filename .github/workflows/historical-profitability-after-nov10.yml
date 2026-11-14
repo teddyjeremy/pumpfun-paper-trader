@@ -1,0 +1,45 @@
+name: Historical profitability — Nov 10 expanded sample
+
+on:
+  workflow_run:
+    workflows:
+      - "Historical paper replay — 2026-11-10 300k expanded sample"
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  profitability:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+
+      - name: Download the completed 300k historical dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-10-300k
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          path: artifacts
+
+      - name: Run the strict-v1 entry and dynamic-exit price-path replay
+        run: npm run backtest:profitability -- --date=2026-11-10 --round-trip-cost-pct=4
+
+      - name: Save modeled profitability report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-profitability-nov10
+          path: artifacts/pump-profitability-backtest-2026-11-10.json
+          if-no-files-found: error
+          retention-days: 30
