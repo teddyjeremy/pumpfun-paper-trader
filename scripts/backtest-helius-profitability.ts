@@ -87,6 +87,85 @@ const researchOnly = simulations.filter(row => row.riskEvidence !== "CLEARED");
 const strictReturns = strictEligible.map(row => Number(row.modeledNetReturnPct)).filter(Number.isFinite);
 const researchReturns = researchOnly.map(row => Number(row.modeledNetReturnPct)).filter(Number.isFinite);
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+
+function simulatePortfolio(rows: Array<Record<string, unknown>>) {
+  const startingBankrollUsd = 2.70;
+  const initialStakeUsd = 1;
+  const topUpUsd = 2.70;
+  const topUpBelowUsd = 1;
+  let cash = startingBankrollUsd;
+  let topUps = 0;
+  let realizedPnlUsd = 0;
+  let highWaterGrowthEquityUsd = startingBankrollUsd;
+  let maximumOpenPositions = 1;
+  let skippedForCapacity = 0;
+  let skippedForCash = 0;
+  const open: Array<{ entryAt: number; exitAt: number | null; stakeUsd: number; netReturnPct: number }> = [];
+  const equityPoints: number[] = [startingBankrollUsd];
+  const ordered = rows.filter(row => row.riskEvidence === "CLEARED")
+    .sort((a, b) => Number(a.entryAt) - Number(b.entryAt));
+  const markEquity = () => cash + open.reduce((sum, position) =>
+    sum + position.stakeUsd * (1 + position.netReturnPct / 100), 0);
+  const closeDue = (at: number) => {
+    for (let i = open.length - 1; i >= 0; i -= 1) {
+      const position = open[i]!;
+      if (position.exitAt === null || position.exitAt > at) continue;
+      const pnl = position.stakeUsd * position.netReturnPct / 100;
+      cash += position.stakeUsd + pnl;
+      realizedPnlUsd += pnl;
+      open.splice(i, 1);
+      equityPoints.push(markEquity());
+    }
+  };
+  for (const row of ordered) {
+    const entryAt = Number(row.entryAt);
+    const exitAt = row.exitAt === null ? null : Number(row.exitAt);
+    const netReturnPct = Number(row.modeledNetReturnPct);
+    if (!Number.isSafeInteger(entryAt) || !Number.isFinite(netReturnPct)) continue;
+    closeDue(entryAt);
+    const growthEquity = Math.max(0, cash + open.reduce((sum, p) => sum + p.stakeUsd, 0) - topUps);
+    highWaterGrowthEquityUsd = Math.max(highWaterGrowthEquityUsd, growthEquity);
+    const levels = highWaterGrowthEquityUsd < 5 ? 0
+      : 1 + Math.floor(Math.log2(highWaterGrowthEquityUsd / 5));
+    const stakeUsd = Math.min(100, initialStakeUsd * Math.pow(1.5, levels));
+    const maxPositions = Math.min(100, 1 + levels);
+    maximumOpenPositions = Math.max(maximumOpenPositions, maxPositions);
+    if (open.length >= maxPositions) { skippedForCapacity += 1; continue; }
+    if (cash < stakeUsd && cash < topUpBelowUsd) {
+      cash += topUpUsd;
+      topUps += topUpUsd;
+    }
+    if (cash < stakeUsd) { skippedForCash += 1; continue; }
+    cash -= stakeUsd;
+    open.push({ entryAt, exitAt, stakeUsd, netReturnPct });
+    equityPoints.push(markEquity());
+  }
+  const endingEquityUsd = markEquity();
+  const unrealizedPnlUsd = open.reduce((sum, position) =>
+    sum + position.stakeUsd * position.netReturnPct / 100, 0);
+  const peak = Math.max(startingBankrollUsd, ...equityPoints);
+  const maxDrawdownPct = equityPoints.reduce((worst, equity) =>
+    Math.max(worst, peak > 0 ? (peak - equity) / peak * 100 : 0), 0);
+  return {
+    startingBankrollUsd, endingEquityUsd,
+    totalCapitalTopUpsUsd: topUps,
+    netTradingPnlUsd: realizedPnlUsd + unrealizedPnlUsd,
+    realizedPnlUsd, unrealizedPnlUsd,
+    tradesEntered: ordered.length - skippedForCapacity - skippedForCash,
+    openPositionsAtEnd: open.length,
+    maxConcurrentPositionsObserved: maximumOpenPositions,
+    skippedForCapacity, skippedForCash, maxDrawdownPct,
+    stakePolicy: "Starts at $1; increases 50% at each doubling from $5 growth equity; maximum $100. Concurrent slots increase by one at each doubling.",
+    note: "Only risk-cleared candidate rows are admitted. Open-at-horizon positions are marked, not realized. This portfolio ledger inherits the reserve-price proxy and modeled-cost limitations of each trade."
+  };
+}
+
+const portfolioCandidates = simulations.map(row => ({
+  ...row,
+  entryAt: Number(row.entryAt),
+  exitAt: row.exitAt === null ? null : Number(row.exitAt)
+}));
+const portfolioSimulation = simulatePortfolio(portfolioCandidates);
 const report = {
   date, strategyVersion: "strict-v1-market-pattern-plus-dynamic-exits",
   sourceCoinCount: results.length, simulatedCandidates: simulations.length,
@@ -107,15 +186,7 @@ const report = {
     modeledPnlUsdAtOneDollarStake: sum(researchReturns) / 100,
     winRate: researchReturns.length ? researchReturns.filter(value => value > 0).length / researchReturns.length : null
   },
-  portfolioSizing: {
-    startingBankrollUsd: 2.70,
-    initialStakeUsd: 1,
-    initialMaxConcurrentPositions: 1,
-    stakeGrowthPerPortfolioDoubling: 1.5,
-    maxStakeUsd: 100,
-    simulated: false,
-    reason: "Portfolio-level concurrency and compounding are not applied to reserve-price proxy candidates; only risk-cleared, execution-grade trades may enter the authoritative portfolio simulation."
-  },
+  portfolioSimulation,
   roundTripCostAssumptionPct: roundTripCostPct,
   modeledNetReturnPct: netReturns.reduce((sum, value) => sum + value, 0),
   winRate: netReturns.length ? wins / netReturns.length : null,
