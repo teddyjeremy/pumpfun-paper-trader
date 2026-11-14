@@ -1,6 +1,6 @@
 import { readFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { isSolQuoteMint } from "../src/ingestion/trade-flow.js";
+import { getSolQuoteMetrics } from "../src/ingestion/sol-quote-metrics.js";
 
 type Trade = {
   mint: string; solAmount: string; quoteAmount?: string; tokenAmount: string; isBuy: boolean; user: string;
@@ -64,21 +64,12 @@ for (const selectedFile of files) {
     continue;
   }
   const trades = coin.transactions.flatMap(tx => tx.tradeEvents ?? [])
-    .filter(event => event.mint === coin.mint && isSolQuoteMint(event.quoteMint))
+    .filter(event => event.mint === coin.mint)
     .map(event => {
-      const quoteAmount = BigInt(event.quoteAmount ?? "0");
-      const legacyAmount = BigInt(event.solAmount ?? "0");
-      const quoteReserves = BigInt(event.virtualQuoteReserves ?? "0");
-      const solReserves = BigInt(event.virtualSolReserves ?? "0");
-      const realQuoteReserves = BigInt(event.realQuoteReserves ?? "0");
-      const realSolReserves = BigInt(event.realSolReserves ?? "0");
-      return {
-        ...event, time: Number(event.timestamp),
-        sol: Number(quoteAmount > 0n ? quoteAmount : legacyAmount) / 1e9,
-        price: Number(quoteReserves > 0n ? quoteReserves : solReserves) / Number(event.virtualTokenReserves),
-        liquidity: Number(realQuoteReserves > 0n ? realQuoteReserves : realSolReserves) / 1e9
-      };
+      const metrics = getSolQuoteMetrics(event);
+      return metrics ? { ...event, time: Number(event.timestamp), ...metrics } : null;
     })
+    .filter((event): event is NonNullable<typeof event> => event !== null)
     .filter(event => Number.isSafeInteger(event.time) && event.time >= 0 &&
       Number.isFinite(event.price) && event.price > 0 && Number.isFinite(event.sol) && event.sol >= 0)
     .sort((a, b) => a.time - b.time);
