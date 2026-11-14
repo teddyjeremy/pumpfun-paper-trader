@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodePumpCreateEvents, decodePumpTradeEvents, decodeSuccessfulPumpTransaction } from "../src/ingestion/pump-events.js";
+import { PUMP_FUN_PROGRAM_ID } from "../src/ingestion/helius.js";
 
 const discriminator = [27, 114, 169, 77, 222, 235, 99, 118];
 function encodeBase64(bytes: number[]): string {
@@ -67,6 +68,21 @@ describe("Pump.fun CreateEvent decoder", () => {
 
   it("rejects truncated matching events instead of emitting partial candidates", () => {
     expect(() => decodePumpCreateEvents(["Program data: " + encodeBase64(discriminator)])).toThrow(/Truncated/);
+  });
+
+  it("ignores malformed Program data emitted by nested non-Pump programs", () => {
+    const systemProgram = "11111111111111111111111111111111";
+    const logs = [
+      `Program ${PUMP_FUN_PROGRAM_ID} invoke [1]`,
+      `Program ${systemProgram} invoke [2]`,
+      "Program data: !!!",
+      `Program ${systemProgram} success`,
+      "Program data: " + encodeBase64(createEventPayload()),
+      "Program data: " + encodeBase64(tradeEventPayload()),
+      `Program ${PUMP_FUN_PROGRAM_ID} success`
+    ];
+    expect(decodePumpCreateEvents(logs)).toHaveLength(1);
+    expect(decodePumpTradeEvents(logs)).toHaveLength(1);
   });
 
   it("rejects malformed base64 log payloads", () => {
