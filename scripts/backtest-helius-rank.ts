@@ -14,6 +14,7 @@ type CoinRecord = {
   collection?: { status?: string; verifiedTransactions?: number };
   transactions?: Array<{ tradeEvents?: Trade[] }>;
 };
+type RankedTrade = Trade & { time: number; sol: number; price: number; liquidity: number };
 type Candidate = {
   mint: string; status: "QUALIFIED" | "REJECTED" | "INCOMPLETE";
   uniqueBuyers30s: number; buyTrades30s: number; sellTrades30s: number;
@@ -69,9 +70,9 @@ for (const selectedFile of files) {
       const metrics = getSolQuoteMetrics(event);
       return metrics ? { ...event, time: Number(event.timestamp), ...metrics } : null;
     })
-    .filter((event): event is NonNullable<typeof event> => event !== null)
-    .filter(event => Number.isSafeInteger(event.time) && event.time >= 0 &&
-      event.price !== null && Number.isFinite(event.price) && event.price > 0 &&
+    .filter((event): event is RankedTrade => event !== null && event.price !== null &&
+      Number.isSafeInteger(event.time) && event.time >= 0 &&
+      Number.isFinite(event.price) && event.price > 0 &&
       Number.isFinite(event.sol) && event.sol >= 0)
     .sort((a, b) => a.time - b.time);
   const launchTime = coin.launch?.blockTime;
