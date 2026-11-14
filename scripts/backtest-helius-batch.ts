@@ -155,10 +155,13 @@ for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex 
   const buyTrades = trades.filter(event => event.isBuy);
   const sellTrades = trades.filter(event => !event.isBuy);
   const uniqueBuyers = new Set(buyTrades.map(event => event.user)).size;
-  const buyQuoteVolumeLamports = buyTrades.reduce((sum, event) => sum + event.quoteAmount, 0n);
-  const reservePrices = trades.map(event =>
-    Number(event.virtualSolReserves) / Number(event.virtualTokenReserves)
-  ).filter(value => Number.isFinite(value) && value > 0);
+  const buyQuoteVolumeLamports = buyTrades.reduce((sum, event) =>
+    sum + (event.quoteAmount > 0n ? event.quoteAmount : event.solAmount), 0n);
+  const reservePrices = trades.map(event => {
+    const quoteReserves = event.virtualQuoteReserves > 0n
+      ? event.virtualQuoteReserves : event.virtualSolReserves;
+    return Number(quoteReserves) / Number(event.virtualTokenReserves);
+  }).filter(value => Number.isFinite(value) && value > 0);
   const reservePriceMovePct = reservePrices.length > 1
     ? (reservePrices[reservePrices.length - 1]! / reservePrices[0]! - 1) * 100 : null;
   const maximumReserveUpsidePct = reservePrices.length > 1
