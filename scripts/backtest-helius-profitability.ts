@@ -315,7 +315,11 @@ process.stdout.write(JSON.stringify({
   date, sourceCoinCount: report.sourceCoinCount, pricePathCandidates: report.pricePathCandidates,
   proxyExitTriggers: report.proxyExitTriggers, proxyOpenAtHorizon: report.proxyOpenAtHorizon,
   riskClearedCandidates: report.riskClearedCandidates,
+  riskRejectedCandidates: report.riskRejectedCandidates,
   riskUnverifiedCandidates: report.riskUnverifiedCandidates,
+  strictStrategy: report.strictStrategy,
+  researchOnly: report.researchOnly,
+  portfolioSimulation: report.portfolioSimulation,
   allProxyWinRate: report.allProxyWinRate, allProxyExpectancyPctPerCandidate: report.allProxyExpectancyPctPerCandidate,
   allProxyProfitFactor: report.allProxyProfitFactor, artifact: outputPath
 }, null, 2) + "\n");
