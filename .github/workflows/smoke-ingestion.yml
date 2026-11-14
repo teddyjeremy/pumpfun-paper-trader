@@ -32,7 +32,20 @@ jobs:
           node-version: "22"
       - name: Install application dependencies
         run: npm install
+      - name: Detect intentional Durable Objects quota pause
+        id: pause
+        run: |
+          if grep -q '"PAPER_WORKER_PAUSED": "true"' infra/cloudflare/worker/wrangler.jsonc; then
+            echo "paused=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "paused=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Verify production Worker, API and Neon persistence
+        if: steps.pause.outputs.paused != 'true'
         run: npm run smoke:ingestion
         env:
           PAPER_WORKER_CONTROL_TOKEN: ${{ secrets.PAPER_WORKER_CONTROL_TOKEN }}
+      - name: Report intentional pause
+        if: steps.pause.outputs.paused == 'true'
+        run: |
+          echo "Production ingestion smoke was intentionally skipped: the Worker is paused because the Durable Objects daily rows_written free-tier quota is exhausted." >> "$GITHUB_STEP_SUMMARY"
