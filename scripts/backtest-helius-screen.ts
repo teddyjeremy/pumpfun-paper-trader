@@ -8,7 +8,7 @@ type Launch = {
 };
 type Discovery = { requestedLocalDate: string; status: string; creditsUsed: number; launches: Launch[] };
 type ScreenArtifact = {
-  schemaVersion: 1; date: string; discoveryLaunchCount: number;
+  schemaVersion: 1; date: string; discoveryStatus: string; discoveryLaunchCount: number;
   status: "RUNNING" | "COMPLETE" | "BUDGET_EXHAUSTED";
   maxCandidates: number; minSuccessfulSignatures: number; minActiveTimeBuckets: number;
   creditsUsed: number; nextIndex: number;
@@ -34,12 +34,13 @@ const maxCredits = integer("max-credits", 500, 10_000);
 const maxSharePct = integer("max-share-pct", 30, 30);
 const minSuccessfulSignatures = integer("min-successful", 5, 100);
 const minActiveTimeBuckets = integer("min-active-buckets", 3, 60);
+const allowPartialDiscovery = option("allow-partial-discovery", "false") === "true";
 const apiKey = process.env.HELIUS_API_KEY ?? "";
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !apiKey.trim()) throw new Error("Set HELIUS_API_KEY and pass --date=YYYY-MM-DD.");
 const dir = resolve("artifacts");
 await mkdir(dir, { recursive: true });
 const discovery = JSON.parse(await readFile(resolve(dir, `pump-launch-discovery-${date}.json`), "utf8")) as Discovery;
-if (discovery.requestedLocalDate !== date || !(discovery.status === "DAY_EXHAUSTED" || discovery.status === "SAMPLE_COMPLETE") ||
+if (discovery.requestedLocalDate !== date || !(discovery.status === "DAY_EXHAUSTED" || discovery.status === "SAMPLE_COMPLETE" || (allowPartialDiscovery && discovery.status === "INCOMPLETE")) ||
     !Array.isArray(discovery.launches) || !Number.isSafeInteger(discovery.creditsUsed)) {
   throw new Error("A complete day-discovery artifact is required before activity screening.");
 }
@@ -48,7 +49,7 @@ const maxCandidates = Math.floor(discovery.launches.length * maxSharePct / 100);
 let artifact: ScreenArtifact;
 try {
   artifact = JSON.parse(await readFile(path, "utf8")) as ScreenArtifact;
-  if (artifact.schemaVersion !== 1 || artifact.date !== date ||
+  if (artifact.schemaVersion !== 1 || artifact.date !== date || artifact.discoveryStatus !== discovery.status ||
       artifact.discoveryLaunchCount !== discovery.launches.length ||
       artifact.maxCandidates !== maxCandidates ||
       artifact.minSuccessfulSignatures !== minSuccessfulSignatures ||
@@ -65,7 +66,7 @@ try {
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   artifact = {
-    schemaVersion: 1, date, discoveryLaunchCount: discovery.launches.length,
+    schemaVersion: 1, date, discoveryStatus: discovery.status, discoveryLaunchCount: discovery.launches.length,
     status: "RUNNING", maxCandidates, minSuccessfulSignatures, minActiveTimeBuckets,
     creditsUsed: 0, nextIndex: 0, results: [], selectedLaunchIndexes: [],
     updatedAt: new Date().toISOString()
@@ -117,6 +118,6 @@ process.stdout.write(JSON.stringify({
   minSuccessfulSignatures, minActiveTimeBuckets, screeningCreditsUsed: artifact.creditsUsed,
   candidateIndexes: artifact.selectedLaunchIndexes,
   artifact: path,
-  note: "Signature activity is only a cheap pre-screen proxy. It does not prove unique buyers, buy direction, volume, price movement, risk clearance, or profitability. Detailed decode/replay is required for selected candidates."
+  note: `${discovery.status === "INCOMPLETE" ? "PARTIAL DISCOVERY: future/unscanned time buckets are not represented; this is not a full-day sample. " : ""}Signature activity is only a cheap pre-screen proxy. It does not prove unique buyers, buy direction, volume, price movement, risk clearance, or profitability. Detailed decode/replay is required for selected candidates."
 }, null, 2) + "\n");
 if (artifact.status !== "COMPLETE") process.exitCode = 2;
