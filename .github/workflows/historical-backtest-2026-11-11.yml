@@ -9,6 +9,13 @@ on:
       - "scripts/backtest-helius-batch.ts"
       - "src/ingestion/helius-launch-window.ts"
       - "src/ingestion/pump-events.ts"
+  workflow_dispatch:
+    inputs:
+      previous_run_id:
+        description: "Completed Nov 11 replay run ID containing the historical artifact"
+        required: true
+        default: "43560217034"
+        type: string
 
 permissions:
   contents: read
@@ -20,12 +27,13 @@ concurrency:
 
 jobs:
   replay:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
       HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
       BACKTEST_DATE: "2026-11-11"
-      PREVIOUS_RUN_ID: "43507464175"
+      PREVIOUS_RUN_ID: ${{ github.event.inputs.previous_run_id || '43560217034' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
