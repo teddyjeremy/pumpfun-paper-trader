@@ -1,10 +1,6 @@
 name: Historical paper replay — 2026-11-13 expanded sample
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/historical-backtest-2026-11-13-expanded.yml"
   workflow_dispatch:
 
 permissions:
@@ -44,8 +40,14 @@ jobs:
 
       - name: Replay selected launches in resumable batches, up to 50,000 Helius credits
         run: |
+          FIRST_BATCH=true
           while true; do
-            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=50000 --max-new-credits=50000 --max-signatures=5000 --retry-incomplete=true
+            RETRY_FLAG="--retry-incomplete=false"
+            if [ "$FIRST_BATCH" = true ]; then
+              RETRY_FLAG="--retry-incomplete=true"
+              FIRST_BATCH=false
+            fi
+            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=50000 --max-new-credits=50000 --max-signatures=5000 "$RETRY_FLAG"
             STATUS="$(node -e 'const s=require("./artifacts/batch-summary-"+process.env.BACKTEST_DATE+".json"); process.stdout.write(String(s.status))')"
             if [ "$STATUS" != "BATCH_COMPLETE" ]; then
               echo "Replay stopped at checkpoint status: $STATUS"
