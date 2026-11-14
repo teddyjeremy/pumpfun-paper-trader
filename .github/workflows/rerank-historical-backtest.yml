@@ -39,7 +39,7 @@ jobs:
       - name: Restore existing historical dataset
         uses: actions/download-artifact@v4
         with:
-          name: pump-backtest-state-${{ github.event.inputs.date }}
+          name: pump-backtest-state-${{ env.BACKTEST_DATE }}
           path: artifacts
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.inputs.source_run_id }}
@@ -69,7 +69,7 @@ jobs:
       - name: Save corrected ranking and dataset
         uses: actions/upload-artifact@v4
         with:
-          name: pump-backtest-state-${{ github.event.inputs.date }}-reranked
+          name: pump-backtest-state-${{ env.BACKTEST_DATE }}-reranked
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
