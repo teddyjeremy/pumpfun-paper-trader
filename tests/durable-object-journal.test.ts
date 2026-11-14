@@ -201,6 +201,7 @@ describe("Durable Object audit storage contract", () => {
       heliusState: HeliusMonitorState;
       advanceHistoricalBackfill: () => Promise<boolean>;
     };
+    await first.getStatus();
     first.activeSessionId = "runtime-test-session";
     first.heliusState = monitor;
     await first.advanceHistoricalBackfill();
@@ -218,6 +219,7 @@ describe("Durable Object audit storage contract", () => {
       heliusState: HeliusMonitorState;
       advanceHistoricalBackfill: () => Promise<boolean>;
     };
+    await restarted.getStatus();
     restarted.activeSessionId = "runtime-test-session";
     restarted.heliusState = savedMonitor;
     await restarted.advanceHistoricalBackfill();
