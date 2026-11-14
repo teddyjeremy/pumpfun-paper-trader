@@ -43,6 +43,15 @@ jobs:
           npm run backtest:batch -- --date=2026-11-11 --batch-size=20 --max-credits=30000 --max-new-credits=8000 --max-signatures=1000 --retry-incomplete=true --skip-mints=DJYzweGzY3xTCAdTug9L4tVPGFVUjpZ7wXrstw2DJNjk
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      - name: Retry remaining Nov 11 candidates within the same 8,000-credit cap
+        run: |
+          used="$(node -e 'const c=require("./artifacts/checkpoint.json"); process.stdout.write(String(c.cumulativeCreditsUsed))')"
+          remaining=$((8000 - (used - 3795)))
+          if [ "$remaining" -gt 0 ]; then
+            npm run backtest:batch -- --date=2026-11-11 --batch-size=20 --max-credits=30000 --max-new-credits="$remaining" --max-signatures=2500 --retry-incomplete=false --skip-mints=DJYzweGzY3xTCAdTug9L4tVPGFVUjpZ7wXrstw2DJNjk
+          else
+            echo "Nov 11 retry budget exhausted; no second batch."
+          fi
       - name: Rerank Nov 11
         run: npm run backtest:rank -- --date=2026-11-11 --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
       - name: Publish Nov 11 to Neon
@@ -70,6 +79,15 @@ jobs:
           npm run backtest:batch -- --date=2026-11-12 --batch-size=20 --max-credits=50000 --max-new-credits=8000 --max-signatures=1000 --retry-incomplete=true
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      - name: Retry remaining Nov 12 candidates within the same 8,000-credit cap
+        run: |
+          used="$(node -e 'const c=require("./artifacts/checkpoint.json"); process.stdout.write(String(c.cumulativeCreditsUsed))')"
+          remaining=$((8000 - (used - 22951)))
+          if [ "$remaining" -gt 0 ]; then
+            npm run backtest:batch -- --date=2026-11-12 --batch-size=20 --max-credits=50000 --max-new-credits="$remaining" --max-signatures=2500 --retry-incomplete=false
+          else
+            echo "Nov 12 retry budget exhausted; no second batch."
+          fi
       - name: Rerank Nov 12
         run: npm run backtest:rank -- --date=2026-11-12 --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
       - name: Publish Nov 12 to Neon
