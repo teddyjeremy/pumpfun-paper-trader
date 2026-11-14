@@ -1,4 +1,4 @@
-# The two date-scoped jobs share a hard 8,000-credit incremental ceiling each.
+# Final publication reuses the current retry artifacts and skips all known incomplete mints; no extra Helius scans.
 name: Retry incomplete historical coins (bounded, no rediscovery)
 
 on:
