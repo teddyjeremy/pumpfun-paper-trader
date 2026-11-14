@@ -35,7 +35,8 @@ const results: Array<Record<string, unknown>> = [];
 for (const file of files) {
   const raw = JSON.parse(await readFile(resolve(coinDirectory, file), "utf8")) as Record<string, unknown>;
   const mint = String(raw.mint ?? "");
-  const launchBlockTime = Number(raw.launchBlockTime);
+  const launch = raw.launch as Record<string, unknown> | undefined;
+  const launchBlockTime = Number(launch?.blockTime ?? raw.launchBlockTime);
   const collection = raw.collection as Record<string, unknown> | undefined;
   if (!summary.selectedLaunchIndexes.includes(Number(raw.index)) || collection?.status !== "COMPLETE" ||
       !Array.isArray(raw.transactions) || !Number.isSafeInteger(launchBlockTime) ||
