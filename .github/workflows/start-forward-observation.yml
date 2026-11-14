@@ -18,7 +18,7 @@ jobs:
       CONTROL_TOKEN: ${{ secrets.PAPER_WORKER_CONTROL_TOKEN }}
     steps:
       - name: Wait for Worker deployment and Durable Object code update
-        run: sleep 360
+        run: sleep 60
 
       - name: Verify the reviewed-calibration gate is closed
         shell: bash
