@@ -1,0 +1,76 @@
+name: Rerank Nov 11 historical paper dataset (no Helius calls)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/rerank-historical-backtest.yml"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Nairobi calendar date to rerank (YYYY-MM-DD)"
+        required: true
+        default: "2026-11-11"
+        type: string
+      source_run_id:
+        description: "Completed historical replay run ID containing pump-backtest-state artifact"
+        required: true
+        default: "43560217034"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rerank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BACKTEST_DATE: ${{ github.event.inputs.date || '2026-11-11' }}
+      SOURCE_RUN_ID: ${{ github.event.inputs.source_run_id || '43560217034' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+
+      - name: Restore existing historical dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-backtest-state-${{ env.BACKTEST_DATE }}
+          path: artifacts
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+
+      - name: Validate restored checkpoint and dataset
+        run: |
+          test -s "artifacts/pump-launch-discovery-$BACKTEST_DATE.json"
+          test -s "artifacts/pump-launch-screen-$BACKTEST_DATE.json"
+          test -s artifacts/checkpoint.json
+          test -d artifacts/coins
+          node -e 'const c=require("./artifacts/checkpoint.json"); if(c.date!==process.env.BACKTEST_DATE) process.exit(1)'
+          echo "Restored existing data; this workflow makes no Helius RPC calls."
+
+      - name: Typecheck and run tests
+        run: npm run typecheck:scripts && npm test -- --run
+
+      - name: Rank with corrected SOL quote handling
+        run: npm run backtest:rank -- --date="$BACKTEST_DATE" --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
+
+      - name: Publish corrected research to Neon dashboard
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          test -n "$DATABASE_URL"
+          npm run backtest:publish -- --date="$BACKTEST_DATE" --run-id="$GITHUB_RUN_ID"
+
+      - name: Save corrected ranking and dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-${{ env.BACKTEST_DATE }}-reranked
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
