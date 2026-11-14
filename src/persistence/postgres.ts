@@ -324,12 +324,17 @@ export async function persistPaperAuditEvents(
   }
   const ordered = [...events].sort((a, b) => a.sequence - b.sequence);
   for (const event of ordered) {
-    if (event.sessionId !== sessionId || !Number.isSafeInteger(event.sequence) || event.sequence < 1 ||
-        !event.eventId || event.eventId.length > 256 || !event.kind || event.kind.length > 128 ||
-        !event.strategyVersion || event.strategyVersion.length > 128 ||
-        (event.mint !== null && (typeof event.mint !== "string" || event.mint.length > 64)) ||
-        !Number.isFinite(Date.parse(event.occurredAt))) {
-      throw new Error("Paper audit event contains invalid identity, sequence or timestamp fields.");
+    const invalid: string[] = [];
+    if (event.sessionId !== sessionId) invalid.push("sessionId");
+    if (!Number.isSafeInteger(event.sequence) || event.sequence < 1) invalid.push("sequence");
+    if (typeof event.eventId !== "string" || !event.eventId.trim() || event.eventId.length > 256) invalid.push("eventId");
+    if (typeof event.kind !== "string" || !event.kind.trim() || event.kind.length > 128) invalid.push("kind");
+    if (typeof event.strategyVersion !== "string" || !event.strategyVersion.trim() ||
+        event.strategyVersion.length > 128) invalid.push("strategyVersion");
+    if (event.mint !== null && (typeof event.mint !== "string" || event.mint.length > 64)) invalid.push("mint");
+    if (typeof event.occurredAt !== "string" || !Number.isFinite(Date.parse(event.occurredAt))) invalid.push("occurredAt");
+    if (invalid.length > 0) {
+      throw new Error(`Paper audit event has invalid fields: ${invalid.join(", ")} (kind=${String(event.kind).slice(0, 48)}, sequence=${String(event.sequence)}).`);
     }
     if (JSON.stringify(event.data ?? {}) === undefined) {
       throw new Error("Paper audit event payload is not JSON serializable.");
