@@ -45,7 +45,10 @@ jobs:
         run: npm run smoke:ingestion
         env:
           PAPER_WORKER_CONTROL_TOKEN: ${{ secrets.PAPER_WORKER_CONTROL_TOKEN }}
+      - name: Verify static quota-protection health
+        if: steps.pause.outputs.paused == 'true'
+        run: node scripts/verify-worker-paused.mjs
       - name: Report intentional pause
         if: steps.pause.outputs.paused == 'true'
         run: |
-          echo "Production ingestion smoke was intentionally skipped: the Worker is paused because the Durable Objects daily rows_written free-tier quota is exhausted." >> "$GITHUB_STEP_SUMMARY"
+          echo "Worker is intentionally paused. No Durable Object storage writes or market-stream work are permitted until quota reset and batching remediation." >> "$GITHUB_STEP_SUMMARY"
