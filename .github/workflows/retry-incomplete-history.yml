@@ -2,10 +2,6 @@
 name: Retry incomplete historical coins (bounded, no rediscovery)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/retry-incomplete-history.yml"
   workflow_dispatch:
 
 concurrency:
