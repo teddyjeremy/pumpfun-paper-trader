@@ -35,13 +35,13 @@ jobs:
       - name: Restore Nov 11 reranked checkpoint
         uses: actions/download-artifact@v4
         with:
-          name: pump-backtest-state-2026-11-11-reranked
+          name: pump-backtest-state-2026-11-11-retried
           path: artifacts
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 43568187060
+          run-id: 43572311606
       - name: Retry Nov 11 cap-limited coins only
         run: |
-          npm run backtest:batch -- --date=2026-11-11 --batch-size=20 --max-credits=30000 --max-new-credits=8000 --max-signatures=2500 --retry-incomplete=true --skip-mints=DJYzweGzY3xTCAdTug9L4tVPGFVUjpZ7wXrstw2DJNjk
+          npm run backtest:batch -- --date=2026-11-11 --batch-size=20 --max-credits=30000 --max-new-credits=8000 --max-signatures=2500 --retry-incomplete=true --skip-mints=DJYzweGzY3xTCAdTug9L4tVPGFVUjpZ7wXrstw2DJNjk,65gZLLzUkycqaoByzNSU7Yf9FPZjBfHFf9eZPr1kpump,9fnyD1gbaAfEedzfe64PC1R8xnRw6ud41A9UdjGgpump
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
       - name: Retry remaining Nov 11 candidates within the same 8,000-credit cap
@@ -49,7 +49,7 @@ jobs:
           used="$(node -e 'const c=require("./artifacts/checkpoint.json"); process.stdout.write(String(c.cumulativeCreditsUsed))')"
           remaining=$((8000 - (used - 3795)))
           if [ "$remaining" -gt 0 ]; then
-            npm run backtest:batch -- --date=2026-11-11 --batch-size=20 --max-credits=30000 --max-new-credits="$remaining" --max-signatures=2500 --retry-incomplete=false --skip-mints=DJYzweGzY3xTCAdTug9L4tVPGFVUjpZ7wXrstw2DJNjk
+            npm run backtest:batch -- --date=2026-11-11 --batch-size=20 --max-credits=30000 --max-new-credits="$remaining" --max-signatures=2500 --retry-incomplete=false --skip-mints=DJYzweGzY3xTCAdTug9L4tVPGFVUjpZ7wXrstw2DJNjk,65gZLLzUkycqaoByzNSU7Yf9FPZjBfHFf9eZPr1kpump,9fnyD1gbaAfEedzfe64PC1R8xnRw6ud41A9UdjGgpump
           else
             echo "Nov 11 retry budget exhausted; no second batch."
           fi
@@ -71,13 +71,13 @@ jobs:
       - name: Restore Nov 12 reranked checkpoint
         uses: actions/download-artifact@v4
         with:
-          name: pump-backtest-state-2026-11-12-reranked
+          name: pump-backtest-state-2026-11-12-retried
           path: artifacts
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 43568059148
+          run-id: 43572311606
       - name: Retry Nov 12 cap-limited coins only
         run: |
-          npm run backtest:batch -- --date=2026-11-12 --batch-size=20 --max-credits=50000 --max-new-credits=8000 --max-signatures=2500 --retry-incomplete=true
+          npm run backtest:batch -- --date=2026-11-12 --batch-size=20 --max-credits=50000 --max-new-credits=8000 --max-signatures=2500 --retry-incomplete=true --skip-mints=J2CD5wvQ1V5GCbeYHBf68vTauYiVSYwBpUZwbWZXZQvN,4s1jvCiFeoXDYGBjZR5PSJGbxMH6piDvEgoo5hECpump,F66tmpu8QmR5BifVWfgbrfgwLtd1DPgYaWhhyZU6pump
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
       - name: Retry remaining Nov 12 candidates within the same 8,000-credit cap
@@ -85,7 +85,7 @@ jobs:
           used="$(node -e 'const c=require("./artifacts/checkpoint.json"); process.stdout.write(String(c.cumulativeCreditsUsed))')"
           remaining=$((8000 - (used - 22951)))
           if [ "$remaining" -gt 0 ]; then
-            npm run backtest:batch -- --date=2026-11-12 --batch-size=20 --max-credits=50000 --max-new-credits="$remaining" --max-signatures=2500 --retry-incomplete=false
+            npm run backtest:batch -- --date=2026-11-12 --batch-size=20 --max-credits=50000 --max-new-credits="$remaining" --max-signatures=2500 --retry-incomplete=false --skip-mints=J2CD5wvQ1V5GCbeYHBf68vTauYiVSYwBpUZwbWZXZQvN,4s1jvCiFeoXDYGBjZR5PSJGbxMH6piDvEgoo5hECpump,F66tmpu8QmR5BifVWfgbrfgwLtd1DPgYaWhhyZU6pump
           else
             echo "Nov 12 retry budget exhausted; no second batch."
           fi
