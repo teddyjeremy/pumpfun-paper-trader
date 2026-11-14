@@ -1,0 +1,54 @@
+{
+  "id": "launch-snipe-1m-2x-15m",
+  "family": "launch",
+  "profitableOnHoldout": true,
+  "entry": {
+    "family": "launch",
+    "delayMinutes": 1,
+    "minVolumeUsd": 0,
+    "maxDropPct": 1,
+    "lookbackMinutes": 3,
+    "minReturnPct": 0.2,
+    "maxChasePct": 3,
+    "copyMinWallets": 2,
+    "copyWindowSeconds": 90,
+    "copyWallets": []
+  },
+  "exit": {
+    "stopLossPct": 0.05,
+    "takeProfitPct": 1,
+    "trailActivatePct": 5,
+    "trailDistancePct": 0.2,
+    "maxHoldMinutes": 15
+  },
+  "rug": {
+    "maxCreatorHoldPct": 8,
+    "rejectCreatorSoldInSlot": true,
+    "minSameSlotBuyers": 0,
+    "maxSameSlotTopShare": null,
+    "maxDevHoldingPct": 8,
+    "maxDevSoldPct": 0,
+    "maxTop10HolderPct": 100,
+    "maxBundledBuyPct": 100,
+    "maxFreshWalletClusterPct": 100,
+    "maxCreatorPriorRugs": 99
+  },
+  "sizing": {
+    "startingEquityUsd": 2.4,
+    "stakeUsd": 0.35,
+    "maxConcurrent": 2,
+    "dailyDrawdownKillPct": 20
+  },
+  "copyWallets": [],
+  "costs": {
+    "solUsd": 73.5,
+    "venueFeeBps": 125,
+    "slippageFloorBps": 30,
+    "feeLamportsPerTx": 15000,
+    "rentLamports": 1488440,
+    "fixedRoundTripUsd": 0.002205,
+    "roundTripVariablePct": 3.0759749999999864,
+    "rentUsd": 0.10940034,
+    "costPerTradeUsdAtStake": 0.012970912499999952
+  }
+}

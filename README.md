@@ -2,6 +2,20 @@
 
 A **paper-only** Pump.fun research, market-monitoring and trading-simulation system. It does not sign transactions, hold a wallet key, submit Solana transactions, or execute real trades.
 
+## Overnight paper session
+
+The default paper rules are in [RULES.md](RULES.md): buy one minute after launch, skip an early dev sale or a creator holding more than 8%, take profit at 2x, stop at -5%, and get out by 15 minutes. On the Nov 14 holdout that was **77 signals, about $0.029 expected per $0.35 trade after fees**. Momentum lost money on that day. Copy-trading is not the default. The older fail-closed audit is still in the tree and is not what `npm run paper` runs.
+
+```bash
+npm run collect:history   # public RPC + GeckoTerminal sample
+npm run backtest:rules    # train/holdout, writes the default rules
+npm run paper -- --replay # resimulate the saved dataset
+npm run paper -- --once   # one live poll, paper only
+npm run paper             # leave it running
+```
+
+`npm run paper -- --live` exits without trading. There is no signer. Optional inputs: `HELIUS_API_KEY` (cached, not required) and `RUG_SIGNALS_CSV` (see RULES.md). Starting bankroll for this session is about **$2.40**.
+
 ## Repository status
 
 The current `main` branch contains the discovery and monitoring foundation, verified Pump/PumpSwap account and transaction evidence, strict strategy audit, quote adapters, portfolio simulation primitives, and dashboard/API foundations.
