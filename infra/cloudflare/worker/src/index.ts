@@ -340,7 +340,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       }
       if (events.length === 0) return;
       const response = await this.postPostgresIngest("/internal/paper-events", { sessionId, events });
-      if (!response.ok) throw new Error("PostgreSQL rejected the paper audit batch.");
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const payload = await response.json() as { error?: unknown; detail?: unknown };
+          const message = typeof payload.detail === "string" ? payload.detail :
+            typeof payload.error === "string" ? payload.error : "";
+          if (message) detail += `: ${message.slice(0, 140)}`;
+        } catch {
+          // Keep a bounded HTTP-only diagnostic for non-JSON responses.
+        }
+        throw new Error(detail);
+      }
       const result = await response.json() as { ok?: boolean; lastSequence?: number };
       const lastEvent = events[events.length - 1];
       if (!lastEvent || result.ok !== true || !Number.isSafeInteger(result.lastSequence) ||
@@ -348,17 +359,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         throw new Error("PostgreSQL did not acknowledge the complete paper audit batch.");
       }
       await this.ctx.storage.put(cursorKey, lastEvent.sequence);
-      if (this.status.lastError === "Paper event ingestion failed; durable outbox will retry.") {
+      if (this.status.lastError?.startsWith("Paper event ingestion failed")) {
         this.status.lastError = null;
       }
       const meta = await this.ctx.storage.get<AuditSessionMeta>(`audit_session:${sessionId}`);
       if (meta && meta.eventCount > lastEvent.sequence) {
         await this.ctx.storage.setAlarm(Date.now() + 1_000);
       }
-    } catch {
+    } catch (error) {
       // The durable audit pages are the outbox. Do not advance the cursor on
       // failure; a retry is safe because PostgreSQL deduplicates event ids.
-      this.status.lastError = "Paper event ingestion failed; durable outbox will retry.";
+      const detail = error instanceof Error ? error.message.slice(0, 180) : "unknown persistence error";
+      this.status.lastError = `Paper event ingestion failed (${detail}); durable outbox will retry.`;
       await this.ctx.storage.setAlarm(Date.now() + 30_000).catch(() => undefined);
     } finally {
       this.postgresFlushInFlight = false;
