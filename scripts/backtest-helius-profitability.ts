@@ -41,7 +41,11 @@ for (const file of files) {
   if (!summary.selectedLaunchIndexes.includes(Number(raw.index)) || collection?.status !== "COMPLETE" ||
       !Array.isArray(raw.transactions) || !Number.isSafeInteger(launchBlockTime) ||
       launchBlockTime < dayStart || launchBlockTime >= dayEnd) continue;
-  const transactions = raw.transactions.map(hydrateArchivedVerifiedTransaction);
+  // These files are emitted only by the Helius historical collector. Add the archive provenance marker required by the strict hydrator at this trusted artifact boundary.
+  const transactions = raw.transactions.map(value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Malformed archived transaction in ${file}.`);
+    return hydrateArchivedVerifiedTransaction({ ...(value as Record<string, unknown>), source: "HISTORICAL_BACKFILL" });
+  });
   const replay = replayHistoricalCoin({
     mint, transactions, launchBlockTime, horizonSeconds: 600, decodeComplete: true
   }, {
