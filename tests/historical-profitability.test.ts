@@ -36,7 +36,7 @@ describe("historical profitability replay", () => {
     const result = simulateHistoricalProfitability({
       mint, transactions: [tx([trade(100, 1), trade(101, 0.9), trade(102, 0.88)])],
       entryAt: 100, entryPriceQuotePerToken: 1, horizonSeconds: 600,
-      roundTripCostPct: 4, riskCleared: false
+      roundTripCostPct: 4, riskStatus: "UNKNOWN"
     });
     expect(result.status).toBe("CLOSED_BY_STRATEGY");
     expect(result.exitAt).toBe(101);
@@ -50,7 +50,7 @@ describe("historical profitability replay", () => {
     const result = simulateHistoricalProfitability({
       mint, transactions: [tx([trade(100, 1), trade(101, 1.2), trade(102, 1.15)])],
       entryAt: 100, entryPriceQuotePerToken: 1, horizonSeconds: 60,
-      roundTripCostPct: 4, riskCleared: true
+      roundTripCostPct: 4, riskStatus: "CLEARED"
     });
     expect(result.status).toBe("OPEN_AT_HORIZON");
     expect(result.exitAt).toBeNull();
