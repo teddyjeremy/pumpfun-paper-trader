@@ -176,6 +176,18 @@ for (let index = artifact.nextBucketIndex; index < maxLaunches; index += 1) {
     continue;
   }
   if (bucket.startTime !== start || bucket.endTime !== end) throw new Error("Saved bucket time bounds are inconsistent.");
+  // Parsed Events rejects time ranges that extend into the current/future period.
+  // Stop at the first not-yet-closed bucket and preserve the verified launches
+  // already collected; downstream screening must label this as partial-day data.
+  if (end > Math.floor(Date.now() / 1_000) - 30) {
+    artifact.status = "INCOMPLETE";
+    artifact.nextBucketIndex = index;
+    artifact.buckets[index] = bucket;
+    artifact.reason = "Stopped at the first current/future bucket; resume after its end time.";
+    artifact.updatedAt = new Date().toISOString();
+    await save(path, artifact);
+    break;
+  }
   bucket.status = "RUNNING";
   while (bucket.pagesScanned < maxPagesPerBucket) {
     // Reserve the maximum possible scan charge plus one raw transaction fetch.
