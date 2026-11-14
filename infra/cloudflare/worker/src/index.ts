@@ -1050,8 +1050,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.heliusSocket?.close(1000, "Emergency pause for Durable Objects quota protection");
     this.socket = null;
     this.heliusSocket = null;
-    this.postgresLeaseHeld = false;
     await this.releasePostgresWorkerLease().catch(() => undefined);
+    this.postgresLeaseHeld = false;
     this.status.lastError = "Provider streams closed in memory; Durable Object storage remains paused until quota reset.";
     return this.status;
   }
