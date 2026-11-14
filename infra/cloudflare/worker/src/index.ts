@@ -1189,7 +1189,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         helius.close(1000, "Coordinator disabled");
       }
       this.status.heliusConnected = false;
-      if (this.pendingWrites >= PERSIST_EVERY_EVENTS || Date.now() - this.lastPersistAtMs >= 300_000) {
+      if (this.pendingWrites > 0 &&
+          (this.pendingWrites >= PERSIST_EVERY_EVENTS || Date.now() - this.lastPersistAtMs >= 300_000)) {
         await this.persist();
       }
       return this.getStatus();
@@ -1206,7 +1207,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.reconcileHelius();
       this.pendingWrites += 1;
     }
-    if (this.pendingWrites >= PERSIST_EVERY_EVENTS || Date.now() - this.lastPersistAtMs >= 300_000) {
+    if (this.pendingWrites > 0 &&
+          (this.pendingWrites >= PERSIST_EVERY_EVENTS || Date.now() - this.lastPersistAtMs >= 300_000)) {
       await this.persist();
     }
 
@@ -3226,7 +3228,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       this.status.incompleteHeliusTransactions += 1;
       await this.ctx.storage.put({
         helius_monitor_state: this.heliusState,
-        verified_transactions: this.verifiedTransactions,
+        verified_transactions: this.verifiedTransactions.slice(-500),
         status: this.status
       }).catch(() => undefined);
     } finally {
