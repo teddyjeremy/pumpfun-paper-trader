@@ -299,6 +299,39 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     expect(monitor?.coverageGaps[0]?.recoveredAt).toBeTruthy();
   });
 
+  it("batches candidate price trackers into one session checkpoint", async () => {
+    const storage = new MemoryDurableStorage();
+    const sessionId = "candidate-price-batch-session";
+    const mint = "So11111111111111111111111111111111111111112";
+    const coordinator = new PumpFunCoordinator(context(storage) as never, {} as never) as unknown as {
+      activeSessionId: string | null;
+      recordCandidateTradePrice: (trade: {
+        mint: string; quoteMint: string; quoteAmount: string; tokenAmount: string;
+        timestamp: string; signature: string; isBuy: boolean;
+      }, tradeIndex: number) => Promise<void>;
+      persist: () => Promise<void>;
+      candidatePriceTrackers: Record<string, { sampleCount?: number }>;
+    };
+    coordinator.activeSessionId = sessionId;
+    const trade = {
+      mint, quoteMint: "So11111111111111111111111111111111111111112",
+      quoteAmount: "1000000000", tokenAmount: "1000000",
+      timestamp: "2026-11-14T07:00:00.000Z", signature: "7".repeat(64), isBuy: true
+    };
+    await coordinator.recordCandidateTradePrice(trade, 0);
+    const trackerKey = `${mint}:${trade.quoteMint}`;
+    expect(await storage.get(`candidate_price:${sessionId}:${mint}:${trade.quoteMint}`)).toBeUndefined();
+    await coordinator.recordCandidateTradePrice(trade, 0);
+    await coordinator.persist();
+    const saved = await storage.get<{
+      sessionId: string; trackers: Record<string, { sampleCount?: number }>;
+      processedTradeIds: string[];
+    }>(`candidate_price_state:${sessionId}`);
+    expect(saved?.sessionId).toBe(sessionId);
+    expect(saved?.trackers[trackerKey]).toBeDefined();
+    expect(saved?.processedTradeIds).toEqual([`${trade.signature}:0`]);
+  });
+
   it("does not recover a gap while a successful transaction lacks Neon archive acknowledgement", async () => {
     const storage = new MemoryDurableStorage();
     const sessionId = "worker-gap-unarchived-session";
