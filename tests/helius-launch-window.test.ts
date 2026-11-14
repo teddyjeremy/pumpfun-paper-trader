@@ -65,6 +65,35 @@ describe("complete historical Pump launch-window collection", () => {
     expect(result.transactions.map(item => item.signature)).toEqual([tradeSignature, createSignature]);
   });
 
+  it("continues collecting valid transactions after a single undecodable signature", async () => {
+    const badSignature = "9".repeat(88);
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.method === "getSignaturesForAddress") {
+        return rpcResult([
+          { signature: tradeSignature, slot: 102, blockTime: 1_001, err: null },
+          { signature: badSignature, slot: 101, blockTime: 1_000, err: null },
+          { signature: createSignature, slot: 100, blockTime: 1_000, err: null }
+        ]);
+      }
+      const signature = body.params[0] as string;
+      if (signature === badSignature) {
+        return rpcResult({
+          slot: 101, blockTime: 1_000, transaction: { signatures: [signature] },
+          meta: { err: null, logMessages: ["Program data: !!!"] }
+        });
+      }
+      return rpcResult(transaction(signature, signature === tradeSignature ? 102 : 100,
+        signature === tradeSignature ? 1_001 : 1_000));
+    });
+    const result = await collectHistoricalLaunchWindow({
+      mint, bondingCurve: curve, createSignature, launchBlockTime: 1_000
+    }, { apiKey: "test", maxCredits: 10, fetcher, requestIntervalMs: 0 });
+    expect(result.status).toBe("INCOMPLETE");
+    expect(result.transactions.map(item => item.signature)).toEqual([tradeSignature, createSignature]);
+    expect(result.decodeFailures).toEqual([{ signature: badSignature, reason: expect.stringMatching(/base64/) }]);
+  });
+
   it("counts a successfully decoded non-matching transaction as terminal coverage", async () => {
     const unrelatedSignature = "8".repeat(88);
     const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
