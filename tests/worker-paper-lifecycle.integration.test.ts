@@ -373,7 +373,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     try {
       await flush(sessionId);
       expect(await storage.get(`postgres_sync_sequence:${sessionId}`)).toBeUndefined();
-      expect(status.lastError).toBe("Paper event ingestion failed; durable outbox will retry.");
+      expect(status.lastError).toMatch(/^Paper event ingestion failed \(HTTP 503\); durable outbox will retry\.$/);
 
       vi.stubGlobal("fetch", vi.fn(async () => new Response(
         JSON.stringify({ ok: true, lastSequence: 1 }), { status: 200,
