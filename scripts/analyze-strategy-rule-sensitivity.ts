@@ -18,7 +18,9 @@ const ruleNames = [
 type Status = "PASS" | "FAIL" | "UNKNOWN";
 type Rule = { rule: string; status: Status; actual: unknown; expected: string; reason: string };
 type Audit = { decision: string; rules: Rule[]; rejectionReasons: string[]; blockingUnknownRules: string[] };
-const byRule = Object.fromEntries(ruleNames.map(rule => [rule, { pass: 0, fail: 0, unknown: 0 }]));
+type RuleName = typeof ruleNames[number];
+type RuleCounts = { pass: number; fail: number; unknown: number };
+const byRule = Object.fromEntries(ruleNames.map(rule => [rule, { pass: 0, fail: 0, unknown: 0 }])) as Record<RuleName, RuleCounts>;
 const perDate: Record<string, unknown>[] = [];
 const candidateRows: Array<{ date: string; mint: string; audit: Audit }> = [];
 
