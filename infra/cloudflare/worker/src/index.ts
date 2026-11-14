@@ -204,7 +204,7 @@ const INITIAL_STATUS: CoordinatorStatus = {
 };
 
 const MAX_CANDIDATES = 100;
-const PERSIST_EVERY_EVENTS = 100;
+const PERSIST_EVERY_EVENTS = 500;
 
 export class PumpFunCoordinator extends DurableObject<Env> {
   private socket: WebSocket | null = null;
@@ -3692,7 +3692,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       status: statusSnapshot,
       discovery_state: snapshot,
       helius_monitor_state: this.heliusState,
-      verified_transactions: this.verifiedTransactions,
+      verified_transactions: this.verifiedTransactions.slice(-500),
       wallet_link_snapshots: this.walletLinkSnapshots,
       wallet_holdings_by_mint: this.walletHoldingsByMint,
       holder_risk_snapshots: this.holderRiskSnapshots,
