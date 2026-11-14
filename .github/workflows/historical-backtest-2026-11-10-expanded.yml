@@ -1,0 +1,76 @@
+name: Historical paper replay — 2026-11-10 300k expanded sample
+
+on:
+  push:
+    paths:
+      - ".github/workflows/historical-backtest-2026-11-10-expanded.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-paper-replay-shared-helius-key
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BACKTEST_DATE: "2026-11-10"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+
+      - name: Validate credentials before spending credits
+        run: |
+          test -n "$HELIUS_API_KEY" || { echo "HELIUS_API_KEY is required"; exit 1; }
+          test -n "$DATABASE_URL" || { echo "DATABASE_URL is required to publish the results"; exit 1; }
+
+      - name: Discover up to 300 launches across the full Nairobi day
+        run: |
+          npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=30000 --max-launches=300 --max-pages-per-bucket=20
+
+      - name: Screen all discovered launches and retain the top 30% by activity
+        run: npm run backtest:screen -- --date="$BACKTEST_DATE" --max-credits=1500 --max-share-pct=30 --min-successful=5 --min-active-buckets=3
+
+      - name: Replay selected launches in resumable batches within the 300,000-credit total ceiling
+        run: |
+          FIRST_BATCH=true
+          while true; do
+            RETRY_FLAG="--retry-incomplete=false"
+            if [ "$FIRST_BATCH" = true ]; then
+              RETRY_FLAG="--retry-incomplete=true"
+              FIRST_BATCH=false
+            fi
+            npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=20 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 "$RETRY_FLAG"
+            STATUS="$(node -e 'const s=require("./artifacts/batch-summary-"+process.env.BACKTEST_DATE+".json"); process.stdout.write(String(s.status))')"
+            if [ "$STATUS" != "BATCH_COMPLETE" ]; then
+              echo "Replay stopped at checkpoint status: $STATUS"
+              break
+            fi
+          done
+
+      - name: Rank completed coins by verified first-30-second activity
+        if: always() && hashFiles('artifacts/coins/*.json') != ''
+        run: npm run backtest:rank -- --date="$BACKTEST_DATE" --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
+
+      - name: Publish research dataset to Neon dashboard
+        if: always() && hashFiles('artifacts/pump-launch-discovery-*.json') != ''
+        run: npm run backtest:publish -- --date="$BACKTEST_DATE" --run-id="$GITHUB_RUN_ID"
+
+      - name: Save full resumable dataset and checkpoint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-10-300k
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
