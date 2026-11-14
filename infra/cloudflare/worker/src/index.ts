@@ -3525,6 +3525,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
   }
   private markHeliusCoverageGap(): void {
+    if (this.storagePaused) return;
     const now = new Date().toISOString();
     const previouslyIncomplete = new Set(this.heliusState.incompleteMints);
     const affectedMints = [...new Set(this.heliusState.subscriptions.map(item => item.mint))];
