@@ -18,7 +18,11 @@ const ruleNames = [
 type Status = "PASS" | "FAIL" | "UNKNOWN";
 type Rule = { rule: string; status: Status; actual: unknown; expected: string; reason: string };
 type Audit = { decision: string; rules: Rule[]; rejectionReasons: string[]; blockingUnknownRules: string[] };
-const byRule = Object.fromEntries(ruleNames.map(rule => [rule, { pass: 0, fail: 0, unknown: 0 }]));
+type RuleName = typeof ruleNames[number];
+type RuleCounts = { pass: number; fail: number; unknown: number };
+const byRule = Object.fromEntries(
+  ruleNames.map(rule => [rule, { pass: 0, fail: 0, unknown: 0 } satisfies RuleCounts])
+) as Record<RuleName, RuleCounts>;
 const perDate: Record<string, unknown>[] = [];
 const candidateRows: Array<{ date: string; mint: string; audit: Audit }> = [];
 
@@ -34,7 +38,7 @@ for (const date of dates) {
     candidateRows.push({ date, mint: row.mint, audit });
     for (const rule of audit.rules) {
       if (!ruleNames.includes(rule.rule as typeof ruleNames[number])) continue;
-      const counts = byRule[rule.rule as typeof ruleNames[number]];
+      const counts = byRule[rule.rule as RuleName];
       if (rule.status === "PASS") counts.pass++;
       else if (rule.status === "FAIL") counts.fail++;
       else counts.unknown++;
@@ -53,9 +57,14 @@ const singleRuleRelaxation = ruleNames.map(ruleName => {
   );
   return { rule: ruleName, newlyEligibleCount: newlyEligible.length, mints: newlyEligible.map(row => row.mint) };
 });
-const blockerRanking = ruleNames.map(rule => ({
-  rule, ...byRule[rule], total: byRule[rule].pass + byRule[rule].fail + byRule[rule].unknown
-})).sort((a, b) => (b.fail + b.unknown) - (a.fail + a.unknown));
+const blockerRanking = ruleNames.map(rule => {
+  const counts = byRule[rule];
+  return {
+    rule,
+    ...counts,
+    total: counts.pass + counts.fail + counts.unknown
+  };
+}).sort((a, b) => (b.fail + b.unknown) - (a.fail + a.unknown));
 
 const report = {
   generatedAt: new Date().toISOString(),
