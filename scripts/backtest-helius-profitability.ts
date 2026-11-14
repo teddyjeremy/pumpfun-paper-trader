@@ -4,6 +4,63 @@ import {
   hydrateArchivedVerifiedTransaction, replayHistoricalCoin
 } from "../src/strategy/historical-replay.js";
 import { simulateHistoricalProfitability } from "../src/strategy/historical-profitability.js";
+import { buildCandidatePriceVolumeProfiles } from "../src/ingestion/price-volume-profile.js";
+import { buildCandidateTradeFlows } from "../src/ingestion/trade-flow.js";
+import { calculateReclaimConfirmation, evaluateStrictStrategyAudit } from "../src/paper/strategy-audit.js";
+
+
+function strictAuditForReplay(input: {
+  mint: string;
+  transactions: ReturnType<typeof hydrateArchivedVerifiedTransaction>[];
+  launchBlockTime: number;
+  evaluatedAt: number;
+  solUsdPriceUsd: number;
+  creatorRiskStatus: string;
+  walletClusterRiskStatus: string;
+}) {
+  const options = {
+    nowSeconds: input.evaluatedAt, horizonSeconds: 600,
+    incompleteMints: [] as string[],
+    coverageStartByMint: { [input.mint]: input.launchBlockTime },
+    candidateMints: [input.mint], solUsdPriceUsd: input.solUsdPriceUsd,
+    minimumTradeUsd: 0.01
+  };
+  const profile = buildCandidatePriceVolumeProfiles(input.transactions, options)
+    .find(item => item.mint === input.mint && item.quoteUnit === "SOL");
+  const flow = buildCandidateTradeFlows(input.transactions, options)
+    .find(item => item.mint === input.mint && item.quoteUnit === "SOL");
+  if (!profile || !flow) return null;
+  const reclaimIndex = profile.reclaimTime === null ? -1
+    : profile.buckets.findIndex(bucket => bucket.endTime === profile.reclaimTime);
+  const previousCompletedHigh = reclaimIndex > 0
+    ? profile.buckets[reclaimIndex - 1]!.highPrice : null;
+  const nextObservationPrices = input.transactions.flatMap(tx => tx.tradeEvents)
+    .filter(event => event.mint === input.mint && event.quoteMint &&
+      (event.quoteMint === "So11111111111111111111111111111111111111112" ||
+       event.quoteMint === "11111111111111111111111111111111"))
+    .map(event => ({
+      timestampSeconds: Number(event.timestamp),
+      price: Number(event.virtualSolReserves) / Number(event.virtualTokenReserves)
+    }))
+    .filter(item => Number.isSafeInteger(item.timestampSeconds) &&
+      Number.isFinite(item.price) && item.price > 0);
+  const confirmation = calculateReclaimConfirmation({
+    reclaimTimeSeconds: profile.reclaimTime,
+    previousCompletedHigh, nowSeconds: input.evaluatedAt, nextObservationPrices
+  });
+  return evaluateStrictStrategyAudit({
+    candidateAgeSeconds: input.evaluatedAt - input.launchBlockTime,
+    profile, flow,
+    creatorRiskStatus: input.creatorRiskStatus,
+    walletClusterRiskStatus: input.walletClusterRiskStatus,
+    attributionConfidenceBps: null,
+    signalAgeSeconds: confirmation.signalAgeSeconds,
+    nextObservationConfirmed: confirmation.nextObservationConfirmed,
+    executableQuoteAvailable: false,
+    volumeThresholds: null,
+    roundTripCostPct: null
+  }, new Date(input.evaluatedAt * 1_000).toISOString());
+}
 
 function option(name: string, fallback: string): string {
   const prefix = `--${name}=`;
@@ -52,18 +109,25 @@ for (const file of files) {
     solUsdPriceUsd: summary.solUsdReference!.priceUsd!, minimumTradeUsd: 0.01, horizonSeconds: 600
   });
   const outcome = replay.outcome;
+  const strictAudit = replay.firstSetup ? strictAuditForReplay({
+    mint, transactions, launchBlockTime,
+    evaluatedAt: replay.firstSetup.evaluatedAt,
+    solUsdPriceUsd: summary.solUsdReference!.priceUsd!,
+    creatorRiskStatus: replay.firstSetup.creatorSellRiskStatus,
+    walletClusterRiskStatus: replay.firstSetup.walletClusterRiskStatus
+  }) : null;
+  const riskStatus = strictAudit?.decision === "BUY" ? "CLEARED"
+    : strictAudit?.decision === "REJECT" ? "REJECTED" : "UNKNOWN";
   const profitability = outcome && replay.firstSetup
     ? simulateHistoricalProfitability({
         mint, transactions, entryAt: outcome.entryAt,
         entryPriceQuotePerToken: outcome.entryPriceQuotePerToken,
-        horizonSeconds: 600, roundTripCostPct,
-        riskStatus: replay.firstSetup.creatorSellRiskStatus === "REJECT_OBSERVED" || replay.firstSetup.walletClusterRiskStatus === "REJECT_OBSERVED"
-          ? "REJECTED"
-          : replay.firstSetup.riskClearedSetupEligible ? "CLEARED" : "UNKNOWN"
+        horizonSeconds: 600, roundTripCostPct, riskStatus
       })
     : null;
   results.push({
     mint, index: raw.index, replayStatus: replay.status,
+    strictAudit,
     entrySignal: replay.firstSetup ? {
       evaluatedAt: replay.firstSetup.evaluatedAt,
       setupEligible: replay.firstSetup.setupEligible,
@@ -178,7 +242,7 @@ const portfolioCandidates = simulations.map(row => ({
 }));
 const portfolioSimulation = simulatePortfolio(portfolioCandidates);
 const report = {
-  date, strategyVersion: "strict-v1-market-pattern-plus-dynamic-exits",
+  date, strategyVersion: "strict-15-rule-audit-plus-dynamic-exits",
   strategyParameters: {
     entry: {
       minimumImpulsePct: 20, pullbackRangePct: [10, 40],
@@ -189,9 +253,12 @@ const report = {
     },
     risk: {
       creatorSellRiskMustPass: true, completeWalletHistoryRequired: true,
-      completeHolderCensusRequired: true,
+      completeHolderCensusRequired: true, attributionConfidenceFloorBps: 7000,
+      reviewedChronologicalVolumeThresholdsRequired: true,
+      signalFreshnessSeconds: [1, 2], nextObservationConfirmationRequired: true,
       historicalExecutableEntryQuoteRequired: true
     },
+    execution: { maxImpactPerSidePct: 2, maxTaxPerSidePct: 2, maxRoundTripCostPct: 4, maxQuoteAgeMs: 2000, exactSizeBuyAndSellQuotesRequired: true },
     exit: {
       hardStopNetReturnPct: -5, trailingActivationNetReturnPct: 10,
       trailingGivebackPct: 40,
@@ -234,9 +301,9 @@ const report = {
   allProxyProfitFactor: netReturns.length === 0 ? null : grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? null : 0,
   results,
   limitations: [
-    "This is a reserve-price path simulation, not a historical executable-quote backtest.",
+    "The price-path exit replay is a research proxy, not a historical executable-quote backtest. Strict 15-rule decisions are reported separately and only BUY decisions may enter the portfolio ledger.",
     "A 4% maximum round-trip cost is modeled as a symmetric haircut; actual per-trade network, priority, provider, rent and venue costs are not present in the historical artifacts.",
-    "Wallet/holder evidence is not complete in these artifacts. Observed creator/cluster risk rejects and unknown risk are excluded from strict strategy PnL; their price-path results are research-only.",
+    "The strict 15-rule strategy audit is applied. Missing attribution, reviewed volume calibration, executable historical quotes or exact round-trip costs keep candidates on WATCH; observed creator/cluster or other failed rules REJECT them.",
     "Positions still open at the end of the 10-minute observation horizon are marked, not realized exits.",
     "The sample is activity-ranked and is not representative of all launches."
   ]
