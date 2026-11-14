@@ -44,8 +44,8 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 
 const date = option("date", "");
 const batchSize = integer("batch-size", 20, 20);
-const maxCredits = integer("max-credits", 50_000, 50_000);
-const maxNewCredits = integer("max-new-credits", maxCredits, maxCredits);
+const maxCredits = integer("max-credits", 50_000, 300_000);
+const maxNewCredits = integer("max-new-credits", maxCredits, 300_000);
 const maxSignatures = integer("max-signatures", 1_000, 5_000);
 const skipMints = new Set(option("skip-mints", "").split(",").map(value => value.trim()).filter(Boolean));
 const retryIncomplete = option("retry-incomplete", "false") === "true";
