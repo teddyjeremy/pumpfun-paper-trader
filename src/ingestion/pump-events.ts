@@ -164,14 +164,14 @@ function encodeBase58(bytes: Uint8Array): string {
 }
 
 function pumpProgramDataLogs(logs: readonly string[]): string[] {
-  const hasInvocationContext = logs.some(log => /^Program \\S+ invoke \\[\\d+\\]$/.test(log));
+  const hasInvocationContext = logs.some(log => /^Program \S+ invoke \[\d+\]$/.test(log));
   const dataLogs: string[] = [];
   if (!hasInvocationContext) {
     return logs.filter(log => log.includes("Program data: "));
   }
   const stack: string[] = [];
   for (const log of logs) {
-    const invoke = /^Program (\\S+) invoke \\[(\\d+)\\]$/.exec(log);
+    const invoke = /^Program (\S+) invoke \[(\d+)\]$/.exec(log);
     if (invoke) {
       const depth = Number(invoke[2]);
       if (Number.isSafeInteger(depth) && depth > 0) {
@@ -180,7 +180,7 @@ function pumpProgramDataLogs(logs: readonly string[]): string[] {
       }
       continue;
     }
-    const completed = /^Program (\\S+) (?:success|failed:.*)$/.exec(log);
+    const completed = /^Program (\S+) (?:success|failed:.*)$/.exec(log);
     if (completed) {
       const index = stack.lastIndexOf(completed[1]!);
       if (index >= 0) stack.length = index;
@@ -258,7 +258,7 @@ const TRADE_EVENT_DISCRIMINATOR = Uint8Array.from([189, 219, 127, 211, 78, 230, 
 /** Decode Pump.fun TradeEvent payloads using the official IDL field order. */
 export function decodePumpTradeEvents(logs: readonly string[]): PumpTradeEvent[] {
   const events: PumpTradeEvent[] = [];
-  for (const log of logs) {
+  for (const log of pumpProgramDataLogs(logs)) {
     const marker = "Program data: ";
     const markerIndex = log.indexOf(marker);
     if (markerIndex < 0) continue;
