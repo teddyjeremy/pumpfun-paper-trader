@@ -748,13 +748,24 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const leaseValid = await this.heartbeatPostgresWorkerLease();
       if (!leaseValid) {
         this.postgresLeaseHeld = false;
-        this.status.lastError = "PostgreSQL worker lease lost; coordinator stopped fail-closed.";
+        this.status.lastError = this.status.lastError.startsWith("PostgreSQL worker lease heartbeat")
+          ? `${this.status.lastError}; coordinator stopped fail-closed.`
+          : "PostgreSQL worker lease lost; coordinator stopped fail-closed.";
         await this.stop();
         return;
       }
     }
     if (this.status.enabled && this.postgresLeaseHeld) {
       await this.drainHeliusQueue();
+      const leaseAfterDrain = await this.heartbeatPostgresWorkerLease();
+      if (!leaseAfterDrain) {
+        this.postgresLeaseHeld = false;
+        this.status.lastError = this.status.lastError.startsWith("PostgreSQL worker lease heartbeat")
+          ? `${this.status.lastError}; coordinator stopped fail-closed.`
+          : "PostgreSQL worker lease lost after Helius queue processing; coordinator stopped fail-closed.";
+        await this.stop();
+        return;
+      }
       try {
         await this.runScheduledPaperExitCycle();
       } catch (error) {
@@ -769,6 +780,15 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     await this.flushAllAuditSessionsToPostgres();
     await this.flushAllHeliusBackfillArchivesToPostgres();
     if (this.status.enabled && this.postgresLeaseHeld) {
+      const leaseAfterPersistence = await this.heartbeatPostgresWorkerLease();
+      if (!leaseAfterPersistence) {
+        this.postgresLeaseHeld = false;
+        this.status.lastError = this.status.lastError.startsWith("PostgreSQL worker lease heartbeat")
+          ? `${this.status.lastError}; coordinator stopped fail-closed.`
+          : "PostgreSQL worker lease lost after persistence flush; coordinator stopped fail-closed.";
+        await this.stop();
+        return;
+      }
       const now = Date.now();
       const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
       const hasOpenPositions = Boolean(portfolio?.positions.some(position => position.status !== "CLOSED"));
