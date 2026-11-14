@@ -3757,11 +3757,14 @@ export default {
           tradingReady: false, blocker: reason, readinessBlockers: [reason], lastError: reason
         }, { headers: { "cache-control": "no-store" } });
       }
-      if (url.pathname === "/stop" && request.method === "POST") {
+      if ((url.pathname === "/stop" || url.pathname === "/finalize-stop") && request.method === "POST") {
         if (!(await authorized(request, env))) {
           return Response.json({ error: "Unauthorized" }, { status: 401 });
         }
-        return Response.json(await coordinator.pauseWithoutStorage(), { headers: { "cache-control": "no-store" } });
+        const status = url.pathname === "/finalize-stop"
+          ? await coordinator.stop()
+          : await coordinator.pauseWithoutStorage();
+        return Response.json(status, { headers: { "cache-control": "no-store" } });
       }
       return Response.json({ error: reason, tradingReady: false }, { status: 503 });
     }
