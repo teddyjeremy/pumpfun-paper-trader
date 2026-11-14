@@ -45,12 +45,16 @@ jobs:
           npm run backtest:profitability -- --date=2026-11-11 --round-trip-cost-pct=4
           npm run backtest:profitability -- --date=2026-11-12 --round-trip-cost-pct=4
 
-      - name: Save modeled profitability reports
+      - name: Analyze per-rule blockers and one-rule relaxation candidates
+        run: npm run backtest:rule-sensitivity -- --dates=2026-11-11,2026-11-12
+
+      - name: Save modeled profitability and rule sensitivity reports
         uses: actions/upload-artifact@v4
         with:
           name: pump-profitability-nov11-nov12
           path: |
             artifacts/pump-profitability-backtest-2026-11-11.json
             artifacts/pump-profitability-backtest-2026-11-12.json
+            artifacts/pump-rule-sensitivity-2026-11-11-2026-11-12.json
           if-no-files-found: error
           retention-days: 30
