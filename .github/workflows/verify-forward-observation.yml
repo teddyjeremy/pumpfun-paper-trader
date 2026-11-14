@@ -1,5 +1,5 @@
 name: Verify forward paper observation session
-# Re-run after bounded queue drains and 120-second PostgreSQL lease renewal.
+# Recheck after Neon outbox retry and persistence diagnostics deployment.
 
 on:
   push:
