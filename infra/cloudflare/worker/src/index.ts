@@ -1813,6 +1813,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           decisionAt: previousRefs?.decisionAt ??
             (decisionPriceQuotePerToken !== null && decisionPriceQuotePerToken > 0 ? evaluated.evaluatedAt : null)
         });
+        this.candidatePriceRefsCache.delete(`${mint}:${profile.quoteMint}`);
       }
       for (const rule of evaluated.rules) {
         await this.appendAudit("RULE_EVALUATION", mint, { triggerSignature, ...rule },
