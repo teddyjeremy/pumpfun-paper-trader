@@ -19,12 +19,20 @@ jobs:
           PAPER_WORKER_URL: https://pumpfun-paper-worker.teddyjeremy12.workers.dev
         run: |
           set -euo pipefail
-          response="$(curl --silent --show-error --fail-with-body \
-            --max-time 20 \
-            -X POST "$PAPER_WORKER_URL/finalize-stop" \
-            -H "Authorization: Bearer $PAPER_WORKER_CONTROL_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{}')"
+          response=""
+          for attempt in 1 2 3; do
+            if response="$(curl --silent --show-error --fail-with-body \
+              --max-time 20 \
+              -X POST "$PAPER_WORKER_URL/finalize-stop" \
+              -H "Authorization: Bearer $PAPER_WORKER_CONTROL_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{}')"; then
+              break
+            fi
+            echo "Finalization attempt $attempt failed; retrying after 30 seconds."
+            sleep 30
+          done
+          test -n "$response"
           echo "$response" | node -e '
             let s=""; process.stdin.on("data", c => s+=c).on("end", () => {
               const status=JSON.parse(s);
