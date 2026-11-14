@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - ".github/workflows/rerank-historical-backtest.yml"
+      - ".github/workflows/rerank-historical-backtest-2026-11-11.yml"
   workflow_dispatch:
     inputs:
       date:
