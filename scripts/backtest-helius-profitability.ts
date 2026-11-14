@@ -97,7 +97,8 @@ function simulatePortfolio(rows: Array<Record<string, unknown>>) {
   let topUps = 0;
   let realizedPnlUsd = 0;
   let highWaterGrowthEquityUsd = startingBankrollUsd;
-  let maximumOpenPositions = 1;
+  let maximumConcurrentSlotsAvailable = 1;
+  let maxOpenPositionsObserved = 0;
   let skippedForCapacity = 0;
   let skippedForCash = 0;
   let tradesEntered = 0;
@@ -130,7 +131,7 @@ function simulatePortfolio(rows: Array<Record<string, unknown>>) {
       : 1 + Math.floor(Math.log2(highWaterGrowthEquityUsd / 5));
     const stakeUsd = Math.min(100, initialStakeUsd * Math.pow(1.5, levels));
     const maxPositions = Math.min(100, 1 + levels);
-    maximumOpenPositions = Math.max(maximumOpenPositions, maxPositions);
+    maximumConcurrentSlotsAvailable = Math.max(maximumConcurrentSlotsAvailable, maxPositions);
     if (open.length >= maxPositions) { skippedForCapacity += 1; continue; }
     const preEntryEquity = cash + open.reduce((sum, item) => sum + item.stakeUsd, 0);
     if (preEntryEquity < topUpBelowUsd) {
@@ -141,6 +142,7 @@ function simulatePortfolio(rows: Array<Record<string, unknown>>) {
     cash -= stakeUsd;
     open.push({ entryAt, exitAt, stakeUsd, netReturnPct });
     tradesEntered += 1;
+    maxOpenPositionsObserved = Math.max(maxOpenPositionsObserved, open.length);
     equityPoints.push(cash + open.reduce((sum, item) => sum + item.stakeUsd, 0));
   }
   closeDue(Number.MAX_SAFE_INTEGER);
@@ -161,7 +163,8 @@ function simulatePortfolio(rows: Array<Record<string, unknown>>) {
     realizedPnlUsd, unrealizedPnlUsd,
     tradesEntered,
     openPositionsAtEnd: open.length,
-    maxConcurrentPositionsObserved: maximumOpenPositions,
+    maxConcurrentSlotsAvailable: maximumConcurrentSlotsAvailable,
+    maxOpenPositionsObserved,
     skippedForCapacity, skippedForCash, maxDrawdownPct,
     stakePolicy: "Starts at $1; increases 50% at each doubling from $5 growth equity; maximum $100. Concurrent slots increase by one at each doubling.",
     note: "Only risk-cleared candidate rows are admitted. Open-at-horizon positions are marked, not realized. This portfolio ledger inherits the reserve-price proxy and modeled-cost limitations of each trade."
