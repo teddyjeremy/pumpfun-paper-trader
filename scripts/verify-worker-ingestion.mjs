@@ -52,7 +52,12 @@ try {
   const healthResponse = await fetch(new URL("/health", workerUrl), {
     signal: AbortSignal.timeout(10_000), cache: "no-store"
   });
-  const health = await healthResponse.json();
+  const healthText = await healthResponse.text();
+  let health;
+  try { health = healthText ? JSON.parse(healthText) : {}; }
+  catch {
+    throw new Error(`Worker /health returned non-JSON HTTP ${healthResponse.status}; content-type=${healthResponse.headers.get("content-type") ?? "unknown"}; body=${healthText.slice(0, 180)}`);
+  }
   check("Worker public health", healthResponse.ok && health.service === "pumpfun-paper-worker",
     `HTTP ${healthResponse.status}; mode=${health.mode ?? "unknown"}`);
   if (!healthResponse.ok || health.service !== "pumpfun-paper-worker") throw new Error("Cloudflare Worker health check failed.");
