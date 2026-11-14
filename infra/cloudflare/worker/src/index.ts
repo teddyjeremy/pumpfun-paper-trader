@@ -25,6 +25,11 @@ interface AuditSessionMeta {
   topUpAmountUsd: number; topUpThresholdUsd: number; topUpCount: number;
   totalTopUpsUsd: number;
 }
+interface CandidatePriceState {
+  sessionId: string;
+  trackers: Record<string, CandidatePriceTracker & { sessionId: string }>;
+  processedTradeIds: string[];
+}
 const AUDIT_PAGE_SIZE = 100;
 import {
   buildCandidateLogsSubscribe, buildHeliusWebSocketUrl, fetchAndVerifyPumpTransaction,
@@ -210,6 +215,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private heliusBucket = new TokenBucket(2, 2);
   private drainingHelius = false;
   private verifiedTransactions: Array<VerifiedPumpTransaction & { receivedAt?: string }> = [];
+  private candidatePriceTrackers: Record<string, CandidatePriceTracker & { sessionId: string }> = {};
+  private processedCandidateTradeIds = new Set<string>();
+  private candidatePriceRefsCache = new Map<string, {
+    decisionPriceQuotePerToken: number | null; decisionAt: string | null;
+    discoveryPriceQuotePerToken: number | null;
+  }>();
   private walletLinkSnapshots: Record<string, WalletLinkEvidenceSnapshot> = {};
   private walletHoldingsByMint: Record<string, WalletHoldingEvidence[]> = {};
   private holderRiskSnapshots: Record<string, HolderConcentrationResult> = {};
@@ -879,6 +890,18 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     ]);
     if (savedStatus) this.status = { ...INITIAL_STATUS, ...savedStatus };
     this.activeSessionId = activeSessionId ?? null;
+    this.candidatePriceTrackers = {};
+    this.processedCandidateTradeIds = new Set();
+    this.candidatePriceRefsCache.clear();
+    if (this.activeSessionId) {
+      const candidatePriceState = await this.ctx.storage.get<CandidatePriceState>(
+        `candidate_price_state:${this.activeSessionId}`
+      );
+      if (candidatePriceState?.sessionId === this.activeSessionId) {
+        this.candidatePriceTrackers = candidatePriceState.trackers ?? {};
+        this.processedCandidateTradeIds = new Set((candidatePriceState.processedTradeIds ?? []).slice(-5_000));
+      }
+    }
     this.walletLinkSnapshots = Object.fromEntries(Object.entries(savedWalletLinks ?? {}).map(([mint, value]) => {
       if ("fundingEvidence" in value) return [mint, value as WalletLinkEvidenceSnapshot];
       const fundingEvidence = value as CompleteWalletFundingEvidenceResult;
@@ -1001,6 +1024,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       // sessions remain intact in their own journal and candidate namespaces.
       this.discovery = emptyDiscoveryStore();
       this.verifiedTransactions = [];
+      this.candidatePriceTrackers = {};
+      this.processedCandidateTradeIds.clear();
+      this.candidatePriceRefsCache.clear();
       this.heliusState = emptyHeliusMonitorState();
       this.walletLinkSnapshots = {};
       this.walletHoldingsByMint = {};
@@ -1032,6 +1058,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         await txn.put("wallet_holdings_by_mint", {});
         await txn.put("holder_risk_snapshots", {});
         await txn.put("risk_evidence_attempted_at_by_mint", {});
+        await txn.put(`candidate_price_state:${sessionId}`, {
+          sessionId, trackers: {}, processedTradeIds: []
+        } satisfies CandidatePriceState);
         await txn.put(`helius_backfill_mints:${sessionId}`, []);
         await txn.put(`paper_bankroll:${sessionId}`, createBankrollState(2.70));
         await txn.put(`paper_portfolio:${sessionId}`, createPaperPortfolio(2.70));
@@ -1986,37 +2015,37 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   ): Promise<void> {
     const sessionId = this.activeSessionId;
     if (!sessionId) return;
-    const processedKey = `processed_trade:${sessionId}:${trade.signature}:${tradeIndex}`;
-    await this.ctx.storage.transaction(async txn => {
-      if (await txn.get<boolean>(processedKey)) return;
-      const trackerKey = `candidate_price:${sessionId}:${trade.mint}:${trade.quoteMint}`;
-      const previous = await txn.get<CandidatePriceTracker>(trackerKey) ?? null;
-      const refs = await txn.get<{
+    const processedId = `${trade.signature}:${tradeIndex}`;
+    if (this.processedCandidateTradeIds.has(processedId)) return;
+    const trackerKey = `${trade.mint}:${trade.quoteMint}`;
+    const legacyTrackerKey = `candidate_price:${sessionId}:${trade.mint}:${trade.quoteMint}`;
+    const previous = this.candidatePriceTrackers[trackerKey] ??
+      await this.ctx.storage.get<CandidatePriceTracker>(legacyTrackerKey) ?? null;
+    let refs = this.candidatePriceRefsCache.get(trackerKey);
+    if (!refs) {
+      refs = await this.ctx.storage.get<{
         decisionPriceQuotePerToken: number | null; decisionAt: string | null;
         discoveryPriceQuotePerToken: number | null;
-      }>(`candidate_price_refs:${sessionId}:${trade.mint}:${trade.quoteMint}`);
-      const tracker = { ...updateCandidatePriceTracker(previous, {
-        ...trade, decisionPriceQuotePerToken: refs?.decisionPriceQuotePerToken ?? null,
-        decisionAt: refs?.decisionAt ?? null,
-        discoveryPriceQuotePerToken: refs?.discoveryPriceQuotePerToken ?? null
-      }), sessionId };
-      const metaKey = `audit_session:${sessionId}`;
-      const meta = await txn.get<AuditSessionMeta>(metaKey);
-      if (!meta) throw new Error("Audit session metadata missing.");
-      const sequence = meta.eventCount + 1;
-      const pageNumber = Math.floor((sequence - 1) / AUDIT_PAGE_SIZE);
-      const pageKey = `audit_events:${sessionId}:${String(pageNumber).padStart(8, "0")}`;
-      const page = await txn.get<StoredAuditEvent[]>(pageKey) ?? [];
-      const eventId = `candidate-price:${trade.signature}:${tradeIndex}`;
-      page.push({ sessionId, sequence, eventId, kind: "CANDIDATE_OUTCOME",
-        occurredAt: trade.timestamp, mint: trade.mint,
-        strategyVersion: meta.strategyVersion, data: jsonSafe(tracker) });
-      await txn.put(pageKey, page);
-      await txn.put(`audit_event_id:${sessionId}:${eventId}`, sequence);
-      await txn.put(metaKey, { ...meta, eventCount: sequence });
-      await txn.put(trackerKey, tracker);
-      await txn.put(processedKey, true);
+      }>(`candidate_price_refs:${sessionId}:${trade.mint}:${trade.quoteMint}`) ?? {
+        decisionPriceQuotePerToken: null, decisionAt: null, discoveryPriceQuotePerToken: null
+      };
+      this.candidatePriceRefsCache.set(trackerKey, refs);
+    }
+    const tracker = updateCandidatePriceTracker(previous, {
+      ...trade,
+      decisionPriceQuotePerToken: refs.decisionPriceQuotePerToken,
+      decisionAt: refs.decisionAt,
+      discoveryPriceQuotePerToken: refs.discoveryPriceQuotePerToken
     });
+    this.candidatePriceTrackers[trackerKey] = { ...tracker, sessionId };
+    this.processedCandidateTradeIds.add(processedId);
+    while (this.processedCandidateTradeIds.size > 5_000) {
+      const oldest = this.processedCandidateTradeIds.values().next().value;
+      if (oldest === undefined) break;
+      this.processedCandidateTradeIds.delete(oldest);
+    }
+    // Price samples are checkpointed together, not written as five DO rows per trade.
+    this.markDirty();
   }
 
   async listCandidateOutcomes(requestedSessionId?: string, after = 0, limit = 100): Promise<unknown> {
@@ -2025,12 +2054,19 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (!sessionId) return { sessionId: null, outcomes: [], nextAfter: null };
     const safeAfter = Number.isSafeInteger(after) && after >= 0 ? after : 0;
     const safeLimit = Number.isSafeInteger(limit) ? Math.max(1, Math.min(100, limit)) : 100;
-    const [trackers, candidates] = await Promise.all([
+    const [legacyTrackers, candidates, savedPriceState] = await Promise.all([
       this.ctx.storage.list<CandidatePriceTracker & { sessionId: string }>({ prefix: `candidate_price:${sessionId}:` }),
-      this.ctx.storage.list<Record<string, unknown>>({ prefix: `candidate_seen:${sessionId}:` })
+      this.ctx.storage.list<Record<string, unknown>>({ prefix: `candidate_seen:${sessionId}:` }),
+      this.ctx.storage.get<CandidatePriceState>(`candidate_price_state:${sessionId}`)
     ]);
+    const combinedTrackers = new Map<string, CandidatePriceTracker & { sessionId: string }>();
+    for (const tracker of legacyTrackers.values()) combinedTrackers.set(`${tracker.mint}:${tracker.quoteMint}`, tracker);
+    for (const [key, tracker] of Object.entries(savedPriceState?.trackers ?? {})) combinedTrackers.set(key, tracker);
+    if (this.activeSessionId === sessionId) {
+      for (const [key, tracker] of Object.entries(this.candidatePriceTrackers)) combinedTrackers.set(key, tracker);
+    }
     const byMint = new Map<string, CandidatePriceTracker[]>();
-    for (const tracker of trackers.values()) {
+    for (const tracker of combinedTrackers.values()) {
       const items = byMint.get(tracker.mint) ?? [];
       items.push(tracker);
       byMint.set(tracker.mint, items);
@@ -3642,6 +3678,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.discovery.lastPersistedAt = snapshot.lastPersistedAt;
     this.syncCounts();
     const statusSnapshot = { ...this.status };
+    const candidatePriceStateWrite = this.activeSessionId ? {
+      [`candidate_price_state:${this.activeSessionId}`]: {
+        sessionId: this.activeSessionId,
+        trackers: this.candidatePriceTrackers,
+        processedTradeIds: [...this.processedCandidateTradeIds].slice(-5_000)
+      } satisfies CandidatePriceState
+    } : {};
     const write = this.persistChain.then(() => this.ctx.storage.put({
       status: statusSnapshot,
       discovery_state: snapshot,
@@ -3650,7 +3693,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       wallet_link_snapshots: this.walletLinkSnapshots,
       wallet_holdings_by_mint: this.walletHoldingsByMint,
       holder_risk_snapshots: this.holderRiskSnapshots,
-      risk_evidence_attempted_at_by_mint: this.riskEvidenceAttemptedAtByMint
+      risk_evidence_attempted_at_by_mint: this.riskEvidenceAttemptedAtByMint,
+      ...candidatePriceStateWrite
     }));
     this.persistChain = write.catch(() => undefined);
     try {
