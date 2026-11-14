@@ -32,6 +32,8 @@ jobs:
               const blockers = Array.isArray(s.readinessBlockers) ? s.readinessBlockers : [];
               const calibrationBlocked = blockers.some(x => String(x).includes("Reviewed chronological volume calibration is not configured"));
               const leaseBlocked = blockers.some(x => String(x).includes("Fenced PostgreSQL Worker lease is not held"));
+              const persistenceError = typeof s.lastError === "string" &&
+                s.lastError.includes("Paper event ingestion failed");
               const checks = {
                 paperMode: s.mode === "paper",
                 sessionEnabled: s.enabled === true,
@@ -39,6 +41,7 @@ jobs:
                 discoverySubscribed: s.subscriptionsSent === true,
                 heliusConnected: s.heliusConnected === true,
                 persistenceLeaseHeld: !leaseBlocked,
+                persistenceHealthy: !persistenceError,
                 simulatedEntriesLocked: s.tradingReady === false && calibrationBlocked
               };
               process.stdout.write(JSON.stringify({
