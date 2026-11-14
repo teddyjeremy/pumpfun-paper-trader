@@ -259,7 +259,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     const response = await this.postPostgresIngest("/internal/worker-lease", {
       action: "acquire", leaseName: "pumpfun-paper-trader-coordinator",
-      ownerId: this.postgresLeaseOwnerId, ttlSeconds: 45
+      ownerId: this.postgresLeaseOwnerId, ttlSeconds: 120
     });
     if (!response.ok) {
       let detail = `HTTP ${response.status}`;
@@ -286,12 +286,22 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     try {
       const response = await this.postPostgresIngest("/internal/worker-lease", {
         action: "heartbeat", leaseName: "pumpfun-paper-trader-coordinator",
-        ownerId: this.postgresLeaseOwnerId, ttlSeconds: 45
+        ownerId: this.postgresLeaseOwnerId, ttlSeconds: 120
       });
-      if (!response.ok) return false;
+      if (!response.ok) {
+        this.status.lastError = `PostgreSQL worker lease heartbeat was rejected (HTTP ${response.status}).`;
+        return false;
+      }
       const result = await response.json() as { acquired?: boolean };
-      return result.acquired === true;
-    } catch {
+      if (result.acquired !== true) {
+        this.status.lastError = "PostgreSQL worker lease heartbeat was not acknowledged by its current owner.";
+        return false;
+      }
+      return true;
+    } catch (error) {
+      this.status.lastError = error instanceof Error
+        ? `PostgreSQL worker lease heartbeat failed: ${error.message.slice(0, 160)}`
+        : "PostgreSQL worker lease heartbeat failed due to a network error.";
       return false;
     }
   }
@@ -762,7 +772,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const now = Date.now();
       const portfolio = await this.getPaperPortfolio() as PaperPortfolioState | null;
       const hasOpenPositions = Boolean(portfolio?.positions.some(position => position.status !== "CLOSED"));
-      const nextCycleDelayMs = hasOpenPositions ? 5_000 : 15_000;
+      const hasPendingHeliusQueue = this.heliusState.queue.length > 0;
+      const nextCycleDelayMs = hasPendingHeliusQueue || hasOpenPositions ? 5_000 : 15_000;
       const pendingRetryAt = this.heliusState.queue
         .map(item => item.retryAfterAt ? Date.parse(item.retryAfterAt) : Number.NaN)
         .filter(at => Number.isFinite(at) && at > now)
@@ -2906,11 +2917,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     if (this.drainingHelius || !this.status.enabled) return;
     this.drainingHelius = true;
     let activeWork: HeliusSignatureWork | null = null;
+    let processedItems = 0;
+    const maxItemsPerDrain = 5;
     try {
-      while (this.status.enabled) {
+      while (this.status.enabled && processedItems < maxItemsPerDrain) {
         if (this.heliusState.queue.length === 0) {
           const advancedBackfill = await this.advanceHistoricalBackfill();
           if (!advancedBackfill && this.heliusState.queue.length === 0) break;
+          if (advancedBackfill) processedItems += 1;
         }
         if (this.heliusState.queue.length === 0) continue;
         if (!this.heliusBucket.tryTake()) {
@@ -3013,6 +3027,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
           status: this.status
         });
         activeWork = null;
+        processedItems += 1;
+      }
+      if (this.status.enabled && processedItems >= maxItemsPerDrain) {
+        await this.ctx.storage.setAlarm(Date.now() + 5_000);
       }
       await this.scanIndependentHeliusGapHistory().catch(() => undefined);
       await this.decodeIndependentHeliusGapHistory().catch(() => undefined);
