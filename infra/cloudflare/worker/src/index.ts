@@ -1265,6 +1265,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.status.monitoredCandidates = this.heliusState.subscriptions.length;
     this.status.queuedHeliusSignatures = this.heliusState.queue.length;
     const readiness = evaluateTradingReadiness({
+      workerPaused: this.storagePaused,
       coordinatorEnabled: this.status.enabled,
       activeSession: Boolean(this.activeSessionId),
       discoveryConnected: this.status.connected,
