@@ -45,7 +45,7 @@ jobs:
           npm run backtest:profitability -- --date=2026-11-11 --round-trip-cost-pct=4
           npm run backtest:profitability -- --date=2026-11-12 --round-trip-cost-pct=4
 
-      - name: Analyze per-rule blockers and one-rule relaxation candidates
+      - name: Recompute rule blocker counts and single-rule counterfactuals
         run: npm run backtest:rule-sensitivity -- --dates=2026-11-11,2026-11-12
 
       - name: Save modeled profitability and rule sensitivity reports
