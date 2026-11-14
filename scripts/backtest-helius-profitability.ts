@@ -179,8 +179,8 @@ const portfolioCandidates = simulations.map(row => ({
 const portfolioSimulation = simulatePortfolio(portfolioCandidates);
 const report = {
   date, strategyVersion: "strict-v1-market-pattern-plus-dynamic-exits",
-  sourceCoinCount: results.length, simulatedCandidates: simulations.length,
-  closedByStrategy: closed.length, openAtHorizon: open.length,
+  sourceCoinCount: results.length, pricePathCandidates: simulations.length,
+  proxyExitTriggers: closed.length, proxyOpenAtHorizon: open.length,
   riskClearedCandidates: strictEligible.length,
   riskRejectedCandidates: simulations.filter(row => row.riskEvidence === "REJECTED").length,
   riskUnverifiedCandidates: simulations.filter(row => row.riskEvidence === "UNVERIFIED").length,
@@ -190,21 +190,24 @@ const report = {
     trades: strictReturns.length,
     modeledNetReturnPct: sum(strictReturns),
     modeledPnlUsdAtOneDollarStake: sum(strictReturns) / 100,
-    winRate: strictReturns.length ? strictReturns.filter(value => value > 0).length / strictReturns.length : null
+    winRate: strictReturns.length ? strictReturns.filter(value => value > 0).length / strictReturns.length : null,
+    profitFactor: strictReturns.length === 0 ? null : (() => { const wins = sum(strictReturns.filter(value => value > 0)); const losses = Math.abs(sum(strictReturns.filter(value => value < 0))); return losses > 0 ? wins / losses : wins > 0 ? null : 0; })()
   },
   researchOnly: {
     trades: researchReturns.length,
     modeledNetReturnPct: sum(researchReturns),
     modeledPnlUsdAtOneDollarStake: sum(researchReturns) / 100,
-    winRate: researchReturns.length ? researchReturns.filter(value => value > 0).length / researchReturns.length : null
+    winRate: researchReturns.length ? researchReturns.filter(value => value > 0).length / researchReturns.length : null,
+    expectancyPctPerCandidate: researchReturns.length ? sum(researchReturns) / researchReturns.length : null,
+    profitFactor: researchReturns.length === 0 ? null : (() => { const wins = sum(researchReturns.filter(value => value > 0)); const losses = Math.abs(sum(researchReturns.filter(value => value < 0))); return losses > 0 ? wins / losses : wins > 0 ? null : 0; })()
   },
   portfolioSimulation,
   roundTripCostAssumptionPct: roundTripCostPct,
-  modeledNetReturnPct: netReturns.reduce((sum, value) => sum + value, 0),
-  winRate: netReturns.length ? wins / netReturns.length : null,
-  wins, losses, breakeven: netReturns.length - wins - losses,
-  expectancyPctPerCandidate: netReturns.length ? netReturns.reduce((sum, value) => sum + value, 0) / netReturns.length : null,
-  profitFactor: netReturns.length === 0 ? null : grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? null : 0,
+  allProxyModeledNetReturnPct: sum(netReturns),
+  allProxyWinRate: netReturns.length ? wins / netReturns.length : null,
+  allProxyWins: wins, allProxyLosses: losses, allProxyBreakeven: netReturns.length - wins - losses,
+  allProxyExpectancyPctPerCandidate: netReturns.length ? sum(netReturns) / netReturns.length : null,
+  allProxyProfitFactor: netReturns.length === 0 ? null : grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? null : 0,
   results,
   limitations: [
     "This is a reserve-price path simulation, not a historical executable-quote backtest.",
@@ -218,10 +221,10 @@ const outputPath = resolve(artifacts, `pump-profitability-backtest-${date}.json`
 await mkdir(artifacts, { recursive: true });
 await writeFile(outputPath, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
 process.stdout.write(JSON.stringify({
-  date, sourceCoinCount: report.sourceCoinCount, simulatedCandidates: report.simulatedCandidates,
-  closedByStrategy: report.closedByStrategy, openAtHorizon: report.openAtHorizon,
+  date, sourceCoinCount: report.sourceCoinCount, pricePathCandidates: report.pricePathCandidates,
+  proxyExitTriggers: report.proxyExitTriggers, proxyOpenAtHorizon: report.proxyOpenAtHorizon,
   riskClearedCandidates: report.riskClearedCandidates,
   riskUnverifiedCandidates: report.riskUnverifiedCandidates,
-  winRate: report.winRate, expectancyPctPerCandidate: report.expectancyPctPerCandidate,
-  profitFactor: report.profitFactor, artifact: outputPath
+  allProxyWinRate: report.allProxyWinRate, allProxyExpectancyPctPerCandidate: report.allProxyExpectancyPctPerCandidate,
+  allProxyProfitFactor: report.allProxyProfitFactor, artifact: outputPath
 }, null, 2) + "\n");
