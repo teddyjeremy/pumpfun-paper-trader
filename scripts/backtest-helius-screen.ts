@@ -118,6 +118,6 @@ process.stdout.write(JSON.stringify({
   minSuccessfulSignatures, minActiveTimeBuckets, screeningCreditsUsed: artifact.creditsUsed,
   candidateIndexes: artifact.selectedLaunchIndexes,
   artifact: path,
-  note: `${discovery.status === "INCOMPLETE" ? "PARTIAL DISCOVERY: future/unscanned time buckets are not represented; this is not a full-day sample. " : ""}Signature activity is only a cheap pre-screen proxy. It does not prove unique buyers, buy direction, volume, price movement, risk clearance, or profitability. Detailed decode/replay is required for selected candidates."
+  note: `${discovery.status === "INCOMPLETE" ? "PARTIAL DISCOVERY: future/unscanned time buckets are not represented; this is not a full-day sample. " : ""}Signature activity is only a cheap pre-screen proxy. It does not prove unique buyers, buy direction, volume, price movement, risk clearance, or profitability. Detailed decode/replay is required for selected candidates.`
 }, null, 2) + "\n");
 if (artifact.status !== "COMPLETE") process.exitCode = 2;
