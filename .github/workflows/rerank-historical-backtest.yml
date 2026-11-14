@@ -42,7 +42,7 @@ jobs:
           name: pump-backtest-state-${{ env.BACKTEST_DATE }}
           path: artifacts
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.inputs.source_run_id }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
 
       - name: Validate restored checkpoint and dataset
         run: |
