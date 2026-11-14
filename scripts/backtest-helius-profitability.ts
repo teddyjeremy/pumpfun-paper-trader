@@ -57,7 +57,9 @@ for (const file of files) {
         mint, transactions, entryAt: outcome.entryAt,
         entryPriceQuotePerToken: outcome.entryPriceQuotePerToken,
         horizonSeconds: 600, roundTripCostPct,
-        riskCleared: replay.firstSetup.riskClearedSetupEligible
+        riskStatus: replay.firstSetup.creatorSellRiskStatus === "REJECT_OBSERVED" || replay.firstSetup.walletClusterRiskStatus === "REJECT_OBSERVED"
+          ? "REJECTED"
+          : replay.firstSetup.riskClearedSetupEligible ? "CLEARED" : "UNKNOWN"
       })
     : null;
   results.push({
@@ -80,12 +82,40 @@ const wins = netReturns.filter(value => value > 0).length;
 const losses = netReturns.filter(value => value < 0).length;
 const grossWins = netReturns.filter(value => value > 0).reduce((sum, value) => sum + value, 0);
 const grossLosses = Math.abs(netReturns.filter(value => value < 0).reduce((sum, value) => sum + value, 0));
+const strictEligible = simulations.filter(row => row.riskEvidence === "CLEARED");
+const researchOnly = simulations.filter(row => row.riskEvidence !== "CLEARED");
+const strictReturns = strictEligible.map(row => Number(row.modeledNetReturnPct)).filter(Number.isFinite);
+const researchReturns = researchOnly.map(row => Number(row.modeledNetReturnPct)).filter(Number.isFinite);
+const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 const report = {
   date, strategyVersion: "strict-v1-market-pattern-plus-dynamic-exits",
   sourceCoinCount: results.length, simulatedCandidates: simulations.length,
   closedByStrategy: closed.length, openAtHorizon: open.length,
-  riskClearedCandidates: simulations.filter(row => row.riskEvidence === "CLEARED").length,
+  riskClearedCandidates: strictEligible.length,
+  riskRejectedCandidates: simulations.filter(row => row.riskEvidence === "REJECTED").length,
   riskUnverifiedCandidates: simulations.filter(row => row.riskEvidence === "UNVERIFIED").length,
+  strictStrategy: {
+    status: "EXECUTION_GRADE_NOT_ESTABLISHED",
+    trades: strictReturns.length,
+    modeledNetReturnPct: sum(strictReturns),
+    modeledPnlUsdAtOneDollarStake: sum(strictReturns) / 100,
+    winRate: strictReturns.length ? strictReturns.filter(value => value > 0).length / strictReturns.length : null
+  },
+  researchOnly: {
+    trades: researchReturns.length,
+    modeledNetReturnPct: sum(researchReturns),
+    modeledPnlUsdAtOneDollarStake: sum(researchReturns) / 100,
+    winRate: researchReturns.length ? researchReturns.filter(value => value > 0).length / researchReturns.length : null
+  },
+  portfolioSizing: {
+    startingBankrollUsd: 2.70,
+    initialStakeUsd: 1,
+    initialMaxConcurrentPositions: 1,
+    stakeGrowthPerPortfolioDoubling: 1.5,
+    maxStakeUsd: 100,
+    simulated: false,
+    reason: "Portfolio-level concurrency and compounding are not applied to reserve-price proxy candidates; only risk-cleared, execution-grade trades may enter the authoritative portfolio simulation."
+  },
   roundTripCostAssumptionPct: roundTripCostPct,
   modeledNetReturnPct: netReturns.reduce((sum, value) => sum + value, 0),
   winRate: netReturns.length ? wins / netReturns.length : null,
@@ -96,7 +126,7 @@ const report = {
   limitations: [
     "This is a reserve-price path simulation, not a historical executable-quote backtest.",
     "A 4% maximum round-trip cost is modeled as a symmetric haircut; actual per-trade network, priority, provider, rent and venue costs are not present in the historical artifacts.",
-    "Wallet/holder evidence is not complete in these artifacts. Risk-unverified candidates are research-only and must not be treated as strategy-approved trades.",
+    "Wallet/holder evidence is not complete in these artifacts. Observed creator/cluster risk rejects and unknown risk are excluded from strict strategy PnL; their price-path results are research-only.",
     "Positions still open at the end of the 10-minute observation horizon are marked, not realized exits.",
     "The sample is activity-ranked and is not representative of all launches."
   ]
