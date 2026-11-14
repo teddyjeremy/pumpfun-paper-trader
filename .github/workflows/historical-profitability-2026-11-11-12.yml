@@ -1,0 +1,54 @@
+name: Historical strategy profitability — Nov 11–12
+
+on:
+  push:
+    paths:
+      - ".github/workflows/historical-profitability-2026-11-11-12.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  profitability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+
+      - name: Download completed Nov 11 and Nov 12 historical coin datasets
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-11-retried
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 43572892318
+          path: artifacts
+
+      - name: Download completed Nov 12 historical coin dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-12-retried
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 43572892318
+          path: artifacts
+
+      - name: Run the strategy exit replay on both historical days
+        run: |
+          npm run backtest:profitability -- --date=2026-11-11 --round-trip-cost-pct=4
+          npm run backtest:profitability -- --date=2026-11-12 --round-trip-cost-pct=4
+
+      - name: Save modeled profitability reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-profitability-nov11-nov12
+          path: |
+            artifacts/pump-profitability-backtest-2026-11-11.json
+            artifacts/pump-profitability-backtest-2026-11-12.json
+          if-no-files-found: error
+          retention-days: 30
