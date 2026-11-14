@@ -5,15 +5,18 @@ import { PumpFunCoordinator } from "../infra/cloudflare/worker/src/index.js";
 class MemoryDurableStorage {
   private values = new Map<string, unknown>();
   private transactionChain: Promise<void> = Promise.resolve();
+  writeCount = 0;
   async get<T>(key: string): Promise<T | undefined> {
     return this.values.get(key) as T | undefined;
   }
   async put<T>(keyOrValues: string | Record<string, unknown>, value?: T): Promise<void> {
     if (typeof keyOrValues === "string") {
+      this.writeCount += 1;
       this.values.set(keyOrValues, structuredClone(value));
       return;
     }
     for (const [key, item] of Object.entries(keyOrValues)) {
+      this.writeCount += 1;
       this.values.set(key, structuredClone(item));
     }
   }
@@ -326,18 +329,22 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
       quoteAmount: "1000000000", tokenAmount: "1000000",
       timestamp: "2026-11-14T07:00:00.000Z", signature: "7".repeat(64), isBuy: true
     };
-    await coordinator.recordCandidateTradePrice(trade, 0);
     const trackerKey = `${mint}:${trade.quoteMint}`;
+    for (let i = 0; i < 499; i += 1) {
+      await coordinator.recordCandidateTradePrice({ ...trade, signature: String(i).padStart(64, "0") }, 0);
+    }
+    expect(storage.writeCount).toBe(0);
     expect(await storage.get(`candidate_price:${sessionId}:${mint}:${trade.quoteMint}`)).toBeUndefined();
     await coordinator.recordCandidateTradePrice(trade, 0);
-    await coordinator.persist();
+    await (coordinator as unknown as { persistChain: Promise<unknown> }).persistChain;
     const saved = await storage.get<{
       sessionId: string; trackers: Record<string, { sampleCount?: number }>;
       processedTradeIds: string[];
     }>(`candidate_price_state:${sessionId}`);
     expect(saved?.sessionId).toBe(sessionId);
     expect(saved?.trackers[trackerKey]).toBeDefined();
-    expect(saved?.processedTradeIds).toEqual([`${trade.signature}:0`]);
+    expect(saved?.processedTradeIds).toHaveLength(500);
+    expect(storage.writeCount).toBe(9);
   });
 
   it("does not recover a gap while a successful transaction lacks Neon archive acknowledgement", async () => {
