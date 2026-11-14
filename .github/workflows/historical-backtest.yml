@@ -21,7 +21,7 @@ on:
       previous_run_id:
         description: "Previous run ID containing pump-backtest-state for this date"
         required: false
-        default: "43507464167"
+        default: "43560217053"
         type: string
 
 permissions:
@@ -34,12 +34,13 @@ concurrency:
 
 jobs:
   replay:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
       HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
       BACKTEST_DATE: ${{ github.event.inputs.date || '2026-11-12' }}
-      PREVIOUS_RUN_ID: ${{ github.event.inputs.previous_run_id || '43507464167' }}
+      PREVIOUS_RUN_ID: ${{ github.event.inputs.previous_run_id || '43560217053' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
