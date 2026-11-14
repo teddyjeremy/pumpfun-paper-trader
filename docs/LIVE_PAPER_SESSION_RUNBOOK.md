@@ -1,6 +1,6 @@
 # Live paper-session runbook
 
-Last reviewed: 2026-11-13
+Last reviewed: 2026-11-14
 
 ## Purpose and hard boundary
 
@@ -26,7 +26,7 @@ A four-hour run is an operational observation window, not proof of profitability
 
 ## Phase 1 — paper-only lifecycle acceptance
 
-The first Nov 12 replay attempt [43488935615](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43488935615) ended incomplete: 11 launches were verified, but 89 buckets were left incomplete after selected signatures could not be fetched or decoded. It spent 2,100 of the 5,000 discovery credits (2,900 remain). PR [#81](https://github.com/teddyjeremy/pumpfun-paper-trader/pull/81) includes the cursor-based continuation fix within the existing five-page/5,000-credit limits. Resume the workflow using `previous_run_id=43488935615` after verifying production database prerequisites. It must not share or mutate the forward Worker portfolio, lease, or session checkpoint.
+Historical replay is now available for Nov 11 and Nov 12 using bounded, activity-ranked samples (20 and 30 selected launches respectively). The corrected ranking recognizes both wrapped-SOL and legacy native-SOL quote mints. Nov 11 has 17 complete coins, 3 incomplete and 1 activity-qualified coin; its strategy replay returned `NO_SETUP`, so it is not a strategy entry. Nov 12 has 27 complete coins, 3 incomplete and 0 activity-qualified coins under the current thresholds. These are pre-qualification results, not profitability or win-rate evidence. The corrected artifacts and dashboard publication are in [Nov 11 rerank run 43568187060](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43568187060) and [Nov 12 rerank run 43568059148](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43568059148). Reranking restores those artifacts and makes no Helius calls. Full historical replay workflows are manual-dispatch only; never start a new replay from a stale checkpoint or trigger one merely by editing ingestion code.
 
 
 Before the forward session, run the CI and integration suite and demonstrate against the deployed Worker/Neon environment:
@@ -43,6 +43,10 @@ Before the forward session, run the CI and integration suite and demonstrate aga
 - signing and transaction submission are absent/unavailable.
 
 A direct Durable Object method test with in-memory storage is useful regression coverage but does not replace this deployed Worker-to-Neon acceptance test.
+
+### PostgreSQL lease and queue-drain safeguards
+
+The coordinator's fenced Neon lease uses a 120-second TTL. It renews before and after Helius queue work and after persistence flushes. Each Helius drain is bounded to five work items; pending work schedules another alarm rather than monopolizing one Durable Object invocation. A lost lease remains a fail-closed stop condition. The production Worker-to-Neon smoke passed in [run 43568650219](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43568650219), but that short smoke is not a substitute for a sustained forward-session lease/stream acceptance run.
 
 ## Phase 2 — four-hour forward paper observation
 
