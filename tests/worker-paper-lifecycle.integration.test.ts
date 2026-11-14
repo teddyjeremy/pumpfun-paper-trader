@@ -286,7 +286,9 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     await storage.put(`helius_verified_historical_signatures:${sessionId}:${mint}`, [newer, older]);
     await storage.put(`helius_archived_transaction_signatures:${sessionId}:${mint}`, [newer, older]);
 
-    const coordinator = new PumpFunCoordinator(context(storage) as never, {} as never);
+    const coordinator = new PumpFunCoordinator(context(storage) as never, {
+      PAPER_ENABLE_GAP_RECOVERY: "true"
+    } as never);
     await coordinator.getStatus();
     await (coordinator as unknown as { recoverCoveredHeliusGaps(): Promise<void> })
       .recoverCoveredHeliusGaps();
