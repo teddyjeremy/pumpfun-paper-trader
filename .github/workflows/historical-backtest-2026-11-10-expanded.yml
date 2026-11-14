@@ -61,6 +61,10 @@ jobs:
         if: always() && hashFiles('artifacts/coins/*.json') != ''
         run: npm run backtest:rank -- --date="$BACKTEST_DATE" --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
 
+      - name: Run modeled strategy profitability replay on every complete selected coin
+        if: always() && hashFiles('artifacts/batch-summary-*.json', 'artifacts/coins/*.json') != ''
+        run: npm run backtest:profitability -- --date="$BACKTEST_DATE" --round-trip-cost-pct=4
+
       - name: Publish research dataset to Neon dashboard
         if: always() && hashFiles('artifacts/pump-launch-discovery-*.json') != ''
         run: npm run backtest:publish -- --date="$BACKTEST_DATE" --run-id="$GITHUB_RUN_ID"
