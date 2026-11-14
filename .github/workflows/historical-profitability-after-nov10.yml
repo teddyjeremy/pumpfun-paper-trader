@@ -1,9 +1,10 @@
-name: Historical profitability — Nov 10 expanded sample
+name: Historical profitability — Nov 10/13 expanded samples
 
 on:
   workflow_run:
     workflows:
       - "Historical paper replay — 2026-11-10 300k expanded sample"
+      - "Historical paper replay — 2026-11-13 expanded sample"
     types: [completed]
 
 permissions:
@@ -15,6 +16,9 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      BACKTEST_DATE: ${{ github.event.workflow_run.name == 'Historical paper replay — 2026-11-13 expanded sample' && '2026-11-13' || '2026-11-10' }}
+      BACKTEST_ARTIFACT: ${{ github.event.workflow_run.name == 'Historical paper replay — 2026-11-13 expanded sample' && 'pump-backtest-state-2026-11-13-expanded' || 'pump-backtest-state-2026-11-10-300k' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,19 +31,19 @@ jobs:
       - name: Download the completed 300k historical dataset
         uses: actions/download-artifact@v4
         with:
-          name: pump-backtest-state-2026-11-10-300k
+          name: ${{ env.BACKTEST_ARTIFACT }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
           run-id: ${{ github.event.workflow_run.id }}
           path: artifacts
 
       - name: Run the strict-v1 entry and dynamic-exit price-path replay
-        run: npm run backtest:profitability -- --date=2026-11-10 --round-trip-cost-pct=4
+        run: npm run backtest:profitability -- --date="$BACKTEST_DATE" --round-trip-cost-pct=4
 
       - name: Save modeled profitability report
         uses: actions/upload-artifact@v4
         with:
-          name: pump-profitability-nov10
-          path: artifacts/pump-profitability-backtest-2026-11-10.json
+          name: pump-profitability-${{ env.BACKTEST_DATE }}
+          path: artifacts/pump-profitability-backtest-${{ env.BACKTEST_DATE }}.json
           if-no-files-found: error
           retention-days: 30
