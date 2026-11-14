@@ -1,0 +1,21 @@
+name: Cancel stale historical replay before maintenance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cancel-stale-historical-replay.yml"
+  workflow_dispatch:
+
+# This maintenance workflow intentionally supersedes any active historical
+# replay using the shared Helius budget. It performs no RPC calls.
+concurrency:
+  group: historical-paper-replay-shared-helius-key
+  cancel-in-progress: true
+
+jobs:
+  cancel-stale-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm the shared replay slot is clear
+        run: echo "Maintenance slot acquired; any older replay in this group was superseded."
