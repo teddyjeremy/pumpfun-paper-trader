@@ -369,18 +369,32 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     }).flushAuditEventsToPostgres.bind(coordinator);
     const status = (coordinator as unknown as { status: { lastError: string | null } }).status;
 
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
+    const firstAttempt = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as { events: Array<{ eventId: string }> };
+      expect(payload.events[0]?.eventId).toBe(`recovered:${sessionId}:1`);
+      return new Response("{}", { status: 503 });
+    });
+    vi.stubGlobal("fetch", firstAttempt);
     try {
       await flush(sessionId);
       expect(await storage.get(`postgres_sync_sequence:${sessionId}`)).toBeUndefined();
       expect(status.lastError).toMatch(/^Paper event ingestion failed \(HTTP 503\); durable outbox will retry\.$/);
-
-      vi.stubGlobal("fetch", vi.fn(async () => new Response(
-        JSON.stringify({ ok: true, lastSequence: 1 }), { status: 200,
-          headers: { "content-type": "application/json" } }
-      )));
+      expect(await storage.get("postgres_event_flush_retry_at_ms")).toBeGreaterThan(Date.now());
       await flush(sessionId);
+      expect(firstAttempt).toHaveBeenCalledTimes(1);
+
+      await storage.put("postgres_event_flush_retry_at_ms", Date.now() - 1);
+      const retryAttempt = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const payload = JSON.parse(String(init?.body)) as { events: Array<{ eventId: string }> };
+        expect(payload.events[0]?.eventId).toBe(`recovered:${sessionId}:1`);
+        return new Response(JSON.stringify({ ok: true, lastSequence: 1 }), { status: 200,
+          headers: { "content-type": "application/json" } });
+      });
+      vi.stubGlobal("fetch", retryAttempt);
+      await flush(sessionId);
+      expect(retryAttempt).toHaveBeenCalledTimes(1);
       expect(await storage.get(`postgres_sync_sequence:${sessionId}`)).toBe(1);
+      expect(await storage.get("postgres_event_flush_retry_at_ms")).toBeUndefined();
       expect(status.lastError).toBeNull();
     } finally {
       vi.unstubAllGlobals();
