@@ -37,10 +37,10 @@ jobs:
 
       - name: Discover up to 300 launches across the full Nairobi day
         run: |
-          npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=30000 --max-launches=300 --max-pages-per-bucket=20
+          npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=30000 --max-launches=300 --max-pages-per-bucket=20 || test "$?" -eq 2
 
       - name: Screen the discovered launches and retain the top 30 percent
-        run: npm run backtest:screen -- --date="$BACKTEST_DATE" --max-credits=1500 --max-share-pct=30 --min-successful=5 --min-active-buckets=3
+        run: npm run backtest:screen -- --date="$BACKTEST_DATE" --allow-partial-discovery=true --max-credits=1500 --max-share-pct=30 --min-successful=5 --min-active-buckets=3
 
       - name: Save discovery and screening checkpoint before deep replay
         uses: actions/upload-artifact@v4
@@ -188,7 +188,7 @@ jobs:
 
       - name: Recompute rule sensitivity against the expanded sample
         if: always() && hashFiles('artifacts/pump-profitability-backtest-*.json') != ''
-        run: npm run backtest:rule-sensitivity -- --date="$BACKTEST_DATE"
+        run: npm run backtest:rule-sensitivity -- --dates="$BACKTEST_DATE"
 
       - name: Publish the completed research dataset to Neon
         if: always() && hashFiles('artifacts/pump-launch-discovery-*.json') != ''
