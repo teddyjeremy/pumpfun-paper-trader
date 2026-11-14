@@ -40,7 +40,7 @@ jobs:
           run-id: 43568187060
       - name: Retry Nov 11 cap-limited coins only
         run: |
-          npm run backtest:batch -- --date=2026-11-11 --batch-size=20 --max-credits=30000 --max-new-credits=8000 --max-signatures=1000 --retry-incomplete=true --skip-mints=DJYzweGzY3xTCAdTug9L4tVPGFVUjpZ7wXrstw2DJNjk
+          npm run backtest:batch -- --date=2026-11-11 --batch-size=20 --max-credits=30000 --max-new-credits=8000 --max-signatures=2500 --retry-incomplete=true --skip-mints=DJYzweGzY3xTCAdTug9L4tVPGFVUjpZ7wXrstw2DJNjk
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
       - name: Retry remaining Nov 11 candidates within the same 8,000-credit cap
@@ -76,7 +76,7 @@ jobs:
           run-id: 43568059148
       - name: Retry Nov 12 cap-limited coins only
         run: |
-          npm run backtest:batch -- --date=2026-11-12 --batch-size=20 --max-credits=50000 --max-new-credits=8000 --max-signatures=1000 --retry-incomplete=true
+          npm run backtest:batch -- --date=2026-11-12 --batch-size=20 --max-credits=50000 --max-new-credits=8000 --max-signatures=2500 --retry-incomplete=true
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
       - name: Retry remaining Nov 12 candidates within the same 8,000-credit cap
