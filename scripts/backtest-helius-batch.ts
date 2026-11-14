@@ -14,7 +14,7 @@ type Discovery = {
   requestedLocalDate: string; status: string; creditsUsed: number;
   legacyPriorCreditsUsed?: number; launches: Launch[];
 };
-type Screening = { date: string; status: string; creditsUsed: number; nextIndex: number; selectedLaunchIndexes: number[]; results: Array<{ index: number; result: HistoricalLaunchActivityScreenResult }> };
+type Screening = { date: string; discoveryStatus: string; status: string; creditsUsed: number; nextIndex: number; selectedLaunchIndexes: number[]; results: Array<{ index: number; result: HistoricalLaunchActivityScreenResult }> };
 type Checkpoint = {
   schemaVersion: 3; date: string; discoveryLaunchCount: number;
   discoveryCredits: number; screeningCredits: number; legacyPriorCreditsUsed: number; totalCreditCeiling: number;
@@ -59,7 +59,7 @@ const checkpointPath = resolve(directory, "checkpoint.json");
 const screeningPath = resolve(directory, `pump-launch-screen-${date}.json`);
 await mkdir(resolve(directory, "coins"), { recursive: true });
 const discovery = JSON.parse(await readFile(discoveryPath, "utf8")) as Discovery;
-if (discovery.requestedLocalDate !== date || !(discovery.status === "DAY_EXHAUSTED" || discovery.status === "SAMPLE_COMPLETE") ||
+if (discovery.requestedLocalDate !== date || !(discovery.status === "DAY_EXHAUSTED" || discovery.status === "SAMPLE_COMPLETE" || discovery.status === "INCOMPLETE") ||
     !Array.isArray(discovery.launches) || !Number.isSafeInteger(discovery.creditsUsed) ||
     discovery.creditsUsed > maxCredits) {
   throw new Error("A complete, budget-compliant full-day discovery artifact is required.");
@@ -69,7 +69,7 @@ if (new Set(discovery.launches.map(row => row.event.mint)).size !== discovery.la
 }
 
 const screening = JSON.parse(await readFile(screeningPath, "utf8")) as Screening;
-if (screening.date !== date || screening.status !== "COMPLETE" ||
+if (screening.date !== date || screening.discoveryStatus !== discovery.status || screening.status !== "COMPLETE" ||
     !Number.isSafeInteger(screening.creditsUsed) || screening.creditsUsed < 0 || screening.creditsUsed > 500 ||
     screening.nextIndex !== discovery.launches.length ||
     !Array.isArray(screening.results) || screening.results.length !== discovery.launches.length ||
