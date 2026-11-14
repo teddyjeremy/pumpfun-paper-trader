@@ -1,15 +1,21 @@
 name: Rerank historical paper dataset (no Helius calls)
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/rerank-historical-backtest.yml"
   workflow_dispatch:
     inputs:
       date:
         description: "Nairobi calendar date to rerank (YYYY-MM-DD)"
         required: true
+        default: "2026-11-12"
         type: string
       source_run_id:
         description: "Completed historical replay run ID containing pump-backtest-state artifact"
         required: true
+        default: "43560217053"
         type: string
 
 permissions:
@@ -21,15 +27,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      BACKTEST_DATE: ${{ github.event.inputs.date }}
-      SOURCE_RUN_ID: ${{ github.event.inputs.source_run_id }}
+      BACKTEST_DATE: ${{ github.event.inputs.date || '2026-11-12' }}
+      SOURCE_RUN_ID: ${{ github.event.inputs.source_run_id || '43560217053' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - run: npm install
 
       - name: Restore existing historical dataset
         uses: actions/download-artifact@v4
