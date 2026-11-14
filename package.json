@@ -22,7 +22,8 @@
     "backtest:screen": "tsx scripts/backtest-helius-screen.ts",
     "backtest:rank": "tsx scripts/backtest-helius-rank.ts",
     "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
-    "backtest:publish": "tsx scripts/publish-helius-backtest-dashboard.ts"
+    "backtest:publish": "tsx scripts/publish-helius-backtest-dashboard.ts",
+    "backtest:profitability": "tsx scripts/backtest-helius-profitability.ts"
   },
   "dependencies": {
     "fastify": "^5.2.1",
