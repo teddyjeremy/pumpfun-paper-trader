@@ -179,6 +179,30 @@ const portfolioCandidates = simulations.map(row => ({
 const portfolioSimulation = simulatePortfolio(portfolioCandidates);
 const report = {
   date, strategyVersion: "strict-v1-market-pattern-plus-dynamic-exits",
+  strategyParameters: {
+    entry: {
+      minimumImpulsePct: 20, pullbackRangePct: [10, 40],
+      minimumReclaimAbovePreviousFiveSecondHighPct: 1,
+      flowWindowSeconds: 2, requiredConsecutiveFlowWindows: 3,
+      minimumDistinctBuyersAcrossLatestThreeWindows: 5,
+      maximumLargestBuyerSharePct: 72, minimumTradeUsd: 0.01
+    },
+    risk: {
+      creatorSellRiskMustPass: true, completeWalletHistoryRequired: true,
+      completeHolderCensusRequired: true,
+      historicalExecutableEntryQuoteRequired: true
+    },
+    exit: {
+      hardStopNetReturnPct: -5, trailingActivationNetReturnPct: 10,
+      trailingGivebackPct: 40,
+      profitLocks: [{ triggerPct: 10, floorPct: 5 }, { triggerPct: 50, floorPct: 15 },
+        { triggerPct: 100, floorPct: 40 }, { triggerPct: 200, floorPct: 80 }],
+      dynamicConfirmationWindows: 2, minimumBearishSignalsPerWindow: 2,
+      buySellRatioBelow: 1, buyVolumeDeclinePct: 40, buyerRateDeclinePct: 40,
+      sellVolumeExpansionPct: 50, priceResponseDeclinePct: 40, liquidityDropPct: 20,
+      evaluatedWindowSeconds: [2, 5, 10, 30]
+    }
+  },
   sourceCoinCount: results.length, pricePathCandidates: simulations.length,
   proxyExitTriggers: closed.length, proxyOpenAtHorizon: open.length,
   riskClearedCandidates: strictEligible.length,
