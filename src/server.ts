@@ -67,10 +67,13 @@ app.post("/internal/paper-events", async (request, reply) => {
     const result = await persistPaperAuditEvents(sessionId, events as never[]);
     return { ok: true, ...result };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
+    const message = error instanceof Error ? error.message : "Unknown PostgreSQL persistence error.";
     const conflict = message.includes("sequence") || message.includes("replay");
+    const detail = message.replace(/postgres(?:ql)?:\/\/\\S+/gi, "[redacted connection string]").slice(0, 180);
+    request.log.error({ detail }, "Paper event persistence failed");
     return reply.code(conflict ? 409 : 503).send({
-      error: conflict ? message : "Paper event persistence failed; the sender should retry."
+      error: conflict ? detail : "Paper event persistence failed; the sender should retry.",
+      detail
     });
   }
 });
