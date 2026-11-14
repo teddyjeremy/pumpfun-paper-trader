@@ -248,7 +248,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         "content-type": "application/json",
         authorization: `Bearer ${token}`
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000)
     });
   }
 
@@ -323,6 +324,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   private async flushAuditEventsToPostgres(sessionId: string): Promise<void> {
     if (!this.postgresIngestConfigured || this.postgresFlushInFlight) return;
+    const retryKey = "postgres_event_flush_retry_at_ms";
+    const retryAt = await this.ctx.storage.get<number>(retryKey) ?? 0;
+    if (Date.now() < retryAt) return;
     this.postgresFlushInFlight = true;
     try {
       const cursorKey = `postgres_sync_sequence:${sessionId}`;
@@ -339,7 +343,20 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         pageNumber++;
       }
       if (events.length === 0) return;
-      const response = await this.postPostgresIngest("/internal/paper-events", { sessionId, events });
+      // Repair only missing identity metadata from older outbox entries. The
+      // deterministic fallback event ID makes retries idempotent.
+      const normalizedEvents = events.map(event => ({
+        ...event,
+        sessionId,
+        eventId: typeof event.eventId === "string" && event.eventId.trim()
+          ? event.eventId : `recovered:${sessionId}:${event.sequence}`,
+        mint: event.mint ?? null,
+        strategyVersion: typeof event.strategyVersion === "string" && event.strategyVersion.trim()
+          ? event.strategyVersion : "paper-strategy-v1"
+      }));
+      const response = await this.postPostgresIngest("/internal/paper-events", {
+        sessionId, events: normalizedEvents
+      });
       if (!response.ok) {
         let detail = `HTTP ${response.status}`;
         try {
@@ -353,12 +370,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         throw new Error(detail);
       }
       const result = await response.json() as { ok?: boolean; lastSequence?: number };
-      const lastEvent = events[events.length - 1];
+      const lastEvent = normalizedEvents[normalizedEvents.length - 1];
       if (!lastEvent || result.ok !== true || !Number.isSafeInteger(result.lastSequence) ||
           (result.lastSequence as number) < lastEvent.sequence) {
         throw new Error("PostgreSQL did not acknowledge the complete paper audit batch.");
       }
       await this.ctx.storage.put(cursorKey, lastEvent.sequence);
+      await this.ctx.storage.delete(retryKey);
       if (this.status.lastError?.startsWith("Paper event ingestion failed")) {
         this.status.lastError = null;
       }
@@ -371,7 +389,9 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       // failure; a retry is safe because PostgreSQL deduplicates event ids.
       const detail = error instanceof Error ? error.message.slice(0, 180) : "unknown persistence error";
       this.status.lastError = `Paper event ingestion failed (${detail}); durable outbox will retry.`;
-      await this.ctx.storage.setAlarm(Date.now() + 30_000).catch(() => undefined);
+      const nextRetryAt = Date.now() + 15_000;
+      await this.ctx.storage.put(retryKey, nextRetryAt);
+      await this.ctx.storage.setAlarm(nextRetryAt).catch(() => undefined);
     } finally {
       this.postgresFlushInFlight = false;
     }
