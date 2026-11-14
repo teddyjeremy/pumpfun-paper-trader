@@ -1038,6 +1038,24 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return this.getStatus();
   }
 
+  async pauseWithoutStorage(): Promise<CoordinatorStatus> {
+    // Emergency in-memory shutdown used only while the DO write quota is
+    // exhausted. It must not hydrate, append audit events or touch storage.
+    this.status.enabled = false;
+    this.status.connected = false;
+    this.status.subscriptionsSent = false;
+    this.status.heliusConnected = false;
+    this.status.nextReconnectAt = null;
+    this.socket?.close(1000, "Emergency pause for Durable Objects quota protection");
+    this.heliusSocket?.close(1000, "Emergency pause for Durable Objects quota protection");
+    this.socket = null;
+    this.heliusSocket = null;
+    this.postgresLeaseHeld = false;
+    await this.releasePostgresWorkerLease().catch(() => undefined);
+    this.status.lastError = "Provider streams closed in memory; Durable Object storage remains paused until quota reset.";
+    return this.status;
+  }
+
   async stop(): Promise<CoordinatorStatus> {
     await this.hydrate();
     // Close provider sockets before storage writes so emergency stop still
@@ -3662,7 +3680,7 @@ export default {
         if (!(await authorized(request, env))) {
           return Response.json({ error: "Unauthorized" }, { status: 401 });
         }
-        return Response.json(await coordinator.stop(), { headers: { "cache-control": "no-store" } });
+        return Response.json(await coordinator.pauseWithoutStorage(), { headers: { "cache-control": "no-store" } });
       }
       return Response.json({ error: reason, tradingReady: false }, { status: 503 });
     }
