@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   hydrateArchivedVerifiedTransaction, replayHistoricalCoin
@@ -309,8 +309,10 @@ const report = {
   ]
 };
 const outputPath = resolve(artifacts, `pump-profitability-backtest-${date}.json`);
+const temporaryOutputPath = `${outputPath}.tmp`;
 await mkdir(artifacts, { recursive: true });
-await writeFile(outputPath, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
+await writeFile(temporaryOutputPath, JSON.stringify(report, null, 2) + "\n");
+await rename(temporaryOutputPath, outputPath);
 process.stdout.write(JSON.stringify({
   date, sourceCoinCount: report.sourceCoinCount, pricePathCandidates: report.pricePathCandidates,
   proxyExitTriggers: report.proxyExitTriggers, proxyOpenAtHorizon: report.proxyOpenAtHorizon,
