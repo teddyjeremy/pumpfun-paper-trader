@@ -28,6 +28,8 @@ if (summary.date !== date || !Number.isFinite(summary.solUsdReference?.priceUsd)
   throw new Error("A matching batch summary with its historical SOL/USD reference is required.");
 }
 const coinDirectory = resolve(artifacts, "coins");
+const dayStart = Math.floor(Date.parse(`${date}T00:00:00+03:00`) / 1_000);
+const dayEnd = dayStart + 86_400;
 const files = (await readdir(coinDirectory)).filter(name => name.endsWith(".json"));
 const results: Array<Record<string, unknown>> = [];
 for (const file of files) {
@@ -36,7 +38,8 @@ for (const file of files) {
   const launchBlockTime = Number(raw.launchBlockTime);
   const collection = raw.collection as Record<string, unknown> | undefined;
   if (!summary.selectedLaunchIndexes.includes(Number(raw.index)) || collection?.status !== "COMPLETE" ||
-      !Array.isArray(raw.transactions) || !Number.isSafeInteger(launchBlockTime)) continue;
+      !Array.isArray(raw.transactions) || !Number.isSafeInteger(launchBlockTime) ||
+      launchBlockTime < dayStart || launchBlockTime >= dayEnd) continue;
   const transactions = raw.transactions.map(hydrateArchivedVerifiedTransaction);
   const replay = replayHistoricalCoin({
     mint, transactions, launchBlockTime, horizonSeconds: 600, decodeComplete: true
