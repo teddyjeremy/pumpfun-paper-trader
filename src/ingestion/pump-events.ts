@@ -1,3 +1,5 @@
+import { PUMP_FUN_PROGRAM_ID } from "./pump-constants.js";
+
 /**
  * Decoder for Pump.fun's on-chain CreateEvent log.
  * Field order and discriminator are pinned to the official Pump IDL:
@@ -161,6 +163,36 @@ function encodeBase58(bytes: Uint8Array): string {
   return "1".repeat(leadingZeroes) + encoded;
 }
 
+function pumpProgramDataLogs(logs: readonly string[]): string[] {
+  const hasInvocationContext = logs.some(log => /^Program \\S+ invoke \\[\\d+\\]$/.test(log));
+  const dataLogs: string[] = [];
+  if (!hasInvocationContext) {
+    return logs.filter(log => log.includes("Program data: "));
+  }
+  const stack: string[] = [];
+  for (const log of logs) {
+    const invoke = /^Program (\\S+) invoke \\[(\\d+)\\]$/.exec(log);
+    if (invoke) {
+      const depth = Number(invoke[2]);
+      if (Number.isSafeInteger(depth) && depth > 0) {
+        stack.length = depth - 1;
+        stack[depth - 1] = invoke[1]!;
+      }
+      continue;
+    }
+    const completed = /^Program (\\S+) (?:success|failed:.*)$/.exec(log);
+    if (completed) {
+      const index = stack.lastIndexOf(completed[1]!);
+      if (index >= 0) stack.length = index;
+      continue;
+    }
+    if (stack[stack.length - 1] === PUMP_FUN_PROGRAM_ID && log.includes("Program data: ")) {
+      dataLogs.push(log);
+    }
+  }
+  return dataLogs;
+}
+
 function decodeBase64(value: string): Uint8Array {
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length % 4 !== 0) {
     throw new Error("Invalid base64 in Pump program log.");
@@ -171,7 +203,7 @@ function decodeBase64(value: string): Uint8Array {
 /** Pass logs only when the transaction metadata reports err === null. */
 export function decodePumpCreateEvents(logs: readonly string[]): PumpCreateEvent[] {
   const events: PumpCreateEvent[] = [];
-  for (const log of logs) {
+  for (const log of pumpProgramDataLogs(logs)) {
     const marker = "Program data: ";
     const markerIndex = log.indexOf(marker);
     if (markerIndex < 0) continue;
