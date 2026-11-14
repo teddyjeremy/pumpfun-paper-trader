@@ -19,6 +19,7 @@ export interface HistoricalLaunchWindowResult {
   transactions: VerifiedPumpTransaction[];
   failedSignatures: string[];
   ignoredSignatures: string[];
+  decodeFailures: Array<{ signature: string; reason: string }>;
   creditsUsed: number;
   reason: string | null;
 }
@@ -77,8 +78,9 @@ export async function collectHistoricalLaunchWindow(
   const transactions: VerifiedPumpTransaction[] = [];
   const failedSignatures: string[] = [];
   const ignoredSignatures: string[] = [];
+  const decodeFailures: Array<{ signature: string; reason: string }> = [];
   const finish = (status: HistoricalLaunchWindowResult["status"], reason: string | null) => ({
-    status, mint: input.mint, state, transactions, failedSignatures, ignoredSignatures, creditsUsed, reason
+    status, mint: input.mint, state, transactions, failedSignatures, ignoredSignatures, decodeFailures, creditsUsed, reason
   });
 
   while (state.status !== "COMPLETE" && state.status !== "INCOMPLETE") {
@@ -114,10 +116,13 @@ export async function collectHistoricalLaunchWindow(
       ignoredSignatures.push(signatureInfo.signature);
       continue;
     }
+    if (fetched.status === "DATA_INCOMPLETE") {
+      decodeFailures.push({ signature: signatureInfo.signature, reason: fetched.reason });
+      continue;
+    }
     if (fetched.status !== "VERIFIED") {
-      return finish("INCOMPLETE", fetched.status === "DATA_INCOMPLETE"
-        ? `Signature ${signatureInfo.signature.slice(0, 12)}…: ${fetched.reason}`
-        : `Signature ${signatureInfo.signature.slice(0, 12)}… did not verify as a successful Pump transaction.`);
+      return finish("INCOMPLETE",
+        `Signature ${signatureInfo.signature.slice(0, 12)}… did not verify as a successful Pump transaction.`);
     }
     if (fetched.transaction.slot !== signatureInfo.slot ||
         fetched.transaction.blockTime !== signatureInfo.blockTime) {
@@ -126,10 +131,17 @@ export async function collectHistoricalLaunchWindow(
     transactions.push(fetched.transaction);
   }
 
-  if (transactions.length + failedSignatures.length + ignoredSignatures.length !== state.signatures.length ||
+  if (transactions.length + failedSignatures.length + ignoredSignatures.length + decodeFailures.length !== state.signatures.length ||
       !transactions.some(transaction => transaction.signature === input.createSignature &&
         transaction.createEvents.some(event => event.mint === input.mint))) {
-    return finish("INCOMPLETE", "Launch-window signatures do not reconcile to verified transactions and confirmed failures.");
+    const decodeReason = decodeFailures.length
+      ? ` ${decodeFailures.length} transaction(s) could not be decoded; first: ${decodeFailures[0]!.reason}`
+      : "";
+    return finish("INCOMPLETE", `Launch-window signatures do not reconcile to verified transactions and confirmed failures.${decodeReason}`);
+  }
+  if (decodeFailures.length > 0) {
+    return finish("INCOMPLETE",
+      `${decodeFailures.length} transaction(s) could not be decoded; first: ${decodeFailures[0]!.reason}`);
   }
   return finish("COMPLETE", null);
 }
