@@ -45,6 +45,9 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 const date = option("date", "");
 const batchSize = integer("batch-size", 20, 20);
 const maxCredits = integer("max-credits", 50_000, 50_000);
+const maxNewCredits = integer("max-new-credits", maxCredits, maxCredits);
+const maxSignatures = integer("max-signatures", 1_000, 5_000);
+const skipMints = new Set(option("skip-mints", "").split(",").map(value => value.trim()).filter(Boolean));
 const retryIncomplete = option("retry-incomplete", "false") === "true";
 const apiKey = process.env.HELIUS_API_KEY ?? "";
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !apiKey.trim()) {
@@ -115,9 +118,10 @@ checkpoint.completedMints = checkpoint.completedMints.filter(mint => !checkpoint
 checkpoint.totalCreditCeiling = maxCredits;
 const incompleteMintSet = new Set(checkpoint.incompleteMints);
 if (retryIncomplete) {
-  const firstIncompleteCandidate = selectedLaunchIndexes.findIndex(index =>
-    incompleteMintSet.has(discovery.launches[index]!.event.mint)
-  );
+  const firstIncompleteCandidate = selectedLaunchIndexes.findIndex(index => {
+    const mint = discovery.launches[index]!.event.mint;
+    return incompleteMintSet.has(mint) && !skipMints.has(mint);
+  });
   if (firstIncompleteCandidate >= 0) {
     checkpoint.nextCandidateIndex = Math.min(checkpoint.nextCandidateIndex, firstIncompleteCandidate);
   }
@@ -126,20 +130,27 @@ const solUsd = await fetchSolUsdPrice();
 if (solUsd.status !== "AVAILABLE") throw new Error("Fresh SOL/USD reference unavailable.");
 const startIndex = checkpoint.nextCandidateIndex;
 const endIndex = Math.min(startIndex + batchSize, selectedLaunchIndexes.length);
+const runCreditCeiling = Math.min(maxCredits, checkpoint.cumulativeCreditsUsed + maxNewCredits);
 let budgetStopped = false;
 
 for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex += 1) {
   const index = selectedLaunchIndexes[candidateIndex]!;
   const launch = discovery.launches[index]!;
-  const remaining = maxCredits - checkpoint.cumulativeCreditsUsed;
-  // A coin is an atomic work unit: at most ten 100-signature pages plus
-  // 1,000 raw transaction fetches. Reserve the full bound before starting it.
-  const maxCreditsPerCoin = 1_010;
+  const mint = launch.event.mint;
+  if (skipMints.has(mint) ||
+      (checkpoint.completedMints.includes(mint) && !checkpoint.incompleteMints.includes(mint))) {
+    checkpoint.nextCandidateIndex = candidateIndex + 1;
+    continue;
+  }
+  const remaining = runCreditCeiling - checkpoint.cumulativeCreditsUsed;
+  // Reserve the signature pages plus one transaction fetch per signature,
+  // with a small safety margin, before starting an atomic coin replay.
+  const maxCreditsPerCoin = maxSignatures + Math.ceil(maxSignatures / 100) + 10;
   if (remaining < maxCreditsPerCoin) { budgetStopped = true; break; }
   const collected = await collectHistoricalLaunchWindow({
-    mint: launch.event.mint, bondingCurve: launch.event.bondingCurve,
+    mint, bondingCurve: launch.event.bondingCurve,
     createSignature: launch.signature, launchBlockTime: launch.blockTime,
-    horizonSeconds: 600, maxSignatures: 1_000
+    horizonSeconds: 600, maxSignatures
   }, { apiKey, maxCredits: remaining, requestIntervalMs: 1_000 });
   checkpoint.cumulativeCreditsUsed += collected.creditsUsed;
   const replay = collected.status === "COMPLETE"
