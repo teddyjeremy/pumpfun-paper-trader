@@ -1,0 +1,189 @@
+{
+  "dataset": {
+    "file": "data/helius/tokens.csv",
+    "tokens": 746,
+    "withPricePath": 167,
+    "train": 315,
+    "validation": 431,
+    "holdout": "2026-11-14",
+    "bias": "Public lists over-weight 13-14 Nov and coins Gecko/GMGN still track. 409 tokens have no price path and are not in the pnl."
+  },
+  "families": [
+    {
+      "id": "launch-unfiltered",
+      "family": "launch",
+      "train": {
+        "trades": 65,
+        "winRate": 0.38461538461538464,
+        "avgWinUsd": 0.19884938461091234,
+        "avgLossUsd": -0.06817235836877632,
+        "expectancyUsd": 0.03452831200802699,
+        "pnlUsd": 2.244340280521754,
+        "avgHoldMinutes": 10.307692307692308,
+        "worstReturnPct": -49.183074989526595
+      },
+      "validation": {
+        "trades": 102,
+        "winRate": 0.37254901960784315,
+        "avgWinUsd": 0.19915928321657797,
+        "avgLossUsd": -0.08695507972842247,
+        "expectancyUsd": 0.019636545682460062,
+        "pnlUsd": 2.0029276596109264,
+        "avgHoldMinutes": 10.96078431372549,
+        "worstReturnPct": -87.5
+      }
+    },
+    {
+      "id": "launch-snipe-1m-2x-15m",
+      "family": "launch",
+      "train": {
+        "trades": 57,
+        "winRate": 0.38596491228070173,
+        "avgWinUsd": 0.19348576249824695,
+        "avgLossUsd": -0.06545943612171959,
+        "expectancyUsd": 0.034484324749144674,
+        "pnlUsd": 1.9656065107012466,
+        "avgHoldMinutes": 10.31578947368421,
+        "worstReturnPct": -49.183074989526595
+      },
+      "validation": {
+        "trades": 77,
+        "winRate": 0.4025974025974026,
+        "avgWinUsd": 0.20056395907224875,
+        "avgLossUsd": -0.08691778113198009,
+        "expectancyUsd": 0.028821620768423723,
+        "pnlUsd": 2.2192647991686267,
+        "avgHoldMinutes": 11.012987012987013,
+        "worstReturnPct": -81.0412147505423
+      }
+    },
+    {
+      "id": "launch-strict-rug",
+      "family": "launch",
+      "train": {
+        "trades": 24,
+        "winRate": 0.4583333333333333,
+        "avgWinUsd": 0.2067684619400885,
+        "avgLossUsd": -0.05981973773668313,
+        "expectancyUsd": 0.062366520448503875,
+        "pnlUsd": 1.496796490764093,
+        "avgHoldMinutes": 9.833333333333334,
+        "worstReturnPct": -38.546766297346046
+      },
+      "validation": {
+        "trades": 24,
+        "winRate": 0.4583333333333333,
+        "avgWinUsd": 0.19341547824859368,
+        "avgLossUsd": -0.09475425676652402,
+        "expectancyUsd": 0.03732353844873827,
+        "pnlUsd": 0.8957649227697185,
+        "avgHoldMinutes": 10.25,
+        "worstReturnPct": -78.3629250677099
+      }
+    },
+    {
+      "id": "momentum-5m",
+      "family": "momentum",
+      "train": {
+        "trades": 31,
+        "winRate": 0.3870967741935484,
+        "avgWinUsd": 0.21434718759255691,
+        "avgLossUsd": -0.07491597235697028,
+        "expectancyUsd": 0.03705686375252411,
+        "pnlUsd": 1.1487627763282473,
+        "avgHoldMinutes": 41.935483870967744,
+        "worstReturnPct": -73.98142725675562
+      },
+      "validation": {
+        "trades": 49,
+        "winRate": 0.32653061224489793,
+        "avgWinUsd": 0.21083079454868536,
+        "avgLossUsd": -0.1087653262407833,
+        "expectancyUsd": -0.0044074092483037735,
+        "pnlUsd": -0.2159630531668849,
+        "avgHoldMinutes": 32.04081632653061,
+        "worstReturnPct": -96.99453551912568
+      }
+    },
+    {
+      "id": "graduation-1m",
+      "family": "graduation",
+      "train": {
+        "trades": 52,
+        "winRate": 0.38461538461538464,
+        "avgWinUsd": 0.21273341602686685,
+        "avgLossUsd": -0.06313874717035473,
+        "expectancyUsd": 0.042965930982422774,
+        "pnlUsd": 2.2342284110859842,
+        "avgHoldMinutes": 9.961538461538462,
+        "worstReturnPct": -45.19180446523021
+      },
+      "validation": {
+        "trades": 36,
+        "winRate": 0.2777777777777778,
+        "avgWinUsd": 0.2209323421977995,
+        "avgLossUsd": -0.04861333939650943,
+        "expectancyUsd": 0.026260461046354173,
+        "pnlUsd": 0.9453765976687503,
+        "avgHoldMinutes": 12.333333333333334,
+        "worstReturnPct": -78.3629250677099
+      }
+    }
+  ],
+  "winner": {
+    "id": "launch-snipe-1m-2x-15m",
+    "why": "Highest validation profit among rules that stay positive on both splits and still reject an early dev sale or a creator holding more than 8%. Unfiltered sniping takes more trades but less money. Stricter rug flags and copy-trading take fewer trades.",
+    "train": {
+      "trades": 57,
+      "winRate": 0.38596491228070173,
+      "avgWinUsd": 0.19348576249824695,
+      "avgLossUsd": -0.06545943612171959,
+      "expectancyUsd": 0.034484324749144674,
+      "pnlUsd": 1.9656065107012466,
+      "avgHoldMinutes": 10.31578947368421,
+      "worstReturnPct": -49.183074989526595
+    },
+    "validation": {
+      "trades": 77,
+      "winRate": 0.4025974025974026,
+      "avgWinUsd": 0.20056395907224875,
+      "avgLossUsd": -0.08691778113198009,
+      "expectancyUsd": 0.028821620768423723,
+      "pnlUsd": 2.2192647991686267,
+      "avgHoldMinutes": 11.012987012987013,
+      "worstReturnPct": -81.0412147505423
+    },
+    "portfolio": {
+      "endingEquityUsd": 4.237703492144984,
+      "maxDrawdownPct": 17.5401157090731,
+      "taken": 60,
+      "skippedConcurrency": 17,
+      "killedDays": 0,
+      "pnlUsd": 1.8377034921449837,
+      "tradesPerDay": 60
+    },
+    "costs": {
+      "solUsd": 73.5,
+      "venueFeeBps": 125,
+      "slippageFloorBps": 30,
+      "feeLamportsPerTx": 15000,
+      "rentLamports": 1488440,
+      "fixedRoundTripUsd": 0.002205,
+      "roundTripVariablePct": 3.0759749999999864,
+      "rentUsd": 0.10940034,
+      "costPerTradeUsdAtStake": 0.012970912499999952
+    }
+  },
+  "copyTrading": {
+    "sourceRows": 61,
+    "copyEligible": 3,
+    "whyNotSelected": "The wallet file has no mint-level buy timestamps, so a '2 wallets within N seconds' rule cannot be simulated. 51 of 61 wallets appear on only one token. Copy-trading is not the default."
+  },
+  "throughput": {
+    "observedValidationSignals": 77,
+    "takenAfterConcurrency": 60,
+    "observedTradesPerValidationDay": 60,
+    "fiveHundredPerDay": false,
+    "reason": "The holdout day produced well under 500 qualified entries even before the two-slot cap. A 15-minute hold and $2.40 bankroll cannot fund 500 simultaneous attempts, and the other ~400 tokens that day had no price path to support them."
+  }
+}

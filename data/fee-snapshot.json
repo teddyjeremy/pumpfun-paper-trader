@@ -1,0 +1,223 @@
+{
+  "capturedAt": "2026-11-14T15:16:51.545Z",
+  "programs": {
+    "pump": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+    "pumpAmm": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+    "fee": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ"
+  },
+  "curve": {
+    "address": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+    "bytes": 4097,
+    "flat": {
+      "lp": "0",
+      "protocol": "95",
+      "creator": "30",
+      "total": 125
+    },
+    "tiers": [
+      {
+        "mcapLamports": "0",
+        "lp": "0",
+        "protocol": "95",
+        "creator": "30",
+        "total": 125
+      }
+    ]
+  },
+  "amm": {
+    "address": "5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx",
+    "bytes": 4097,
+    "flat": {
+      "lp": "25",
+      "protocol": "5",
+      "creator": "0",
+      "total": 30
+    },
+    "tiers": [
+      {
+        "mcapLamports": "0",
+        "lp": "2",
+        "protocol": "93",
+        "creator": "30",
+        "total": 125
+      },
+      {
+        "mcapLamports": "420000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "95",
+        "total": 120
+      },
+      {
+        "mcapLamports": "1470000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "90",
+        "total": 115
+      },
+      {
+        "mcapLamports": "2460000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "85",
+        "total": 110
+      },
+      {
+        "mcapLamports": "3440000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "80",
+        "total": 105
+      },
+      {
+        "mcapLamports": "4420000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "75",
+        "total": 100
+      },
+      {
+        "mcapLamports": "9820000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "70",
+        "total": 95
+      },
+      {
+        "mcapLamports": "14740000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "65",
+        "total": 90
+      },
+      {
+        "mcapLamports": "19650000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "60",
+        "total": 85
+      },
+      {
+        "mcapLamports": "24560000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "55",
+        "total": 80
+      },
+      {
+        "mcapLamports": "29470000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "50",
+        "total": 75
+      },
+      {
+        "mcapLamports": "34380000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "45",
+        "total": 70
+      },
+      {
+        "mcapLamports": "39300000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "40",
+        "total": 65
+      },
+      {
+        "mcapLamports": "44210000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "35",
+        "total": 60
+      },
+      {
+        "mcapLamports": "49120000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "30",
+        "total": 55
+      },
+      {
+        "mcapLamports": "54030000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "28",
+        "total": 53
+      },
+      {
+        "mcapLamports": "58940000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "25",
+        "total": 50
+      },
+      {
+        "mcapLamports": "63860000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "23",
+        "total": 48
+      },
+      {
+        "mcapLamports": "68770000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "20",
+        "total": 45
+      },
+      {
+        "mcapLamports": "73681000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "18",
+        "total": 43
+      },
+      {
+        "mcapLamports": "78590000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "15",
+        "total": 40
+      },
+      {
+        "mcapLamports": "83500000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "13",
+        "total": 38
+      },
+      {
+        "mcapLamports": "88400000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "10",
+        "total": 35
+      },
+      {
+        "mcapLamports": "93330000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "8",
+        "total": 33
+      },
+      {
+        "mcapLamports": "98240000000000",
+        "lp": "20",
+        "protocol": "5",
+        "creator": "5",
+        "total": 30
+      }
+    ]
+  },
+  "rentExemptLamports": 1488440,
+  "slot": 469374900,
+  "priority": {
+    "n": 150,
+    "median": 0,
+    "p75": 0,
+    "p90": 0,
+    "max": 0
+  }
+}
