@@ -1,0 +1,205 @@
+name: Historical paper replay — 2026-11-14 expanded sample
+
+on:
+  push:
+    paths:
+      - ".github/workflows/historical-backtest-2026-11-14-expanded.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-paper-replay-shared-helius-key
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BACKTEST_DATE: "2026-11-14"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+
+      - name: Validate credentials before spending credits
+        run: |
+          test -n "$HELIUS_API_KEY" || { echo "HELIUS_API_KEY is required"; exit 1; }
+          test -n "$DATABASE_URL" || { echo "DATABASE_URL is required to publish results"; exit 1; }
+
+      - name: Discover up to 300 launches across the full Nairobi day
+        run: |
+          npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=30000 --max-launches=300 --max-pages-per-bucket=20
+
+      - name: Screen the discovered launches and retain the top 30 percent
+        run: npm run backtest:screen -- --date="$BACKTEST_DATE" --max-credits=1500 --max-share-pct=30 --min-successful=5 --min-active-buckets=3
+
+      - name: Save discovery and screening checkpoint before deep replay
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+
+      - name: Replay batch 1 of 9 (10 coins maximum)
+        if: success()
+        run: |
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=true
+      - name: Save durable checkpoint after batch 1
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+          overwrite: true
+      - name: Replay batch 2 of 9 (10 coins maximum)
+        if: success()
+        run: |
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+      - name: Save durable checkpoint after batch 2
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+          overwrite: true
+      - name: Replay batch 3 of 9 (10 coins maximum)
+        if: success()
+        run: |
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+      - name: Save durable checkpoint after batch 3
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+          overwrite: true
+      - name: Replay batch 4 of 9 (10 coins maximum)
+        if: success()
+        run: |
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+      - name: Save durable checkpoint after batch 4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+          overwrite: true
+      - name: Replay batch 5 of 9 (10 coins maximum)
+        if: success()
+        run: |
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+      - name: Save durable checkpoint after batch 5
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+          overwrite: true
+      - name: Replay batch 6 of 9 (10 coins maximum)
+        if: success()
+        run: |
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+      - name: Save durable checkpoint after batch 6
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+          overwrite: true
+      - name: Replay batch 7 of 9 (10 coins maximum)
+        if: success()
+        run: |
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+      - name: Save durable checkpoint after batch 7
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+          overwrite: true
+      - name: Replay batch 8 of 9 (10 coins maximum)
+        if: success()
+        run: |
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+      - name: Save durable checkpoint after batch 8
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+          overwrite: true
+      - name: Replay batch 9 of 9 (10 coins maximum)
+        if: success()
+        run: |
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+      - name: Save durable checkpoint after batch 9
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+          overwrite: true
+
+      - name: Rank all completed coins by verified first-30-second activity
+        if: always() && hashFiles('artifacts/coins/*.json') != ''
+        run: npm run backtest:rank -- --date="$BACKTEST_DATE" --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
+
+      - name: Run strict profitability and price-path research
+        if: always() && hashFiles('artifacts/batch-summary-*.json', 'artifacts/coins/*.json') != ''
+        run: npm run backtest:profitability -- --date="$BACKTEST_DATE" --round-trip-cost-pct=4
+
+      - name: Recompute rule sensitivity against the expanded sample
+        if: always() && hashFiles('artifacts/pump-profitability-backtest-*.json') != ''
+        run: npm run backtest:rule-sensitivity -- --date="$BACKTEST_DATE"
+
+      - name: Publish the completed research dataset to Neon
+        if: always() && hashFiles('artifacts/pump-launch-discovery-*.json') != ''
+        run: npm run backtest:publish -- --date="$BACKTEST_DATE" --run-id="$GITHUB_RUN_ID"
+
+      - name: Save final dataset, checkpoint and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded-final
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
