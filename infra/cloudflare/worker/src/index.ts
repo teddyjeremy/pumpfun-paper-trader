@@ -197,7 +197,7 @@ const INITIAL_STATUS: CoordinatorStatus = {
 };
 
 const MAX_CANDIDATES = 100;
-const PERSIST_EVERY_EVENTS = 25;
+const PERSIST_EVERY_EVENTS = 100;
 
 export class PumpFunCoordinator extends DurableObject<Env> {
   private socket: WebSocket | null = null;
@@ -216,6 +216,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   private discovery: DiscoveryStoreState = emptyDiscoveryStore();
   private hydrated = false;
   private pendingWrites = 0;
+  private lastPersistAtMs = 0;
   private activeSessionId: string | null = null;
   private solUsdPriceCache: Awaited<ReturnType<typeof fetchSolUsdPrice>> | null = null;
   private solUsdPriceFetchedAtMs = 0;
@@ -804,6 +805,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       }
     }
     if (this.status.enabled && this.postgresLeaseHeld) {
+      if (this.pendingWrites > 0 &&
+          (this.pendingWrites >= PERSIST_EVERY_EVENTS || Date.now() - this.lastPersistAtMs >= 60_000)) {
+        await this.persist().catch(() => undefined);
+      }
       await this.drainHeliusQueue();
       const leaseAfterDrain = await this.heartbeatPostgresWorkerLease();
       if (!leaseAfterDrain) {
@@ -2722,7 +2727,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         this.heliusConnectingSinceMs = 0;
         this.heliusState = resetHeliusSubscriptionIds(this.heliusState);
         this.sendHeliusSubscriptions();
-        void this.persist().then(() => this.drainHeliusQueue()).catch(() => undefined);
+        this.markDirty();
+        void this.drainHeliusQueue().catch(() => undefined);
       });
       socket.addEventListener("message", (message: MessageEvent) => {
         if (this.storagePaused || this.heliusSocket !== socket || !this.status.enabled || typeof message.data !== "string") return;
@@ -2732,7 +2738,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const record = payload as Record<string, unknown>;
         if (Number.isSafeInteger(record.id) && Number.isSafeInteger(record.result)) {
           this.heliusState = confirmHeliusSubscription(this.heliusState, record.id as number, record.result as number);
-          void this.persist().catch(() => undefined);
+          this.markDirty();
           return;
         }
         if (Number.isSafeInteger(record.id) && record.error) {
@@ -2747,7 +2753,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
               error: jsonSafe(record.error)
             });
           }
-          void this.persist().catch(() => undefined);
+          this.markDirty();
           return;
         }
         const notification = parseHeliusLogsNotification(payload);
@@ -2782,7 +2788,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
               reason: gap ? "NOTIFICATION_NOT_QUEUED" : result.outcome
             }, `helius-notification:${notification.signature}:${result.outcome}`);
         }
-        void this.persist().then(() => this.drainHeliusQueue()).catch(() => this.markHeliusIncomplete());
+        this.markDirty();
+        void this.drainHeliusQueue().catch(() => this.markHeliusIncomplete());
       });
       socket.addEventListener("close", () => {
         if (this.heliusSocket !== socket) return;
@@ -2791,7 +2798,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         this.heliusConnectedAtMs = 0;
         this.heliusConnectingSinceMs = 0;
         if (this.status.enabled) this.markHeliusCoverageGap();
-        void this.persist().catch(() => undefined);
+        this.markDirty();
       });
       socket.addEventListener("error", () => {
         if (this.heliusSocket !== socket) return;
@@ -2800,7 +2807,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         // Invalidate the affected coverage immediately; never wait for close.
         if (this.status.enabled) this.markHeliusCoverageGap();
         this.auditInBackground("ERROR", null, { subsystem: "HELIUS_WEBSOCKET", message: this.status.lastError });
-        void this.persist().catch(() => undefined);
+        this.markDirty();
         // Force the close path so the coordinator releases this socket and
         // schedules a fresh connection instead of remaining half-open.
         try { socket.close(1011, "Helius transport error"); } catch { /* close is best-effort */ }
@@ -2828,7 +2835,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         if (subscription.subscriptionId !== null) continue;
         socket.send(JSON.stringify(buildCandidateLogsSubscribe(subscription.bondingCurve, subscription.requestId, "confirmed")));
       }
-      void this.persist().catch(() => undefined);
+      this.markDirty();
     } catch {
       this.status.lastError = "Helius candidate subscription send failed.";
       socket.close(1011, "Helius subscription send failed");
@@ -3584,6 +3591,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     });
   }
 
+  private markDirty(): void {
+    this.pendingWrites += 1;
+    if (this.pendingWrites >= PERSIST_EVERY_EVENTS) {
+      void this.persist().catch(() => undefined);
+    }
+  }
+
   private syncCounts(): void {
     this.status.candidates = this.discovery.candidates.length;
     this.status.acceptedCandidates = this.discovery.accepted;
@@ -3622,6 +3636,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.persistChain = write.catch(() => undefined);
     try {
       await write;
+      this.lastPersistAtMs = Date.now();
     } catch (error) {
       this.pendingWrites += pendingAtStart;
       this.status.lastError = "Unable to persist discovery state; ingestion may be incomplete.";
