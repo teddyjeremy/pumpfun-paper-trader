@@ -21,6 +21,7 @@ jobs:
           PAPER_WORKER_URL: https://pumpfun-paper-worker.teddyjeremy12.workers.dev
         run: |
           set -euo pipefail
+          sleep 10
           response="$(curl --silent --show-error --fail-with-body \
             --max-time 15 \
             -X POST "$PAPER_WORKER_URL/stop" \
