@@ -93,6 +93,7 @@ import type { UnsignedInstructionFeeEvidence } from "../../../../src/ingestion/s
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
   CONTROL_TOKEN: string;
+  PAPER_WORKER_PAUSED?: string;
   HELIUS_API_KEY: string;
   PAPER_EVENT_INGEST_URL?: string;
   PAPER_EVENT_INGEST_TOKEN?: string;
@@ -237,6 +238,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     return Boolean(this.env.PAPER_EVENT_INGEST_URL && (this.env.PAPER_EVENT_INGEST_TOKEN_V2 || this.env.PAPER_EVENT_INGEST_TOKEN));
   }
 
+  private get storagePaused(): boolean {
+    return this.env.PAPER_WORKER_PAUSED === "true";
+  }
+
   private async postPostgresIngest(path: string, body: unknown): Promise<Response> {
     const baseUrl = this.env.PAPER_EVENT_INGEST_URL;
     const token = this.env.PAPER_EVENT_INGEST_TOKEN_V2 || this.env.PAPER_EVENT_INGEST_TOKEN;
@@ -323,7 +328,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private async flushAuditEventsToPostgres(sessionId: string): Promise<void> {
-    if (!this.postgresIngestConfigured || this.postgresFlushInFlight) return;
+    if (this.storagePaused || !this.postgresIngestConfigured || this.postgresFlushInFlight) return;
     const retryKey = "postgres_event_flush_retry_at_ms";
     const retryAt = await this.ctx.storage.get<number>(retryKey) ?? 0;
     if (Date.now() < retryAt) return;
@@ -764,6 +769,17 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
+    if (this.storagePaused) {
+      this.status.enabled = false;
+      this.status.connected = false;
+      this.status.subscriptionsSent = false;
+      this.status.heliusConnected = false;
+      this.socket?.close(1000, "Paused for Durable Objects quota protection");
+      this.heliusSocket?.close(1000, "Paused for Durable Objects quota protection");
+      this.socket = null;
+      this.heliusSocket = null;
+      return;
+    }
     await this.hydrate();
     // The Durable Object's alarm survives eviction, but in-memory lease state
     // does not. Reacquire the PostgreSQL fencing lease before resuming work.
@@ -1024,10 +1040,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   async stop(): Promise<CoordinatorStatus> {
     await this.hydrate();
-    this.markHeliusCoverageGap();
-    // Stop accepting provider messages before draining the audit queue, so no
-    // event can be appended after SESSION_STOPPED.
-    await this.ctx.storage.put("enabled", false);
+    // Close provider sockets before storage writes so emergency stop still
+    // works when the Durable Objects daily rows_written quota is exhausted.
     this.status.enabled = false;
     if (this.socket) {
       const socket = this.socket;
@@ -1043,6 +1057,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     }
     this.status.heliusConnected = false;
     this.status.nextReconnectAt = null;
+    this.markHeliusCoverageGap();
+    try {
+      await this.ctx.storage.put("enabled", false);
+    } catch (error) {
+      this.status.lastError = error instanceof Error
+        ? `Emergency stop closed streams, but could not persist disabled state: ${error.message.slice(0, 120)}`
+        : "Emergency stop closed streams, but Durable Object storage is unavailable.";
+      await this.releasePostgresWorkerLease().catch(() => undefined);
+      return this.getStatus();
+    }
     await this.auditChain;
     if (this.activeSessionId) {
       const completedSessionId = this.activeSessionId;
@@ -1223,6 +1247,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private auditInBackground(kind: AuditKind, mint: string | null, data: unknown, idempotencyKey?: string): void {
+    if (this.storagePaused) return;
     // Capture the session before asynchronous work: stop() clears the active
     // pointer after its final transaction, but this event still belongs to it.
     const sessionId = this.activeSessionId;
@@ -1238,6 +1263,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
 
   private async appendAudit(kind: AuditKind, mint: string | null, data: unknown,
     idempotencyKey?: string, sessionIdOverride?: string): Promise<void> {
+    if (this.storagePaused) return;
     const sessionId = sessionIdOverride ?? this.activeSessionId;
     if (!sessionId) return;
     const eventId = typeof idempotencyKey === "string" && idempotencyKey.trim().length > 0
@@ -2442,14 +2468,14 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private connect(): void {
-    if (this.socket) return;
+    if (this.storagePaused || this.socket) return;
     try {
       const socket = new WebSocket(buildPumpPortalDiscoveryUrl());
       this.socket = socket;
       this.connectingSinceMs = Date.now();
 
       socket.addEventListener("open", () => {
-        if (this.socket !== socket || !this.status.enabled) {
+        if (this.storagePaused || this.socket !== socket || !this.status.enabled) {
           socket.close(1000, "Coordinator disabled before connection opened");
           return;
         }
@@ -2473,7 +2499,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       });
 
       socket.addEventListener("message", async (message: MessageEvent) => {
-        if (this.socket !== socket || !this.status.enabled) return;
+        if (this.storagePaused || this.socket !== socket || !this.status.enabled) return;
         this.status.notificationsSinceStart += 1;
         this.status.lastMessageAt = new Date().toISOString();
         const parsed = parsePumpPortalDiscoveryMessage(
@@ -2662,13 +2688,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private connectHelius(): void {
-    if (this.heliusSocket || !this.status.enabled) return;
+    if (this.storagePaused || this.heliusSocket || !this.status.enabled) return;
     try {
       const socket = new WebSocket(buildHeliusWebSocketUrl(this.env.HELIUS_API_KEY));
       this.heliusSocket = socket;
       this.heliusConnectingSinceMs = Date.now();
       socket.addEventListener("open", () => {
-        if (this.heliusSocket !== socket || !this.status.enabled) {
+        if (this.storagePaused || this.heliusSocket !== socket || !this.status.enabled) {
           socket.close(1000, "Coordinator disabled before Helius connection opened");
           return;
         }
@@ -2681,7 +2707,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         void this.persist().then(() => this.drainHeliusQueue()).catch(() => undefined);
       });
       socket.addEventListener("message", (message: MessageEvent) => {
-        if (this.heliusSocket !== socket || !this.status.enabled || typeof message.data !== "string") return;
+        if (this.storagePaused || this.heliusSocket !== socket || !this.status.enabled || typeof message.data !== "string") return;
         let payload: unknown;
         try { payload = JSON.parse(message.data); } catch { this.markHeliusIncomplete(); return; }
         if (!payload || typeof payload !== "object") return;
@@ -2970,7 +2996,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private async drainHeliusQueue(): Promise<void> {
-    if (this.drainingHelius || !this.status.enabled) return;
+    if (this.storagePaused || this.drainingHelius || !this.status.enabled) return;
     this.drainingHelius = true;
     let activeWork: HeliusSignatureWork | null = null;
     let processedItems = 0;
@@ -3556,6 +3582,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private async persist(): Promise<void> {
+    if (this.storagePaused) return;
     const pendingAtStart = this.pendingWrites;
     this.pendingWrites = 0;
     const snapshot = structuredClone(this.discovery);
@@ -3614,6 +3641,27 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const coordinator = env.COORDINATOR.get(env.COORDINATOR.idFromName("primary"));
+
+    if (env.PAPER_WORKER_PAUSED === "true") {
+      const reason = "Worker paused: Durable Objects daily rows_written free-tier quota was exhausted. Resume only after quota reset and write-volume fixes.";
+      if (url.pathname === "/health" && request.method === "GET") {
+        return Response.json({
+          service: "pumpfun-paper-worker", mode: "paper", ready: false,
+          enabled: false, paused: true, connected: false, heliusConnected: false,
+          blocker: reason
+        }, { headers: { "cache-control": "no-store" } });
+      }
+      if (url.pathname === "/status" && request.method === "GET") {
+        return Response.json({
+          enabled: false, paused: true, connected: false, heliusConnected: false,
+          tradingReady: false, blocker: reason, readinessBlockers: [reason], lastError: reason
+        }, { headers: { "cache-control": "no-store" } });
+      }
+      if (url.pathname === "/stop" && request.method === "POST") {
+        return Response.json(await coordinator.stop(), { headers: { "cache-control": "no-store" } });
+      }
+      return Response.json({ error: reason, tradingReady: false }, { status: 503 });
+    }
 
     if (url.pathname === "/health" && request.method === "GET") {
       const status = await coordinator.getStatus();
@@ -3823,6 +3871,7 @@ export default {
     env: Env,
     context: ExecutionContext
   ): Promise<void> {
+    if (env.PAPER_WORKER_PAUSED === "true") return;
     const coordinator = env.COORDINATOR.get(env.COORDINATOR.idFromName("primary"));
     context.waitUntil((async () => {
       await coordinator.ensureRunning();
