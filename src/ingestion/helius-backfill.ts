@@ -57,8 +57,8 @@ export function createHistoricalBackfillState(input: {
   if (!Number.isSafeInteger(horizonSeconds) || horizonSeconds < 60 || horizonSeconds > 1800) {
     throw new Error("Backfill horizon must be between 60 and 1800 seconds.");
   }
-  if (!Number.isSafeInteger(maxSignatures) || maxSignatures < 1 || maxSignatures > 1_000) {
-    throw new Error("Backfill signature cap must be between 1 and 1,000.");
+  if (!Number.isSafeInteger(maxSignatures) || maxSignatures < 1 || maxSignatures > 5_000) {
+    throw new Error("Backfill signature cap must be between 1 and 5,000.");
   }
   return {
     mint: input.mint,
