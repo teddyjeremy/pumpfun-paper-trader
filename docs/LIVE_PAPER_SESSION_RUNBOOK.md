@@ -50,6 +50,8 @@ The coordinator's fenced Neon lease uses a 120-second TTL. It renews before and 
 
 **Current safety pause (Nov 14, 2026):** Cloudflare Observability confirmed that the Durable Objects free-tier daily `rows_written` quota was exhausted again at approximately 07:11 UTC. This is after the 00:00 UTC reset, so the current write pattern is not sustainable. `PAPER_WORKER_PAUSED=true` is enabled in `wrangler.jsonc`; public health/status now return a static disabled state without invoking the Durable Object. The pause was verified by [run 43570346129](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43570346129). Production ingestion smoke is intentionally skipped while paused. Do not unpause or start another observation session until the next quota reset and the write-volume reduction work is complete.
 
+**Low-write remediation committed:** forward Helius checkpoints now batch at 500 events or five minutes; candidate price trackers and processed-trade IDs are checkpointed together once per batch instead of writing multiple DO rows per trade; verified transaction snapshots are capped at 500; and automatic historical backfill plus independent gap recovery are disabled in the forward Worker (the separate GitHub historical workflows remain the path for those jobs). The Worker remains paused while these changes are validated. The [post-reset finalization workflow](../.github/workflows/finalize-paused-paper-session.yml) is scheduled for Nov 15 at 00:05 UTC; it persists the previous session as stopped while keeping the Worker paused. It does not automatically resume observation.
+
 ## Phase 2 — four-hour forward paper observation
 
 Only after Phase 1 passes:
