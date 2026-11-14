@@ -44,8 +44,8 @@ async function save(path: string, value: unknown): Promise<void> {
 }
 const date = option("date", "");
 const offsetMinutes = Number(option("utc-offset-minutes", "180"));
-const maxCredits = integer("max-credits", 10_000, 100_000);
-const maxLaunches = integer("max-launches", 100, 100);
+const maxCredits = integer("max-credits", 10_000, 300_000);
+const maxLaunches = integer("max-launches", 100, 300);
 const maxPagesPerBucket = integer("max-pages-per-bucket", 5, 20);
 const apiKey = process.env.HELIUS_API_KEY ?? "";
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
