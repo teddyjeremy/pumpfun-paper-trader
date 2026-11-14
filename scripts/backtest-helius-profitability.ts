@@ -185,7 +185,8 @@ const report = {
   riskRejectedCandidates: simulations.filter(row => row.riskEvidence === "REJECTED").length,
   riskUnverifiedCandidates: simulations.filter(row => row.riskEvidence === "UNVERIFIED").length,
   strictStrategy: {
-    status: "EXECUTION_GRADE_NOT_ESTABLISHED",
+    status: strictReturns.length === 0 ? "NO_ELIGIBLE_TRADES" : "RESERVE_PRICE_PROXY_ONLY",
+    executionGrade: "NOT_ESTABLISHED_WITHOUT_HISTORICAL_FULL_SIZE_QUOTES_AND_FEES",
     trades: strictReturns.length,
     modeledNetReturnPct: sum(strictReturns),
     modeledPnlUsdAtOneDollarStake: sum(strictReturns) / 100,
@@ -203,7 +204,7 @@ const report = {
   winRate: netReturns.length ? wins / netReturns.length : null,
   wins, losses, breakeven: netReturns.length - wins - losses,
   expectancyPctPerCandidate: netReturns.length ? netReturns.reduce((sum, value) => sum + value, 0) / netReturns.length : null,
-  profitFactor: grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? null : 0,
+  profitFactor: netReturns.length === 0 ? null : grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? null : 0,
   results,
   limitations: [
     "This is a reserve-price path simulation, not a historical executable-quote backtest.",
