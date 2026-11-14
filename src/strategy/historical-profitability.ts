@@ -11,7 +11,7 @@ export interface HistoricalProfitabilityInput {
   entryPriceQuotePerToken: number;
   horizonSeconds?: number;
   roundTripCostPct: number;
-  riskCleared: boolean;
+  riskStatus: "CLEARED" | "REJECTED" | "UNKNOWN";
   dynamicExitConfig?: DynamicExitConfig;
 }
 
@@ -29,7 +29,7 @@ export interface HistoricalProfitabilityResult {
   maxFavorableExcursionPct: number | null;
   maxAdverseExcursionPct: number | null;
   roundTripCostPct: number;
-  riskEvidence: "CLEARED" | "UNVERIFIED";
+  riskEvidence: "CLEARED" | "REJECTED" | "UNVERIFIED";
   executionEvidence: "RESERVE_PRICE_PROXY_NOT_EXECUTABLE";
   dynamicExitEvidence: "RECONSTRUCTED_FROM_VERIFIED_TRADES";
   note: string;
@@ -113,7 +113,7 @@ export function simulateHistoricalProfitability(
     grossReturnPct: null, modeledNetReturnPct: null,
     modeledPnlUsdOnOneDollar: null, maxFavorableExcursionPct: null,
     maxAdverseExcursionPct: null, roundTripCostPct: input.roundTripCostPct,
-    riskEvidence: input.riskCleared ? "CLEARED" as const : "UNVERIFIED" as const,
+    riskEvidence: input.riskStatus === "CLEARED" ? "CLEARED" as const : input.riskStatus === "REJECTED" ? "REJECTED" as const : "UNVERIFIED" as const,
     executionEvidence: "RESERVE_PRICE_PROXY_NOT_EXECUTABLE" as const,
     dynamicExitEvidence: "RECONSTRUCTED_FROM_VERIFIED_TRADES" as const,
     note: "Reserve-ratio marks are not executable full-size quotes. The modeled round-trip haircut is an assumption; historical network/priority fees, exact SDK slippage, taxes and migrated-pool fills are not proven by this dataset. Risk-unverified candidates are research-only."
