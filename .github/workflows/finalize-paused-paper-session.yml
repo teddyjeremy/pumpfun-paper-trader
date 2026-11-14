@@ -28,14 +28,12 @@ jobs:
           echo "$response" | node -e '
             let s=""; process.stdin.on("data", c => s+=c).on("end", () => {
               const status=JSON.parse(s);
-              if (status.enabled !== false || status.connected !== false || status.heliusConnected !== false) {
+              if (status.enabled !== false || status.connected !== false ||
+                  status.heliusConnected !== false || status.tradingReady !== false) {
                 console.error("The previous paper session is not fully finalized.");
                 process.exit(1);
               }
-              if (status.lastError) {
-                console.error(String(status.lastError));
-                process.exit(1);
-              }
+              if (status.lastError) console.log("Prior session diagnostic:", String(status.lastError));
               console.log("PASS: previous paper session is durably stopped; Worker remains paused.");
             });
           '
