@@ -48,6 +48,8 @@ A direct Durable Object method test with in-memory storage is useful regression 
 
 The coordinator's fenced Neon lease uses a 120-second TTL. It renews before and after Helius queue work and after persistence flushes. Each Helius drain is bounded to five work items; pending work schedules another alarm rather than monopolizing one Durable Object invocation. A lost lease remains a fail-closed stop condition. The production Worker-to-Neon smoke passed in [run 43568650219](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43568650219), but that short smoke is not a substitute for a sustained forward-session lease/stream acceptance run.
 
+**Current safety pause (Nov 14, 2026):** Cloudflare Observability confirmed that the Durable Objects free-tier daily `rows_written` quota was exhausted again at approximately 07:11 UTC. This is after the 00:00 UTC reset, so the current write pattern is not sustainable. `PAPER_WORKER_PAUSED=true` is enabled in `wrangler.jsonc`; public health/status now return a static disabled state without invoking the Durable Object. The pause was verified by [run 43570346129](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43570346129). Production ingestion smoke is intentionally skipped while paused. Do not unpause or start another observation session until the next quota reset and the write-volume reduction work is complete.
+
 ## Phase 2 — four-hour forward paper observation
 
 Only after Phase 1 passes:
