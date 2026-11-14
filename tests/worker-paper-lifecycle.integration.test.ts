@@ -357,7 +357,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
       topUpThresholdUsd: 1, topUpCount: 0, totalTopUpsUsd: 0
     });
     await storage.put(`audit_events:${sessionId}:00000000`, [{
-      sessionId, sequence: 1, eventId: "outbox-event-1", kind: "SESSION_STARTED",
+      sessionId, sequence: 1, eventId: "", kind: "SESSION_STARTED",
       occurredAt, mint: null, strategyVersion: "strict-v1", data: {}
     }]);
     const coordinator = new PumpFunCoordinator(context(storage) as never, {
