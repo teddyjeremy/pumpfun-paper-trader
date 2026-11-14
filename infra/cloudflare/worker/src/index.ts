@@ -1220,7 +1220,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     idempotencyKey?: string, sessionIdOverride?: string): Promise<void> {
     const sessionId = sessionIdOverride ?? this.activeSessionId;
     if (!sessionId) return;
-    const eventId = idempotencyKey ?? crypto.randomUUID();
+    const eventId = typeof idempotencyKey === "string" && idempotencyKey.trim().length > 0
+      ? idempotencyKey : crypto.randomUUID();
     await this.ctx.storage.transaction(async txn => {
       const metaKey = `audit_session:${sessionId}`;
       const dedupeKey = `audit_event_id:${sessionId}:${eventId}`;
@@ -1232,7 +1233,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       const pageKey = `audit_events:${sessionId}:${String(pageNumber).padStart(8, "0")}`;
       const page = await txn.get<StoredAuditEvent[]>(pageKey) ?? [];
       page.push({ sessionId, sequence, eventId, kind, occurredAt: new Date().toISOString(),
-        mint, strategyVersion: meta.strategyVersion, data: jsonSafe(data) });
+        mint: mint ?? null,
+        strategyVersion: typeof meta.strategyVersion === "string" && meta.strategyVersion.trim()
+          ? meta.strategyVersion : "paper-strategy-v1",
+        data: jsonSafe(data) });
       await txn.put(pageKey, page);
       await txn.put(dedupeKey, sequence);
       await txn.put(metaKey, { ...meta, eventCount: sequence });
