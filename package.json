@@ -23,7 +23,8 @@
     "backtest:rank": "tsx scripts/backtest-helius-rank.ts",
     "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
     "backtest:publish": "tsx scripts/publish-helius-backtest-dashboard.ts",
-    "backtest:profitability": "tsx scripts/backtest-helius-profitability.ts"
+    "backtest:profitability": "tsx scripts/backtest-helius-profitability.ts",
+    "backtest:rule-sensitivity": "tsx scripts/analyze-strategy-rule-sensitivity.ts"
   },
   "dependencies": {
     "fastify": "^5.2.1",
