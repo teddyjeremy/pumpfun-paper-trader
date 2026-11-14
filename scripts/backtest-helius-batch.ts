@@ -195,6 +195,7 @@ for (let candidateIndex = startIndex; candidateIndex < endIndex; candidateIndex 
       verifiedTransactions: collected.transactions.length,
       confirmedFailedSignatures: collected.failedSignatures.length,
       ignoredNonMatchingSignatures: collected.ignoredSignatures.length,
+      decodeFailures: collected.decodeFailures.length,
       creditsUsed: collected.creditsUsed, reason: collected.reason
     },
     replay: replay ? {
