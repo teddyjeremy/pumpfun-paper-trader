@@ -1,0 +1,48 @@
+name: Historical profitability — Nov 10 expanded partial sample
+
+on:
+  push:
+    paths:
+      - ".github/workflows/historical-profitability-nov10-partial.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  profitability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+
+      - name: Download the saved Nov 10 300-launch partial dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-10-300k
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 43576238944
+          path: artifacts
+
+      - name: Run strict-v1 entry audit and dynamic-exit price-path research
+        run: npm run backtest:profitability -- --date=2026-11-10 --round-trip-cost-pct=4
+
+      - name: Recompute rule blocker counts and single-rule counterfactuals
+        run: npm run backtest:rule-sensitivity -- --dates=2026-11-10
+
+      - name: Save Nov 10 partial profitability and rule reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-profitability-2026-11-10-partial
+          path: |
+            artifacts/pump-profitability-backtest-2026-11-10.json
+            artifacts/pump-rule-sensitivity-2026-11-10.json
+          if-no-files-found: error
+          retention-days: 30
