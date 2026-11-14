@@ -39,7 +39,7 @@ jobs:
     env:
       HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
       BACKTEST_DATE: ${{ github.event.inputs.date || '2026-11-12' }}
-      PREVIOUS_RUN_ID: ${{ github.event.inputs.previous_run_id || '43505595998' }}
+      PREVIOUS_RUN_ID: ${{ github.event.inputs.previous_run_id || '43507464167' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
