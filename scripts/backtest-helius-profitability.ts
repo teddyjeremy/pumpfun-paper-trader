@@ -100,6 +100,7 @@ function simulatePortfolio(rows: Array<Record<string, unknown>>) {
   let maximumOpenPositions = 1;
   let skippedForCapacity = 0;
   let skippedForCash = 0;
+  let tradesEntered = 0;
   const open: Array<{ entryAt: number; exitAt: number | null; stakeUsd: number; netReturnPct: number }> = [];
   const equityPoints: number[] = [startingBankrollUsd];
   const ordered = rows.filter(row => row.riskEvidence === "CLEARED")
@@ -114,7 +115,7 @@ function simulatePortfolio(rows: Array<Record<string, unknown>>) {
       cash += position.stakeUsd + pnl;
       realizedPnlUsd += pnl;
       open.splice(i, 1);
-      equityPoints.push(markEquity());
+      equityPoints.push(cash + open.reduce((sum, item) => sum + item.stakeUsd, 0));
     }
   };
   for (const row of ordered) {
@@ -131,27 +132,34 @@ function simulatePortfolio(rows: Array<Record<string, unknown>>) {
     const maxPositions = Math.min(100, 1 + levels);
     maximumOpenPositions = Math.max(maximumOpenPositions, maxPositions);
     if (open.length >= maxPositions) { skippedForCapacity += 1; continue; }
-    if (cash < stakeUsd && cash < topUpBelowUsd) {
+    const preEntryEquity = cash + open.reduce((sum, item) => sum + item.stakeUsd, 0);
+    if (preEntryEquity < topUpBelowUsd) {
       cash += topUpUsd;
       topUps += topUpUsd;
     }
     if (cash < stakeUsd) { skippedForCash += 1; continue; }
     cash -= stakeUsd;
     open.push({ entryAt, exitAt, stakeUsd, netReturnPct });
-    equityPoints.push(markEquity());
+    tradesEntered += 1;
+    equityPoints.push(cash + open.reduce((sum, item) => sum + item.stakeUsd, 0));
   }
+  closeDue(Number.MAX_SAFE_INTEGER);
   const endingEquityUsd = markEquity();
+  equityPoints.push(endingEquityUsd);
   const unrealizedPnlUsd = open.reduce((sum, position) =>
     sum + position.stakeUsd * position.netReturnPct / 100, 0);
-  const peak = Math.max(startingBankrollUsd, ...equityPoints);
-  const maxDrawdownPct = equityPoints.reduce((worst, equity) =>
-    Math.max(worst, peak > 0 ? (peak - equity) / peak * 100 : 0), 0);
+  let peak = startingBankrollUsd;
+  let maxDrawdownPct = 0;
+  for (const equity of equityPoints) {
+    peak = Math.max(peak, equity);
+    if (peak > 0) maxDrawdownPct = Math.max(maxDrawdownPct, (peak - equity) / peak * 100);
+  }
   return {
     startingBankrollUsd, endingEquityUsd,
     totalCapitalTopUpsUsd: topUps,
     netTradingPnlUsd: realizedPnlUsd + unrealizedPnlUsd,
     realizedPnlUsd, unrealizedPnlUsd,
-    tradesEntered: ordered.length - skippedForCapacity - skippedForCash,
+    tradesEntered,
     openPositionsAtEnd: open.length,
     maxConcurrentPositionsObserved: maximumOpenPositions,
     skippedForCapacity, skippedForCash, maxDrawdownPct,
