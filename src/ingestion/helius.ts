@@ -1,6 +1,6 @@
 import { decodeSuccessfulPumpTransaction, type PumpCreateEvent, type PumpTradeEvent } from "./pump-events.js";
-
-export const PUMP_FUN_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+import { PUMP_FUN_PROGRAM_ID } from "./pump-constants.js";
+export { PUMP_FUN_PROGRAM_ID } from "./pump-constants.js";
 const BASE58_SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,100}$/;
 const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
