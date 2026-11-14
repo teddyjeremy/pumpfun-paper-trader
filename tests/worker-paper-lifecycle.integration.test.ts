@@ -305,6 +305,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     const mint = "So11111111111111111111111111111111111111112";
     const coordinator = new PumpFunCoordinator(context(storage) as never, {} as never) as unknown as {
       activeSessionId: string | null;
+      getStatus: () => Promise<unknown>;
       recordCandidateTradePrice: (trade: {
         mint: string; quoteMint: string; quoteAmount: string; tokenAmount: string;
         timestamp: string; signature: string; isBuy: boolean;
@@ -312,6 +313,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
       persist: () => Promise<void>;
       candidatePriceTrackers: Record<string, { sampleCount?: number }>;
     };
+    await coordinator.getStatus();
     coordinator.activeSessionId = sessionId;
     const trade = {
       mint, quoteMint: "So11111111111111111111111111111111111111112",
