@@ -1,0 +1,80 @@
+name: Retry incomplete historical coins (bounded, no rediscovery)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: historical-paper-replay-shared-helius-key
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  retry-incomplete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Typecheck and test before spending Helius credits
+        run: npm run typecheck:scripts && npm test -- --run
+
+      - name: Restore Nov 11 reranked checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-11-reranked
+          path: artifacts
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 43568187060
+      - name: Retry Nov 11 cap-limited coins only
+        run: |
+          npm run backtest:batch -- --date=2026-11-11 --batch-size=20 --max-credits=30000 --max-new-credits=8000 --max-signatures=2500 --retry-incomplete=true --skip-mints=DJYzweGzY3xTCAdTug9L4tVPGFVUjpZ7wXrstw2DJNjk
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      - name: Rerank Nov 11
+        run: npm run backtest:rank -- --date=2026-11-11 --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
+      - name: Publish Nov 11 to Neon
+        run: npm run backtest:publish -- --date=2026-11-11 --run-id="$GITHUB_RUN_ID"
+      - name: Save Nov 11 retried dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-11-retried
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+
+      - name: Clear workspace before Nov 12
+        run: rm -rf artifacts
+      - name: Restore Nov 12 reranked checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-12-reranked
+          path: artifacts
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 43568059148
+      - name: Retry Nov 12 cap-limited coins only
+        run: |
+          npm run backtest:batch -- --date=2026-11-12 --batch-size=20 --max-credits=50000 --max-new-credits=8000 --max-signatures=2500 --retry-incomplete=true
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      - name: Rerank Nov 12
+        run: npm run backtest:rank -- --date=2026-11-12 --min-buyers=15 --min-buy-trades=15 --min-move-pct=10 --min-liquidity-sol=5
+      - name: Publish Nov 12 to Neon
+        run: npm run backtest:publish -- --date=2026-11-12 --run-id="$GITHUB_RUN_ID"
+      - name: Save Nov 12 retried dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-12-retried
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
