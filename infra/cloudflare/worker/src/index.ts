@@ -3658,6 +3658,9 @@ export default {
         }, { headers: { "cache-control": "no-store" } });
       }
       if (url.pathname === "/stop" && request.method === "POST") {
+        if (!(await authorized(request, env))) {
+          return Response.json({ error: "Unauthorized" }, { status: 401 });
+        }
         return Response.json(await coordinator.stop(), { headers: { "cache-control": "no-store" } });
       }
       return Response.json({ error: reason, tradingReady: false }, { status: 503 });
