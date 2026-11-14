@@ -30,6 +30,14 @@ jobs:
           node-version: 22
       - run: npm install
 
+      - name: Restore partial discovery checkpoint from the previous attempt
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-backtest-state-2026-11-14-expanded-final
+          run-id: 43601632533
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts/
+
       - name: Validate credentials before spending credits
         run: |
           test -n "$HELIUS_API_KEY" || { echo "HELIUS_API_KEY is required"; exit 1; }
