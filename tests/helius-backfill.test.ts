@@ -47,6 +47,44 @@ describe("bounded Helius historical backfill", () => {
     expect(result.state.before).toBe(newer);
   });
 
+  it("retries transient signature-history HTTP failures only within the supplied budget", async () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    let calls = 0;
+    const result = await fetchHeliusAddressSignaturesPage(initial, {
+      apiKey: "test-key",
+      maxTransientRetries: 2,
+      retryDelayMs: 0,
+      fetcher: async () => {
+        calls += 1;
+        if (calls === 1) return new Response("rate limited", { status: 429 });
+        return new Response(JSON.stringify({ result: [
+          { signature: newer, slot: 12, blockTime: 1060, err: null }
+        ] }), { status: 200 });
+      }
+    });
+    expect(calls).toBe(2);
+    expect(result.status).toBe("CONTINUE");
+    expect(result.state.before).toBe(newer);
+  });
+
+  it("does not retry signature-history failures when no retry budget is supplied", async () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    let calls = 0;
+    const result = await fetchHeliusAddressSignaturesPage(initial, {
+      apiKey: "test-key",
+      fetcher: async () => {
+        calls += 1;
+        return new Response("rate limited", { status: 429 });
+      }
+    });
+    expect(calls).toBe(1);
+    expect(result.status).toBe("INCOMPLETE");
+  });
+
   it("fails closed on HTTP, JSON-RPC and malformed history responses", async () => {
     const initial = createHistoricalBackfillState({
       mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
