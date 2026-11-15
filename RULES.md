@@ -1,5 +1,7 @@
 # Overnight paper rules
 
+> **Research only — not the production paper strategy.** These one-minute candle-path comparisons are not authorized for forward paper fills. The production strategy remains the fail-closed 15-rule audit in `src/paper/strategy-audit.ts`. The standalone `npm run paper` polling mode is blocked until it uses fresh exact-size SDK quotes, verified sellability, complete risk evidence and the durable Worker journal.
+
 Strategy that won: **early-launch snipe on the pump.fun path, one minute after launch.** Momentum scalping lost money on the holdout day. Graduation was profitable and took fewer trades. Copy-trading could not be tested as an entry rule. This is paper research on a biased sample, not a claim that a $2.40 wallet should trade live.
 
 ## What was compared
