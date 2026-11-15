@@ -2,9 +2,12 @@
  * Paper-only session for the data-backed throughput rules.
  * Never signs, never submits, and has no private-key path.
  *
- *   npm run paper                 # poll public data until stopped
- *   npm run paper -- --once       # one poll, then exit
- *   npm run paper -- --replay     # resimulate the saved dataset
+ *   npm run paper -- --replay     # historical research only
+ *
+ * Forward polling is intentionally blocked: this standalone runner prices
+ * from GeckoTerminal candles and writes a local JSON file. It does not obtain
+ * fresh exact-size Pump SDK buy/sell quotes, validate live sellability, or
+ * commit the durable Worker journal transition required for paper fills.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -308,39 +311,18 @@ async function main(): Promise<void> {
     console.error("Refusing --live. This process never signs or sends transactions.");
     process.exit(2);
   }
+  if (!arg("--replay")) {
+    console.error(
+      "Refusing forward paper polling: candle-derived prices and local JSON state are not executable paper fills. " +
+      "Forward paper execution must use the Cloudflare Worker with fresh exact-size Pump SDK buy/sell quotes, " +
+      "validated sellability, complete creator and wallet-cluster evidence, reviewed chronological calibration, " +
+      "all strict strategy rules, and an idempotent durable journal transition."
+    );
+    process.exit(2);
+  }
   const strategy = await readJson<ChosenStrategy>(resolve("data/helius/chosen-strategy.json"));
   if (!strategy) throw new Error("Missing data/helius/chosen-strategy.json. Run npm run backtest:rules first.");
-  if (arg("--replay")) {
-    await replay(strategy);
-    return;
-  }
-  const rugs = loadRugCsv(process.env.RUG_SIGNALS_CSV || resolve("data/rug-signals.csv"));
-  const helius = await readJson<HeliusCache>(CACHE_PATH) ?? {};
-  let session = await readJson<Session>(SESSION_PATH);
-  if (!session || session.strategyId !== strategy.id) {
-    session = {
-      strategyId: strategy.id,
-      startedAt: new Date().toISOString(),
-      equityUsd: strategy.sizing.startingEquityUsd,
-      dayKey: new Date().toISOString().slice(0, 10),
-      dayStartEquityUsd: strategy.sizing.startingEquityUsd,
-      killed: false,
-      seen: [],
-      open: [],
-      closed: [],
-      lastBar: {},
-      heliusCreditsUsed: 0
-    };
-  }
-  session.lastBar ??= {};
-  session.heliusCreditsUsed ??= 0;
-  do {
-    await pollOnce(strategy, session, rugs, helius);
-    await mkdir(resolve("data"), { recursive: true });
-    await writeFile(SESSION_PATH, JSON.stringify(session, null, 2));
-    if (arg("--once")) return;
-    await new Promise(resolveSleep => setTimeout(resolveSleep, POLL_MS));
-  } while (!arg("--once"));
+  await replay(strategy);
 }
 
 main().catch(error => {
