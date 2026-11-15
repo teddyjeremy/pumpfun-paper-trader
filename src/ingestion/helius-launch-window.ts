@@ -106,7 +106,11 @@ export async function collectHistoricalLaunchWindow(
       continue;
     }
     const fetched = await fetchAndVerifyPumpTransaction(signatureInfo.signature, input.mint, {
-      apiKey: config.apiKey, commitment: "confirmed", fetcher: countedFetcher
+      apiKey: config.apiKey,
+      commitment: "confirmed",
+      fetcher: countedFetcher,
+      maxTransientRetries: 2,
+      retryDelayMs: 500
     });
     if (budgetExhausted) {
       return finish("BUDGET_EXHAUSTED", "Helius credit ceiling reached during transaction decoding.");
