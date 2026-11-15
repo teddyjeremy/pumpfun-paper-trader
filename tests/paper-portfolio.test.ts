@@ -43,15 +43,28 @@ describe("paper portfolio accounting",()=>{
   expect(closed.position.rentReserveUsd).toBeCloseTo(0.2,8);
  });
 
- it("locks the expected sell fee so concurrent entries cannot spend the same exit budget",()=>{
-  let state={...createPaperPortfolio(6),maxConcurrentPositions:2};
+ it("locks the expected sell fee and only permits concurrent entries after a verified equity doubling",()=>{
+  const state=createPaperPortfolio(6);
   const first=openPaperPosition(state,{mint:"reserved-fee-1",positionId:"reserved-fee-position-1",occurredAt:now,
     buyQuote:quote("reserved-fee-1","BUY"),sellQuote:quote("reserved-fee-1","SELL"),nowMs:Date.parse(now)});
   expect(first.position.expectedSellCostsUsd).toBeCloseTo(0.007,8);
   expect(first.state.availableCashUsd).toBeCloseTo(4.986,8);
+  expect(first.state.maxConcurrentPositions).toBe(1);
+
+  // A fresh full-position SDK sell quote marks the $6 initial portfolio at
+  // exactly $12. Only that verified 2x equity mark unlocks the second slot
+  // and the 50% stake increase; a test-only capacity override would bypass
+  // the production scaling invariant.
+  const doubled=markPaperPosition(first.state,{sellQuotes:[
+    quote("reserved-fee-1","SELL","1000000",7.014)
+  ],markedAt:now,nowMs:Date.parse(now)});
+  expect(doubled.highWaterEquityUsd).toBeCloseTo(12,8);
+  expect(doubled.maxConcurrentPositions).toBe(2);
+  expect(doubled.positionSizeUsd).toBe(1.5);
+
   const secondBuy=quote("reserved-fee-2","BUY");
-  secondBuy.requestedUsd=first.state.positionSizeUsd;
-  const second=openPaperPosition(first.state,{mint:"reserved-fee-2",positionId:"reserved-fee-position-2",occurredAt:now,
+  secondBuy.requestedUsd=doubled.positionSizeUsd;
+  const second=openPaperPosition(doubled,{mint:"reserved-fee-2",positionId:"reserved-fee-position-2",occurredAt:now,
     buyQuote:secondBuy,sellQuote:quote("reserved-fee-2","SELL"),nowMs:Date.parse(now)});
   expect(second.state.availableCashUsd).toBeCloseTo(3.472,8);
   const closed=closePaperPosition(second.state,{positionId:"reserved-fee-position-1",
@@ -192,29 +205,34 @@ describe("paper portfolio accounting",()=>{
   const opened=openPaperPosition(createPaperPortfolio(),{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
   expect(()=>openPaperPosition(opened.state,{mint:"mint2",positionId:"p1",occurredAt:now,buyQuote:quote("mint2","BUY"),sellQuote:quote("mint2","SELL"),nowMs:Date.parse(now)})).toThrow(/position ID must be unique/);
  });
- it("adds one slot and compounds stake by 50% at each equity doubling, capped at $100",()=>{
+ it("adds one slot and compounds stake by 50% only at exact equity doublings, capped at $100",()=>{
   const openAndMark=(value:number)=>{
    const opened=openPaperPosition(createPaperPortfolio(),{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
    return markPaperPosition(opened.state,{sellQuotes:[quote("mint","SELL","1000000",value+0.007)],markedAt:now,nowMs:Date.parse(now)});
   };
-  const atFive=openAndMark(3.307);
-  expect(atFive.bankroll.currentEquityUsd).toBeCloseTo(5);
-  expect(atFive.maxConcurrentPositions).toBe(2);
-  expect(atFive.positionSizeUsd).toBe(1.5);
-  const atTen=openAndMark(8.307);
-  expect(atTen.bankroll.currentEquityUsd).toBeCloseTo(10);
-  expect(atTen.maxConcurrentPositions).toBe(3);
-  expect(atTen.positionSizeUsd).toBe(2.25);
-  const atTwenty=openAndMark(18.307);
-  expect(atTwenty.bankroll.currentEquityUsd).toBeCloseTo(20);
-  expect(atTwenty.maxConcurrentPositions).toBe(4);
-  expect(atTwenty.positionSizeUsd).toBe(3.375);
-  const atForty=openAndMark(38.307);
-  expect(atForty.bankroll.currentEquityUsd).toBeCloseTo(40);
-  expect(atForty.maxConcurrentPositions).toBe(5);
-  expect(atForty.positionSizeUsd).toBe(5.0625);
-  const atStakeCap=openAndMark(10_238.307);
-  expect(atStakeCap.bankroll.currentEquityUsd).toBeCloseTo(10_240);
+  // Default initial bankroll is $2.70, so the first growth level is $5.40.
+  const belowDouble=openAndMark(3.706);
+  expect(belowDouble.bankroll.currentEquityUsd).toBeCloseTo(5.399);
+  expect(belowDouble.maxConcurrentPositions).toBe(1);
+  expect(belowDouble.positionSizeUsd).toBe(1);
+  const atFirstDouble=openAndMark(3.707);
+  expect(atFirstDouble.bankroll.currentEquityUsd).toBeCloseTo(5.4);
+  expect(atFirstDouble.maxConcurrentPositions).toBe(2);
+  expect(atFirstDouble.positionSizeUsd).toBe(1.5);
+  const atSecondDouble=openAndMark(9.107);
+  expect(atSecondDouble.bankroll.currentEquityUsd).toBeCloseTo(10.8);
+  expect(atSecondDouble.maxConcurrentPositions).toBe(3);
+  expect(atSecondDouble.positionSizeUsd).toBe(2.25);
+  const atThirdDouble=openAndMark(19.907);
+  expect(atThirdDouble.bankroll.currentEquityUsd).toBeCloseTo(21.6);
+  expect(atThirdDouble.maxConcurrentPositions).toBe(4);
+  expect(atThirdDouble.positionSizeUsd).toBe(3.375);
+  const atFourthDouble=openAndMark(41.507);
+  expect(atFourthDouble.bankroll.currentEquityUsd).toBeCloseTo(43.2);
+  expect(atFourthDouble.maxConcurrentPositions).toBe(5);
+  expect(atFourthDouble.positionSizeUsd).toBe(5.0625);
+  const atStakeCap=openAndMark(11_057.507);
+  expect(atStakeCap.bankroll.currentEquityUsd).toBeCloseTo(11_059.2);
   expect(atStakeCap.maxConcurrentPositions).toBe(13);
   expect(atStakeCap.positionSizeUsd).toBe(100);
  });

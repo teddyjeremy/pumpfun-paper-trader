@@ -66,7 +66,6 @@ export interface PaperPortfolioState {
 }
 export const PAPER_PORTFOLIO_POLICY = Object.freeze({
   initialStakeUsd: 1,
-  firstGrowthThresholdUsd: 5,
   maxStakeUsd: 100,
   initialBankrollUsd: 2.70,
   topUpUsd: 2.70,
@@ -146,7 +145,7 @@ function applyEquityAndTopUp(state: PaperPortfolioState, equity: number, occurre
   const cash = round(state.availableCashUsd + (topped.event ? PAPER_PORTFOLIO_POLICY.topUpUsd : 0));
   const highWaterEquityUsd = Math.max(state.highWaterEquityUsd,
     growthEquity({ ...state, bankroll: topped.state }));
-  const limits = capacityForEquity(highWaterEquityUsd);
+  const limits = capacityForEquity(highWaterEquityUsd, state.bankroll.initialBankrollUsd);
   return {
     bankroll: topped.state, availableCashUsd: cash,
     reservedAccountRentUsd: state.reservedAccountRentUsd ?? 0,
@@ -163,10 +162,16 @@ export function createPaperPortfolio(initialBankrollUsd = PAPER_PORTFOLIO_POLICY
     maxConcurrentPositions: 1, positions: [], enteredMints: [], lastMarkedAt: null
   };
 }
-function capacityForEquity(equity: number): { stake: number; slots: number } {
-  const levels = equity < PAPER_PORTFOLIO_POLICY.firstGrowthThresholdUsd
+function capacityForEquity(equity: number, initialBankrollUsd: number): { stake: number; slots: number } {
+  if (!Number.isFinite(initialBankrollUsd) || initialBankrollUsd <= 0) {
+    throw new Error("Initial bankroll must be positive before portfolio growth can be calculated.");
+  }
+  // Scale only after marked trading equity (excluding simulated top-ups)
+  // reaches an exact 2x multiple of this session's initial bankroll.
+  const firstGrowthThresholdUsd = initialBankrollUsd * 2;
+  const levels = equity < firstGrowthThresholdUsd
     ? 0
-    : 1 + Math.floor(Math.log2(equity / PAPER_PORTFOLIO_POLICY.firstGrowthThresholdUsd));
+    : 1 + Math.floor(Math.log2(equity / firstGrowthThresholdUsd));
   return {
     // Compound a 50% stake increase at every equity doubling: $1 -> $1.50 -> $2.25 -> $3.375, capped at $100.
     stake: Math.min(PAPER_PORTFOLIO_POLICY.maxStakeUsd, round(PAPER_PORTFOLIO_POLICY.initialStakeUsd * Math.pow(1.5, levels))),
