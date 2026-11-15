@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { evaluateTradingReadiness, type TradingReadinessInput } from "../src/paper/trading-readiness.js";
 
 const ready: TradingReadinessInput = {
+  workerPaused: false,
   coordinatorEnabled: true,
   activeSession: true,
   discoveryConnected: true,
@@ -18,6 +19,12 @@ const ready: TradingReadinessInput = {
 };
 
 describe("system-level paper trading readiness", () => {
+  it("never reports ready while the operator pause switch is active", () => {
+    const result = evaluateTradingReadiness({ ...ready, workerPaused: true });
+    expect(result.tradingReady).toBe(false);
+    expect(result.blockers).toContain("Paper Worker is paused by operator configuration.");
+  });
+
   it("reports ready only when every infrastructure prerequisite is present", () => {
     expect(evaluateTradingReadiness(ready)).toEqual({ tradingReady: true, blockers: [] });
   });
