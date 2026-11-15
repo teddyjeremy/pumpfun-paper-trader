@@ -85,7 +85,8 @@ export async function collectHistoricalLaunchWindow(
 
   while (state.status !== "COMPLETE" && state.status !== "INCOMPLETE") {
     const page = await fetchHeliusAddressSignaturesPage(state, {
-      apiKey: config.apiKey, commitment: "confirmed", fetcher: countedFetcher
+      apiKey: config.apiKey, commitment: "confirmed", fetcher: countedFetcher,
+      maxTransientRetries: 2, retryDelayMs: 500
     });
     state = page.state;
     if (budgetExhausted) {
