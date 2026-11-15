@@ -159,7 +159,7 @@ describe("bounded Helius historical backfill", () => {
     });
     expect(state.maxSignatures).toBe(2_500);
     expect(() => createHistoricalBackfillState({
-      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000, maxSignatures: 5_001
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000, maxSignatures: 10_001
     })).toThrow(/5,000/);
   });
 
