@@ -8,6 +8,10 @@ export interface HeliusRpcConfig {
   apiKey: string;
   commitment?: "confirmed" | "finalized";
   fetcher?: typeof fetch;
+  /** Bounded retries for transient HTTP/network failures; defaults to zero. */
+  maxTransientRetries?: number;
+  /** Exponential-backoff base delay for transient retries; defaults to 250 ms. */
+  retryDelayMs?: number;
 }
 
 export interface VerifiedPumpTransaction {
@@ -105,26 +109,50 @@ export async function fetchAndVerifyPumpTransaction(
   const commitment = config.commitment ?? "confirmed";
   const fetcher = config.fetcher ?? fetch;
 
-  let response: Response;
-  try {
-    response = await fetcher(buildHeliusRpcUrl(config.apiKey), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: signature,
-        method: "getTransaction",
-        params: [signature, {
-          encoding: "json",
-          commitment,
-          maxSupportedTransactionVersion: 1
-        }]
-      })
-    });
-  } catch {
-    return { status: "DATA_INCOMPLETE", reason: "Helius transaction request failed before a response." };
+  const maxTransientRetries = config.maxTransientRetries ?? 0;
+  const retryDelayMs = config.retryDelayMs ?? 250;
+  if (!Number.isSafeInteger(maxTransientRetries) || maxTransientRetries < 0 || maxTransientRetries > 3 ||
+      !Number.isSafeInteger(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > 5_000) {
+    return { status: "DATA_INCOMPLETE", reason: "Helius transient retry configuration is invalid." };
+  }
+  const requestInit: RequestInit = {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: signature,
+      method: "getTransaction",
+      params: [signature, {
+        encoding: "json",
+        commitment,
+        maxSupportedTransactionVersion: 1
+      }]
+    })
+  };
+  let response: Response | null = null;
+  for (let attempt = 0; attempt <= maxTransientRetries; attempt += 1) {
+    try {
+      response = await fetcher(buildHeliusRpcUrl(config.apiKey), requestInit);
+    } catch {
+      if (attempt < maxTransientRetries) {
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs * (2 ** attempt)));
+        continue;
+      }
+      return { status: "DATA_INCOMPLETE", reason: "Helius transaction request failed before a response." };
+    }
+    const transientStatus = response.status === 408 || response.status === 425 ||
+      response.status === 429 || response.status >= 500;
+    if (!response.ok && transientStatus && attempt < maxTransientRetries) {
+      if (response.body) await response.body.cancel().catch(() => undefined);
+      await new Promise(resolve => setTimeout(resolve, retryDelayMs * (2 ** attempt)));
+      continue;
+    }
+    break;
   }
 
+  if (!response) {
+    return { status: "DATA_INCOMPLETE", reason: "Helius transaction request failed before a response." };
+  }
   if (!response.ok) {
     const detail = (await response.text().catch(() => "")).slice(0, 160);
     return { status: "DATA_INCOMPLETE", reason: "Helius HTTP status " + response.status + (detail ? ": " + detail : "") + "." };
