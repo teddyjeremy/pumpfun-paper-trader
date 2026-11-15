@@ -153,14 +153,14 @@ describe("bounded Helius historical backfill", () => {
     expect(result.state.before).toBe(newer);
   });
 
-  it("accepts the bounded 700-signature window needed for high-activity launch histories", () => {
+  it("accepts the bounded 10,000-signature window needed for high-activity launch histories", () => {
     const state = createHistoricalBackfillState({
-      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000, maxSignatures: 2_500
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000, maxSignatures: 10_000
     });
-    expect(state.maxSignatures).toBe(2_500);
+    expect(state.maxSignatures).toBe(10_000);
     expect(() => createHistoricalBackfillState({
       mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000, maxSignatures: 10_001
-    })).toThrow(/5,000/);
+    })).toThrow(/10,000/);
   });
 
   it("never claims complete when the work cap is reached", () => {
