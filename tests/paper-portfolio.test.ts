@@ -43,15 +43,28 @@ describe("paper portfolio accounting",()=>{
   expect(closed.position.rentReserveUsd).toBeCloseTo(0.2,8);
  });
 
- it("locks the expected sell fee so concurrent entries cannot spend the same exit budget",()=>{
-  let state={...createPaperPortfolio(6),maxConcurrentPositions:2};
+ it("locks the expected sell fee and only permits concurrent entries after a verified equity doubling",()=>{
+  const state=createPaperPortfolio(6);
   const first=openPaperPosition(state,{mint:"reserved-fee-1",positionId:"reserved-fee-position-1",occurredAt:now,
     buyQuote:quote("reserved-fee-1","BUY"),sellQuote:quote("reserved-fee-1","SELL"),nowMs:Date.parse(now)});
   expect(first.position.expectedSellCostsUsd).toBeCloseTo(0.007,8);
   expect(first.state.availableCashUsd).toBeCloseTo(4.986,8);
+  expect(first.state.maxConcurrentPositions).toBe(1);
+
+  // A fresh full-position SDK sell quote marks the $6 initial portfolio at
+  // exactly $12. Only that verified 2x equity mark unlocks the second slot
+  // and the 50% stake increase; a test-only capacity override would bypass
+  // the production scaling invariant.
+  const doubled=markPaperPosition(first.state,{sellQuotes:[
+    quote("reserved-fee-1","SELL","1000000",7.014)
+  ],markedAt:now,nowMs:Date.parse(now)});
+  expect(doubled.highWaterEquityUsd).toBeCloseTo(12,8);
+  expect(doubled.maxConcurrentPositions).toBe(2);
+  expect(doubled.positionSizeUsd).toBe(1.5);
+
   const secondBuy=quote("reserved-fee-2","BUY");
-  secondBuy.requestedUsd=first.state.positionSizeUsd;
-  const second=openPaperPosition(first.state,{mint:"reserved-fee-2",positionId:"reserved-fee-position-2",occurredAt:now,
+  secondBuy.requestedUsd=doubled.positionSizeUsd;
+  const second=openPaperPosition(doubled,{mint:"reserved-fee-2",positionId:"reserved-fee-position-2",occurredAt:now,
     buyQuote:secondBuy,sellQuote:quote("reserved-fee-2","SELL"),nowMs:Date.parse(now)});
   expect(second.state.availableCashUsd).toBeCloseTo(3.472,8);
   const closed=closePaperPosition(second.state,{positionId:"reserved-fee-position-1",
