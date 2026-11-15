@@ -85,6 +85,32 @@ describe("selective Helius transaction fetch", () => {
     expect(networkError.status).toBe("DATA_INCOMPLETE");
   });
 
+  it("retries transient 429 responses only when a bounded retry budget is supplied", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+      .mockResolvedValueOnce(Response.json({ jsonrpc: "2.0", id: signature, result: null }));
+    const result = await fetchAndVerifyPumpTransaction(signature, mint, {
+      apiKey, fetcher, maxTransientRetries: 2, retryDelayMs: 0
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      status: "DATA_INCOMPLETE",
+      reason: "Transaction is not available at the requested commitment."
+    });
+  });
+
+  it("stops after the configured transient retry budget and keeps the decode incomplete", async () => {
+    const fetcher = vi.fn(async () => new Response("rate limited", { status: 429 }));
+    const result = await fetchAndVerifyPumpTransaction(signature, mint, {
+      apiKey, fetcher, maxTransientRetries: 2, retryDelayMs: 0
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(result).toEqual({
+      status: "DATA_INCOMPLETE",
+      reason: "Helius HTTP status 429: rate limited."
+    });
+  });
+
   it("rejects invalid signature or mint before making a request", async () => {
     const fetcher = vi.fn();
     expect((await fetchAndVerifyPumpTransaction("bad", mint, { apiKey, fetcher })).status).toBe("DATA_INCOMPLETE");

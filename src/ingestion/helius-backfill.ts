@@ -57,8 +57,8 @@ export function createHistoricalBackfillState(input: {
   if (!Number.isSafeInteger(horizonSeconds) || horizonSeconds < 60 || horizonSeconds > 1800) {
     throw new Error("Backfill horizon must be between 60 and 1800 seconds.");
   }
-  if (!Number.isSafeInteger(maxSignatures) || maxSignatures < 1 || maxSignatures > 5_000) {
-    throw new Error("Backfill signature cap must be between 1 and 5,000.");
+  if (!Number.isSafeInteger(maxSignatures) || maxSignatures < 1 || maxSignatures > 10_000) {
+    throw new Error("Backfill signature cap must be between 1 and 10,000.");
   }
   return {
     mint: input.mint,
@@ -274,15 +274,56 @@ export async function fetchHeliusAddressSignaturesPage(
   if (current.status === "COMPLETE" || current.status === "INCOMPLETE") {
     return { status: current.status, state: current, signaturesToFetch: [] };
   }
+
+  const maxTransientRetries = config.maxTransientRetries ?? 0;
+  const retryDelayMs = config.retryDelayMs ?? 250;
+  if (!Number.isSafeInteger(maxTransientRetries) || maxTransientRetries < 0 || maxTransientRetries > 3 ||
+      !Number.isSafeInteger(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > 5_000) {
+    return incompleteBackfillPage(current, "Helius transient retry configuration is invalid.");
+  }
+
+  let response: Response | null = null;
   try {
     const request = buildAddressSignaturesRequest(current.bondingCurve, current.before);
     const fetcher = config.fetcher ?? fetch;
-    const response = await fetcher(buildHeliusRpcUrl(config.apiKey), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(request)
-    });
-    if (!response.ok) return incompleteBackfillPage(current, `Helius signature history returned HTTP ${response.status}.`);
+
+    for (let attempt = 0; attempt <= maxTransientRetries; attempt += 1) {
+      try {
+        response = await fetcher(buildHeliusRpcUrl(config.apiKey), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(request)
+        });
+      } catch (error) {
+        // A shared credit-budget sentinel is terminal. Retrying cannot make
+        // another request affordable and the caller will report budget stop.
+        if (error instanceof Error && error.message === "HELIUS_CREDIT_BUDGET_EXHAUSTED") {
+          return incompleteBackfillPage(current, "HELIUS_CREDIT_BUDGET_EXHAUSTED");
+        }
+        if (attempt < maxTransientRetries) {
+          await new Promise(resolve => setTimeout(resolve, retryDelayMs * (2 ** attempt)));
+          continue;
+        }
+        return incompleteBackfillPage(current, "Helius signature history request failed before coverage could be verified.");
+      }
+
+      const transientStatus = response.status === 408 || response.status === 425 ||
+        response.status === 429 || response.status >= 500;
+      if (!response.ok && transientStatus && attempt < maxTransientRetries) {
+        if (response.body) await response.body.cancel().catch(() => undefined);
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs * (2 ** attempt)));
+        continue;
+      }
+      break;
+    }
+
+    if (!response) {
+      return incompleteBackfillPage(current, "Helius signature history request failed before coverage could be verified.");
+    }
+    if (!response.ok) {
+      return incompleteBackfillPage(current, `Helius signature history returned HTTP ${response.status}.`);
+    }
+
     const payload: unknown = await response.json();
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return incompleteBackfillPage(current, "Helius signature history returned malformed JSON.");
@@ -294,6 +335,6 @@ export async function fetchHeliusAddressSignaturesPage(
     }
     return applyAddressSignaturesPage(current, envelope.result);
   } catch {
-    return incompleteBackfillPage(current, "Helius signature history request failed before coverage could be verified.");
+    return incompleteBackfillPage(current, "Helius signature history returned invalid JSON or could not be parsed.");
   }
 }

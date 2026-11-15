@@ -2,8 +2,11 @@ name: Historical paper replay — 2026-11-14 expanded sample
 
 on:
   push:
+    branches:
+      - main
     paths:
       - ".github/workflows/historical-backtest-2026-11-14-expanded.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,11 +33,20 @@ jobs:
           node-version: 22
       - run: npm install
 
-      - name: Restore partial discovery checkpoint from the previous attempt
+      - name: Locate the latest successful checkpoint run
+        id: previous
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          run_id="$(gh run list --workflow .github/workflows/historical-backtest-2026-11-14-expanded.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          test -n "$run_id" || { echo "No successful historical checkpoint run is available"; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the latest successful historical checkpoint
         uses: actions/download-artifact@v4
         with:
           name: pump-backtest-state-2026-11-14-expanded-final
-          run-id: 43601632533
+          run-id: ${{ steps.previous.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: artifacts/
 
@@ -43,26 +55,17 @@ jobs:
           test -n "$HELIUS_API_KEY" || { echo "HELIUS_API_KEY is required"; exit 1; }
           test -n "$DATABASE_URL" || { echo "DATABASE_URL is required to publish results"; exit 1; }
 
-      - name: Discover up to 300 launches across the full Nairobi day
+      - name: Validate restored discovery, screen and resumable portfolio checkpoints
         run: |
-          npm run backtest:discover -- --date="$BACKTEST_DATE" --utc-offset-minutes=180 --max-credits=30000 --max-launches=300 --max-pages-per-bucket=20 || test "$?" -eq 2
-
-      - name: Screen the discovered launches and retain the top 30 percent
-        run: npm run backtest:screen -- --date="$BACKTEST_DATE" --allow-partial-discovery=true --max-credits=1500 --max-share-pct=30 --min-successful=5 --min-active-buckets=3
-
-      - name: Save discovery and screening checkpoint before deep replay
-        uses: actions/upload-artifact@v4
-        with:
-          name: pump-backtest-state-2026-11-14-expanded
-          path: artifacts/
-          if-no-files-found: error
-          retention-days: 30
-          compression-level: 6
+          test -s "artifacts/pump-launch-discovery-$BACKTEST_DATE.json"
+          test -s "artifacts/pump-launch-screen-$BACKTEST_DATE.json"
+          test -s artifacts/checkpoint.json
+          node -e 'const fs=require("node:fs"); const d=JSON.parse(fs.readFileSync("artifacts/pump-launch-discovery-"+process.env.BACKTEST_DATE+".json","utf8")); const s=JSON.parse(fs.readFileSync("artifacts/pump-launch-screen-"+process.env.BACKTEST_DATE+".json","utf8")); const c=JSON.parse(fs.readFileSync("artifacts/checkpoint.json","utf8")); if(d.requestedLocalDate!==process.env.BACKTEST_DATE || s.date!==process.env.BACKTEST_DATE || c.date!==process.env.BACKTEST_DATE || c.totalCreditCeiling!==300000 || c.cumulativeCreditsUsed>300000) throw new Error("Restored checkpoint identity or credit ceiling is invalid."); if(s.discoveryStatus!==d.status || !Array.isArray(c.incompleteMints)) throw new Error("Restored discovery/screen/checkpoint state is inconsistent."); console.log("Resuming",c.incompleteMints.length,"incomplete mints from",c.cumulativeCreditsUsed,"of 300000 Helius credits.");'
 
       - name: Replay batch 1 of 9 (10 coins maximum)
         if: success()
         run: |
-          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=true
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=10000 --retry-incomplete=true
       - name: Save durable checkpoint after batch 1
         if: always()
         uses: actions/upload-artifact@v4
@@ -76,7 +79,7 @@ jobs:
       - name: Replay batch 2 of 9 (10 coins maximum)
         if: success()
         run: |
-          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=10000 --retry-incomplete=false
       - name: Save durable checkpoint after batch 2
         if: always()
         uses: actions/upload-artifact@v4
@@ -90,7 +93,7 @@ jobs:
       - name: Replay batch 3 of 9 (10 coins maximum)
         if: success()
         run: |
-          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=10000 --retry-incomplete=false
       - name: Save durable checkpoint after batch 3
         if: always()
         uses: actions/upload-artifact@v4
@@ -104,7 +107,7 @@ jobs:
       - name: Replay batch 4 of 9 (10 coins maximum)
         if: success()
         run: |
-          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=10000 --retry-incomplete=false
       - name: Save durable checkpoint after batch 4
         if: always()
         uses: actions/upload-artifact@v4
@@ -118,7 +121,7 @@ jobs:
       - name: Replay batch 5 of 9 (10 coins maximum)
         if: success()
         run: |
-          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=10000 --retry-incomplete=false
       - name: Save durable checkpoint after batch 5
         if: always()
         uses: actions/upload-artifact@v4
@@ -132,7 +135,7 @@ jobs:
       - name: Replay batch 6 of 9 (10 coins maximum)
         if: success()
         run: |
-          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=10000 --retry-incomplete=false
       - name: Save durable checkpoint after batch 6
         if: always()
         uses: actions/upload-artifact@v4
@@ -146,7 +149,7 @@ jobs:
       - name: Replay batch 7 of 9 (10 coins maximum)
         if: success()
         run: |
-          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=10000 --retry-incomplete=false
       - name: Save durable checkpoint after batch 7
         if: always()
         uses: actions/upload-artifact@v4
@@ -160,7 +163,7 @@ jobs:
       - name: Replay batch 8 of 9 (10 coins maximum)
         if: success()
         run: |
-          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=10000 --retry-incomplete=false
       - name: Save durable checkpoint after batch 8
         if: always()
         uses: actions/upload-artifact@v4
@@ -174,7 +177,7 @@ jobs:
       - name: Replay batch 9 of 9 (10 coins maximum)
         if: success()
         run: |
-          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=5000 --retry-incomplete=false
+          npm run backtest:batch -- --date="$BACKTEST_DATE" --batch-size=10 --max-credits=300000 --max-new-credits=268500 --max-signatures=10000 --retry-incomplete=false
       - name: Save durable checkpoint after batch 9
         if: always()
         uses: actions/upload-artifact@v4

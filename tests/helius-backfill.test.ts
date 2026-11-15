@@ -47,6 +47,44 @@ describe("bounded Helius historical backfill", () => {
     expect(result.state.before).toBe(newer);
   });
 
+  it("retries transient signature-history HTTP failures only within the supplied budget", async () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    let calls = 0;
+    const result = await fetchHeliusAddressSignaturesPage(initial, {
+      apiKey: "test-key",
+      maxTransientRetries: 2,
+      retryDelayMs: 0,
+      fetcher: async () => {
+        calls += 1;
+        if (calls === 1) return new Response("rate limited", { status: 429 });
+        return new Response(JSON.stringify({ result: [
+          { signature: newer, slot: 12, blockTime: 1060, err: null }
+        ] }), { status: 200 });
+      }
+    });
+    expect(calls).toBe(2);
+    expect(result.status).toBe("CONTINUE");
+    expect(result.state.before).toBe(newer);
+  });
+
+  it("does not retry signature-history failures when no retry budget is supplied", async () => {
+    const initial = createHistoricalBackfillState({
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
+    });
+    let calls = 0;
+    const result = await fetchHeliusAddressSignaturesPage(initial, {
+      apiKey: "test-key",
+      fetcher: async () => {
+        calls += 1;
+        return new Response("rate limited", { status: 429 });
+      }
+    });
+    expect(calls).toBe(1);
+    expect(result.status).toBe("INCOMPLETE");
+  });
+
   it("fails closed on HTTP, JSON-RPC and malformed history responses", async () => {
     const initial = createHistoricalBackfillState({
       mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000
@@ -153,14 +191,14 @@ describe("bounded Helius historical backfill", () => {
     expect(result.state.before).toBe(newer);
   });
 
-  it("accepts the bounded 700-signature window needed for high-activity launch histories", () => {
+  it("accepts the bounded 10,000-signature window needed for high-activity launch histories", () => {
     const state = createHistoricalBackfillState({
-      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000, maxSignatures: 2_500
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000, maxSignatures: 10_000
     });
-    expect(state.maxSignatures).toBe(2_500);
+    expect(state.maxSignatures).toBe(10_000);
     expect(() => createHistoricalBackfillState({
-      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000, maxSignatures: 5_001
-    })).toThrow(/5,000/);
+      mint, bondingCurve: address, createSignature: create, launchBlockTime: 1000, maxSignatures: 10_001
+    })).toThrow(/10,000/);
   });
 
   it("never claims complete when the work cap is reached", () => {
