@@ -1,4 +1,5 @@
 export interface TradingReadinessInput {
+  workerPaused: boolean;
   coordinatorEnabled: boolean;
   activeSession: boolean;
   discoveryConnected: boolean;
@@ -26,6 +27,7 @@ export interface TradingReadinessResult {
  */
 export function evaluateTradingReadiness(input: TradingReadinessInput): TradingReadinessResult {
   const blockers: string[] = [];
+  if (input.workerPaused) blockers.push("Paper Worker is paused by operator configuration.");
   if (!input.coordinatorEnabled) blockers.push("Coordinator is stopped.");
   if (!input.activeSession) blockers.push("No active paper session.");
   if (!input.discoveryConnected || !input.discoverySubscribed) {
