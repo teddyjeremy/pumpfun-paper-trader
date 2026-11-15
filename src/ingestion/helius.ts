@@ -133,7 +133,12 @@ export async function fetchAndVerifyPumpTransaction(
   for (let attempt = 0; attempt <= maxTransientRetries; attempt += 1) {
     try {
       response = await fetcher(buildHeliusRpcUrl(config.apiKey), requestInit);
-    } catch {
+    } catch (error) {
+      // The historical collector marks this sentinel as a budget stop. Never
+      // retry it: doing so cannot spend more credits and only delays the stop.
+      if (error instanceof Error && error.message === "HELIUS_CREDIT_BUDGET_EXHAUSTED") {
+        return { status: "DATA_INCOMPLETE", reason: "HELIUS_CREDIT_BUDGET_EXHAUSTED" };
+      }
       if (attempt < maxTransientRetries) {
         await new Promise(resolve => setTimeout(resolve, retryDelayMs * (2 ** attempt)));
         continue;
