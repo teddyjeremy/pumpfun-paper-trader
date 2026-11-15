@@ -65,6 +65,31 @@ describe("complete historical Pump launch-window collection", () => {
     expect(result.transactions.map(item => item.signature)).toEqual([tradeSignature, createSignature]);
   });
 
+  it("retries transient transaction-decode failures and counts every request against the credit budget", async () => {
+    let transactionCalls = 0;
+    let totalCalls = 0;
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      totalCalls += 1;
+      const body = JSON.parse(String(init?.body));
+      if (body.method === "getSignaturesForAddress") {
+        return rpcResult([
+          { signature: createSignature, slot: 100, blockTime: 1_000, err: null }
+        ]);
+      }
+      transactionCalls += 1;
+      if (transactionCalls === 1) return new Response("rate limited", { status: 429 });
+      return rpcResult(transaction(createSignature, 100, 1_000));
+    });
+    const result = await collectHistoricalLaunchWindow({
+      mint, bondingCurve: curve, createSignature, launchBlockTime: 1_000
+    }, { apiKey: "test", maxCredits: 3, fetcher, requestIntervalMs: 0 });
+    expect(result.status).toBe("COMPLETE");
+    expect(transactionCalls).toBe(2);
+    expect(totalCalls).toBe(3);
+    expect(result.creditsUsed).toBe(3);
+    expect(result.transactions.map(item => item.signature)).toEqual([createSignature]);
+  });
+
   it("continues collecting valid transactions after a single undecodable signature", async () => {
     const badSignature = "9".repeat(88);
     const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
