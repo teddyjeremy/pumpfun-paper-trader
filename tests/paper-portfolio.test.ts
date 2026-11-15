@@ -218,7 +218,7 @@ describe("paper portfolio accounting",()=>{
   expect(atFourthDouble.bankroll.currentEquityUsd).toBeCloseTo(43.2);
   expect(atFourthDouble.maxConcurrentPositions).toBe(5);
   expect(atFourthDouble.positionSizeUsd).toBe(5.0625);
-  const atStakeCap=openAndMark(11_055.893);
+  const atStakeCap=openAndMark(11_057.507);
   expect(atStakeCap.bankroll.currentEquityUsd).toBeCloseTo(11_059.2);
   expect(atStakeCap.maxConcurrentPositions).toBe(13);
   expect(atStakeCap.positionSizeUsd).toBe(100);
