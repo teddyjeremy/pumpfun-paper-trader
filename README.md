@@ -2,19 +2,17 @@
 
 A **paper-only** Pump.fun research, market-monitoring and trading-simulation system. It does not sign transactions, hold a wallet key, submit Solana transactions, or execute real trades.
 
-## Overnight paper session
+## Historical strategy research (not forward execution)
 
-The default paper rules are in [RULES.md](RULES.md): buy one minute after launch, skip an early dev sale or a creator holding more than 8%, take profit at 2x, stop at -5%, and get out by 15 minutes. On the Nov 14 holdout that was **77 signals, about $0.029 expected per $0.35 trade after fees**. Momentum lost money on that day. Copy-trading is not the default. The older fail-closed audit is still in the tree and is not what `npm run paper` runs.
+[RULES.md](RULES.md) documents an experimental one-minute launch-snipe candidate evaluated on a biased historical sample. It is a research result only; it does **not** replace the production 15-rule strategy audit or authorize paper entries. The Nov 14 sample had 77 candidate signals, but 409 of 746 collected tokens had no price path and were excluded from the PnL analysis.
 
 ```bash
-npm run collect:history   # public RPC + GeckoTerminal sample
-npm run backtest:rules    # train/holdout, writes the default rules
-npm run paper -- --replay # resimulate the saved dataset
-npm run paper -- --once   # one live poll, paper only
-npm run paper             # leave it running
+npm run collect:history   # public RPC + GeckoTerminal research sample
+npm run backtest:rules    # chronological train/holdout comparison
+npm run paper -- --replay # historical candle-path research only
 ```
 
-`npm run paper -- --live` exits without trading. There is no signer. Optional inputs: `HELIUS_API_KEY` (cached, not required) and `RUG_SIGNALS_CSV` (see RULES.md). Starting bankroll for this session is about **$2.40**.
+Forward polling through this standalone CLI is intentionally blocked. It derives prices from GeckoTerminal candles and persists to a local JSON file; it does not use fresh exact-size Pump SDK quotes, validate sellability, or commit the Durable Object/PostgreSQL paper journal. Production paper execution must go through the Cloudflare Worker and remain fail-closed until complete creator/wallet-cluster evidence, reviewed chronological volume calibration, all strict strategy rules, quote economics, and durable lifecycle checks pass. `--live` is also refused; there is no signer or real-transaction path.
 
 ## Repository status
 
