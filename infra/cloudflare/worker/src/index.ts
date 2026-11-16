@@ -1359,6 +1359,63 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     this.ctx.waitUntil(this.flushAuditEventsToPostgres(sessionId));
   }
 
+  /**
+   * Appends a related set of audit events atomically. One group marker makes
+   * retries idempotent while the event IDs remain individually visible to the
+   * journal and PostgreSQL projection. This avoids one DO metadata/dedupe write
+   * per rule when a single strategy observation evaluates all fifteen rules.
+   */
+  private async appendAuditBatch(
+    entries: Array<{ kind: AuditKind; mint: string | null; data: unknown; idempotencyKey: string }>,
+    batchId: string,
+    sessionIdOverride?: string
+  ): Promise<void> {
+    if (this.storagePaused || entries.length === 0) return;
+    const sessionId = sessionIdOverride ?? this.activeSessionId;
+    if (!sessionId) return;
+    if (!batchId.trim()) throw new Error("Audit batch id is required.");
+    const eventIds = new Set<string>();
+    for (const entry of entries) {
+      if (!entry.idempotencyKey.trim() || eventIds.has(entry.idempotencyKey)) {
+        throw new Error("Audit batch event IDs must be non-empty and unique.");
+      }
+      eventIds.add(entry.idempotencyKey);
+    }
+
+    await this.ctx.storage.transaction(async txn => {
+      const metaKey = `audit_session:${sessionId}`;
+      const batchKey = `audit_batch_id:${sessionId}:${batchId}`;
+      if (await txn.get<number>(batchKey) !== undefined) return;
+      const meta = await txn.get<AuditSessionMeta>(metaKey);
+      if (!meta) throw new Error("Audit session metadata missing.");
+
+      let eventCount = meta.eventCount;
+      const pages = new Map<number, { key: string; events: StoredAuditEvent[] }>();
+      for (const entry of entries) {
+        eventCount += 1;
+        const pageNumber = Math.floor((eventCount - 1) / AUDIT_PAGE_SIZE);
+        let page = pages.get(pageNumber);
+        if (!page) {
+          const key = `audit_events:${sessionId}:${String(pageNumber).padStart(8, "0")}`;
+          page = { key, events: await txn.get<StoredAuditEvent[]>(key) ?? [] };
+          pages.set(pageNumber, page);
+        }
+        page.events.push({
+          sessionId, sequence: eventCount, eventId: entry.idempotencyKey,
+          kind: entry.kind, occurredAt: new Date().toISOString(),
+          mint: entry.mint ?? null,
+          strategyVersion: typeof meta.strategyVersion === "string" && meta.strategyVersion.trim()
+            ? meta.strategyVersion : "paper-strategy-v1",
+          data: jsonSafe(entry.data)
+        });
+      }
+      for (const page of pages.values()) await txn.put(page.key, page.events);
+      await txn.put(batchKey, eventCount);
+      await txn.put(metaKey, { ...meta, eventCount });
+    });
+    this.ctx.waitUntil(this.flushAuditEventsToPostgres(sessionId));
+  }
+
 
   async recordPaperEntry(input: {
     mint: string; positionId: string; buyQuote: ExecutablePaperQuote; sellQuote: ExecutablePaperQuote;
@@ -1816,16 +1873,29 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         });
         this.candidatePriceRefsCache.delete(`${mint}:${profile.quoteMint}`);
       }
-      for (const rule of evaluated.rules) {
-        await this.appendAudit("RULE_EVALUATION", mint, { triggerSignature, ...rule },
-          `rule:${triggerSignature}:${mint}:${rule.rule}`);
-      }
+      const strategyAuditEvents: Array<{
+        kind: AuditKind; mint: string | null; data: unknown; idempotencyKey: string
+      }> = evaluated.rules.map(rule => ({
+        kind: "RULE_EVALUATION",
+        mint,
+        data: { triggerSignature, ...rule },
+        idempotencyKey: `rule:${triggerSignature}:${mint}:${rule.rule}`
+      }));
       for (const reason of [...evaluated.rejectionReasons, ...evaluated.watchReasons]) {
-        await this.appendAudit("REJECTION_REASON", mint, {
-          triggerSignature, reason,
-          classification: evaluated.rejectionReasons.includes(reason) ? "REJECT" : "WATCH"
-        }, `decision-reason:${triggerSignature}:${mint}:${reason}`);
+        strategyAuditEvents.push({
+          kind: "REJECTION_REASON",
+          mint,
+          data: {
+            triggerSignature, reason,
+            classification: evaluated.rejectionReasons.includes(reason) ? "REJECT" : "WATCH"
+          },
+          idempotencyKey: `decision-reason:${triggerSignature}:${mint}:${reason}`
+        });
       }
+      await this.appendAuditBatch(
+        strategyAuditEvents,
+        `strategy-audit:${triggerSignature}:${mint}`
+      );
       // Start an automatic quote only after all thirteen non-quote rules pass.
       // The durable attempt key is scoped to the reclaim signal so retries,
       // restarts and duplicate observations cannot fan out repeated SDK calls.
