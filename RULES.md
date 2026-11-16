@@ -32,6 +32,20 @@ Momentum's holdout expectancy is negative. It is not enabled.
 
 Copy-trading is not enabled. `wallets.json` keeps all 61 supplied wallets. 51 of them show up on a single token, and the file has no per-mint buy times, so "N wallets within X seconds" cannot be simulated. Three repeat names have a positive rough pnl and no clustered-launch flag (`copyEligible: true`). They are not an entry signal.
 
+## Portfolio sizing update (2026-11-16)
+
+The research runner now uses the repository's agreed portfolio constraints rather than the earlier $0.35 / two-slot sizing used for the historical comparison table above:
+
+- Starting simulated equity: **$2.70** (the repository's existing research bankroll; this is separate from the $1 initial position stake).
+- Initial position stake: **$1.00**.
+- Initial concurrent positions: **1**.
+- At each achieved doubling of realized portfolio equity: add **one** concurrent slot and increase the next stake by **50%**.
+- Maximum position stake: **$100**.
+- A position keeps its slot occupied until its recorded exit; a mint can be entered only once.
+- The historical runner scales each $1 reference-trade PnL to the stake active at that entry and reserves token-account rent while a position is open.
+
+The historical comparison metrics in this document were generated with the older $0.35 stake and two-slot cap. They are retained as historical evidence, **not** presented as results under the new sizing policy. Run `npm run backtest:rules` to regenerate the report with the updated portfolio simulator. This remains candle-path research only: no output from this runner authorizes a Worker entry or relaxes creator/cluster, freshness, calibration, exact-size quote, sellability, cost, or durable-journal gates.
+
 ## Default entry
 
 1. Wait until **1 minute** after launch. Do not buy the create slot. A 5% stop cannot save a same-block rug, and these paths are 5-minute snapshots, so the first tradable print we trust is the 1-minute price.
