@@ -1881,7 +1881,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         data: { triggerSignature, ...rule },
         idempotencyKey: `rule:${triggerSignature}:${mint}:${rule.rule}`
       }));
-      for (const reason of [...evaluated.rejectionReasons, ...evaluated.watchReasons]) {
+      for (const reason of new Set([...evaluated.rejectionReasons, ...evaluated.watchReasons])) {
         strategyAuditEvents.push({
           kind: "REJECTION_REASON",
           mint,
