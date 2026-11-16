@@ -128,6 +128,7 @@ async function main(): Promise<void> {
       startingEquityUsd: 2.7,
       stakeUsd: STAKE,
       maxConcurrent: 1,
+      initialConcurrentPositions: 1,
       stakeIncreaseMultiplier: 1.5,
       maxStakeUsd: 100,
       dailyDrawdownKillPct: 20
