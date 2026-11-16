@@ -5,10 +5,10 @@ import {
   LIGHT_SNIPE, parseSampleCsv, simulateSampleToken, summarizeSample,
   type SampleRule, type SampleToken, type SampleTrade
 } from "../src/strategy/helius-sample.js";
-import { simulatePortfolio } from "../src/strategy/simulate-trade.js";
+import { simulateEquityDoublingPortfolio } from "../src/strategy/equity-doubling-portfolio.js";
 
 const HOLDOUT_DATE = "2026-11-14";
-const STAKE = 0.35;
+const STAKE = 1;
 
 function rule(patch: Partial<SampleRule> & Pick<SampleRule, "id" | "family">): SampleRule {
   return {
@@ -68,7 +68,7 @@ async function main(): Promise<void> {
     };
   });
   const winner = families.find(family => family.id === LIGHT_SNIPE.id)!;
-  const portfolio = simulatePortfolio(winner.validationTrades.map(trade => ({
+  const portfolio = simulateEquityDoublingPortfolio(winner.validationTrades.map(trade => ({
     mint: trade.mint,
     family: "launch",
     entryTime: trade.launchTime,
@@ -82,10 +82,11 @@ async function main(): Promise<void> {
     exitReason: trade.reason === "take_profit" ? "take_profit" : trade.reason === "max_hold" ? "max_hold" : "stop",
     win: trade.pnlUsd > 0
   })), {
-    startingEquityUsd: 2.4,
-    stakeUsd: STAKE,
-    maxConcurrent: 2,
-    dailyDrawdownKillPct: 20
+    startingEquityUsd: 2.7,
+    initialStakeUsd: 1,
+    initialConcurrentPositions: 1,
+    stakeIncreaseMultiplier: 1.5,
+    maxStakeUsd: 100
   }, cost.rentLamports / 1e9 * cost.solUsd);
   const costs = tradeCost(STAKE, null, cost);
   const chosen = {
@@ -124,9 +125,11 @@ async function main(): Promise<void> {
       maxCreatorPriorRugs: 99
     },
     sizing: {
-      startingEquityUsd: 2.4,
+      startingEquityUsd: 2.7,
       stakeUsd: STAKE,
-      maxConcurrent: 2,
+      maxConcurrent: 1,
+      stakeIncreaseMultiplier: 1.5,
+      maxStakeUsd: 100,
       dailyDrawdownKillPct: 20
     },
     copyWallets: [] as string[],
@@ -194,7 +197,7 @@ async function main(): Promise<void> {
       takenAfterConcurrency: portfolio.taken,
       observedTradesPerValidationDay: portfolio.tradesPerDay,
       fiveHundredPerDay: false,
-      reason: "The holdout day produced well under 500 qualified entries even before the two-slot cap. A 15-minute hold and $2.40 bankroll cannot fund 500 simultaneous attempts, and the other ~400 tokens that day had no price path to support them."
+      reason: "The holdout day produced 77 candle-path signals before portfolio constraints. This research simulation applies the $1 initial stake, one initial slot, +1 slot and +50% stake at each realized-equity doubling, and a $100 stake cap. Missing price paths remain excluded."
     }
   };
   await writeFile(resolve("data/helius/chosen-strategy.json"), `${JSON.stringify(chosen, null, 2)}\n`);
