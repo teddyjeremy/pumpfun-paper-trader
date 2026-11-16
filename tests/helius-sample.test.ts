@@ -11,23 +11,23 @@ describe("Helius sample backtest", () => {
 
   it("keeps the 1-minute snipe positive on the held-out day after fees", () => {
     const trades = valid.flatMap(token => {
-      const trade = simulateSampleToken(token, LIGHT_SNIPE, 0.35, cost);
+      const trade = simulateSampleToken(token, LIGHT_SNIPE, 1, cost);
       return trade ? [trade] : [];
     });
     const stats = summarizeSample(trades);
     expect(tokens.length).toBe(746);
     expect(stats.trades).toBe(77);
-    expect(stats.expectancyUsd).toBeGreaterThan(0.02);
+    expect(stats.expectancyUsd).toBeGreaterThan(0.05);
     expect(stats.winRate).toBeGreaterThan(0.35);
     expect(stats.winRate).toBeLessThan(0.5);
   });
 
   it("is also positive on the earlier days", () => {
     const trades = train.flatMap(token => {
-      const trade = simulateSampleToken(token, LIGHT_SNIPE, 0.35, cost);
+      const trade = simulateSampleToken(token, LIGHT_SNIPE, 1, cost);
       return trade ? [trade] : [];
     });
-    expect(summarizeSample(trades).expectancyUsd).toBeGreaterThan(0.02);
+    expect(summarizeSample(trades).expectancyUsd).toBeGreaterThan(0.05);
     expect(trades.length).toBe(57);
   });
 });
