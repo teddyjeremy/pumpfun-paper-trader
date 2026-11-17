@@ -233,6 +233,10 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   const entryPrice = input.buyQuote.outputUsd / humanTokens;
   if (!validPositive(entryPrice)) throw new Error("Buy quote produced an invalid entry price.");
   const initialLiquidationValue = netSellValue(input.sellQuote);
+  const initialNetPnlUsd = round(initialLiquidationValue - stake - buyCosts);
+  if (initialNetPnlUsd <= 0) {
+    throw new Error("Initial exact-size round-trip sell quote is not profitable after all buy and sell fees.");
+  }
   const initialLiquidationPrice = initialLiquidationValue / humanTokens;
   if (!Number.isFinite(initialLiquidationPrice)) throw new Error("Initial sell quote cannot be represented as a finite USD price.");
   const position: PaperPosition = {

@@ -21,8 +21,8 @@ function quote(side: "BUY" | "SELL"): PumpSdkCurveQuote {
     provider: "pump-sdk-4.3.1", venue: "PUMP_CURVE", side, mint,
     quoteMint: "11111111111111111111111111111111", slot: 13,
     observedAt: new Date(now - 100).toISOString(),
-    inputAmountBaseUnits: "1000000", outputAmountBaseUnits: "9890000",
-    grossQuoteAmountBaseUnits: "9900000", netQuoteAmountBaseUnits: "9890000",
+    inputAmountBaseUnits: "1000000", outputAmountBaseUnits: "10200000",
+    grossQuoteAmountBaseUnits: "10200000", netQuoteAmountBaseUnits: "10190000",
     venueFeeBaseUnits: "10000", priceImpactPct: 0.1, baseDecimals: 6, quoteDecimals: 9,
     transferTaxVerifiedZero: true, executionReady: false, blockers: []
   };

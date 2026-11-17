@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createPaperPortfolio, openPaperPosition, markPaperPosition, closePaperPosition, type ExecutablePaperQuote } from "../src/paper/portfolio.js";
 const now = "2026-11-12T12:00:00.000Z";
-function quote(mint:string,side:"BUY"|"SELL",amount="1000000",outputUsd=1):ExecutablePaperQuote {
+function quote(mint:string,side:"BUY"|"SELL",amount="1000000",outputUsd?:number):ExecutablePaperQuote {
+ const grossOutputUsd=outputUsd??(side==="SELL"?1.02:1);
  return {quoteId:side+mint,provider:"test-adapter",mint,side,observedAt:now,expiresAt:"2026-11-12T12:00:02.000Z",
- requestedUsd:1,inputAmountBaseUnits:side==="SELL"?amount:"1000000",outputAmountBaseUnits:side==="BUY"?amount:"1000000",tokenDecimals:6,outputUsd,priceImpactPct:0.5,taxPct:0.5,
+ requestedUsd:1,inputAmountBaseUnits:side==="SELL"?amount:"1000000",outputAmountBaseUnits:side==="BUY"?amount:"1000000",tokenDecimals:6,outputUsd:grossOutputUsd,priceImpactPct:0.5,taxPct:0.5,
  networkFeeUsd:0.001,priorityFeeUsd:0.001,providerFeeUsd:0.001,protocolFeeUsd:0.002,creatorFeeUsd:0.001,poolFeeUsd:0.001,transferFeeUsd:0,routeId:"verified-route",executable:true};
 }
 describe("paper portfolio accounting",()=>{
@@ -22,6 +23,16 @@ describe("paper portfolio accounting",()=>{
   tooLarge.requestedUsd=1.000002;
   expect(()=>openPaperPosition(p,{mint:"rounded-stake-large",positionId:"rounded-position-large",occurredAt:now,
     buyQuote:tooLarge,sellQuote:quote("rounded-stake-large","SELL"),nowMs:Date.parse(now)})).toThrow(/exact planned stake/);
+ });
+ it("blocks a negative immediate round trip even when total execution costs are below 4%",()=>{
+  const p=createPaperPortfolio();
+  const buy=quote("unprofitable","BUY");
+  const sell=quote("unprofitable","SELL","1000000",1.01);
+  expect(buy.priceImpactPct+sell.priceImpactPct+buy.taxPct+sell.taxPct+
+    ((0.014)/1)*100).toBeLessThan(4);
+  expect(()=>openPaperPosition(p,{mint:"unprofitable",positionId:"unprofitable-position",occurredAt:now,
+    buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)}))
+    .toThrow(/not profitable after all buy and sell fees/);
  });
  it("requires fresh exact-size quotes and refuses repeat mints",()=>{
   const p=createPaperPortfolio();
@@ -65,7 +76,7 @@ describe("paper portfolio accounting",()=>{
   const secondBuy=quote("reserved-fee-2","BUY");
   secondBuy.requestedUsd=doubled.positionSizeUsd;
   const second=openPaperPosition(doubled,{mint:"reserved-fee-2",positionId:"reserved-fee-position-2",occurredAt:now,
-    buyQuote:secondBuy,sellQuote:quote("reserved-fee-2","SELL"),nowMs:Date.parse(now)});
+    buyQuote:secondBuy,sellQuote:quote("reserved-fee-2","SELL","1000000",1.6),nowMs:Date.parse(now)});
   expect(second.state.availableCashUsd).toBeCloseTo(3.472,8);
   const closed=closePaperPosition(second.state,{positionId:"reserved-fee-position-1",
     sellQuote:quote("reserved-fee-1","SELL","1000000",1.5),exitReason:"TEST_EXIT",closedAt:now,nowMs:Date.parse(now)});
@@ -126,7 +137,7 @@ describe("paper portfolio accounting",()=>{
   expect(state.bankroll.totalTopUpsUsd).toBe(2.7);
   expect(state.positionSizeUsd).toBe(1);
   expect(state.maxConcurrentPositions).toBe(1);
-  expect(state.highWaterEquityUsd).toBe(2.7);
+  expect(state.highWaterEquityUsd).toBe(2.706);
  });
 
  it("includes aggregate Pump SDK fees in entry cost and liquidation proceeds",()=>{
@@ -135,7 +146,7 @@ describe("paper portfolio accounting",()=>{
   const sell=quote("mint-aggregate","SELL");sell.pumpFeeUsd=0.005;
   const opened=openPaperPosition(p,{mint:"mint-aggregate",positionId:"p-aggregate",occurredAt:now,buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)});
   expect(opened.position.buyCostsUsd).toBeCloseTo(0.009,8);
-  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(0.991,8);
+  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(1.011,8);
   expect(opened.state.availableCashUsd).toBeCloseTo(1.682,8);
  });
 
@@ -175,8 +186,8 @@ describe("paper portfolio accounting",()=>{
 
  it("uses net liquidation value after sell fees for initial equity",()=>{
   const opened=openPaperPosition(createPaperPortfolio(),{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
-  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(0.993);
-  expect(opened.state.bankroll.currentEquityUsd).toBeCloseTo(2.686);
+  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(1.013);
+  expect(opened.state.bankroll.currentEquityUsd).toBeCloseTo(2.706);
  });
  it("requires one exact-size sell quote for every open position before marking equity",()=>{
   let state=createPaperPortfolio();
