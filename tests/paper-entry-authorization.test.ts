@@ -16,7 +16,7 @@ function quote(side: "BUY" | "SELL"): ExecutablePaperQuote {
     mint, side, observedAt: now, expiresAt: "2026-11-13T12:00:02.000Z",
     requestedUsd: 1, inputAmountBaseUnits: side === "BUY" ? "10000000" : "1000000",
     outputAmountBaseUnits: side === "BUY" ? "1000000" : "10000000",
-    tokenDecimals: 6, outputUsd: side === "BUY" ? 1 : 0.993,
+    tokenDecimals: 6, outputUsd: side === "BUY" ? 1 : 1.02,
     priceImpactPct: 0.1, taxPct: 0.1,
     networkFeeUsd: 0.001, priorityFeeUsd: 0.001, providerFeeUsd: 0.001,
     protocolFeeUsd: 0.002, creatorFeeUsd: 0.001, poolFeeUsd: 0.001,
@@ -65,6 +65,14 @@ describe("portfolio-backed unsigned plan authorization", () => {
     if (!result.authorized) return;
     expect(result.rentReserveUsd).toBeCloseTo(0.3, 8);
     expect(result.resolvedBlockers).toContain("VIRTUAL_PAYER_BALANCE_NOT_VERIFIED");
+  });
+
+  it("rejects an unsigned plan when exact-size sell proceeds are unprofitable after all fees", () => {
+    const sell = quote("SELL");
+    sell.outputUsd = 1.01;
+    const result = authorize({ sellQuote: sell });
+    expect(result.authorized).toBe(false);
+    expect(result.reason).toMatch(/not profitable after all buy and sell fees/i);
   });
 
   it("rejects when simulated cash cannot cover stake, both fee legs and refundable rent", () => {
