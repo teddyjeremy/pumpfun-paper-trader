@@ -11,7 +11,7 @@ function evidence(overrides:Record<string,unknown>={}) {
       buyQuote:{mint:"mint-1",venue:"PUMP_CURVE",expiresAt:new Date(now+1_000).toISOString()},
       initialSellQuote:{mint:"mint-1",venue:"PUMP_CURVE",expiresAt:new Date(now+1_000).toISOString()},
       exactFeeEvidence:{buy:{status:"AVAILABLE"},sell:{status:"AVAILABLE"}},
-      economics:{roundTripCostPct:2.5,meetsRoundTripCostLimit:true}
+      economics:{roundTripCostPct:2.5,meetsRoundTripCostLimit:true,roundTripNetReturnPct:0.4,meetsMinimumNetReturn:true}
     },
     ...overrides
   };
@@ -39,6 +39,20 @@ describe("fresh executable quote eligibility",()=>{
     const oneFee=evidence();
     (oneFee.result as any).exactFeeEvidence.sell.status="UNAVAILABLE";
     expect(getFreshExecutableQuoteCostPct(oneFee,"mint-1",now)).toBeNull();
+  });
+  it("rejects fresh quotes with non-positive or missing net round-trip profitability",()=>{
+    const loss=evidence();
+    (loss.result as any).economics.roundTripNetReturnPct=-0.4;
+    (loss.result as any).economics.meetsMinimumNetReturn=false;
+    expect(getFreshExecutableQuoteCostPct(loss,"mint-1",now)).toBeNull();
+
+    const breakEven=evidence();
+    (breakEven.result as any).economics.roundTripNetReturnPct=0;
+    expect(getFreshExecutableQuoteCostPct(breakEven,"mint-1",now)).toBeNull();
+
+    const missing=evidence();
+    delete (missing.result as any).economics.roundTripNetReturnPct;
+    expect(getFreshExecutableQuoteCostPct(missing,"mint-1",now)).toBeNull();
   });
   it("preserves quote availability while leaving an excessive cost for the strategy cost rule to fail",()=>{
     const expensive=evidence();
