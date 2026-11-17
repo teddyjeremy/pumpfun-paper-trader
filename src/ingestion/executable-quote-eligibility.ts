@@ -6,14 +6,15 @@ export interface CachedExecutableQuoteEvidence {
     buyQuote?: { mint?: string; venue?: string; expiresAt?: string };
     initialSellQuote?: { mint?: string; venue?: string; expiresAt?: string };
     exactFeeEvidence?: { buy?: { status?: string }; sell?: { status?: string } };
-    economics?: { roundTripCostPct?: number; meetsRoundTripCostLimit?: boolean };
+    economics?: { roundTripCostPct?: number; meetsRoundTripCostLimit?: boolean; roundTripNetReturnPct?: number; meetsMinimumNetReturn?: boolean };
   };
 }
 
 /**
  * Return the measured round-trip cost only while both quote legs and both
- * exact-message fee estimates are still valid. Missing, stale or mismatched
- * evidence never clears the strategy quote gate.
+ * exact-message fee estimates are valid and the immediate net round trip is
+ * strictly profitable. Missing, stale, mismatched or unprofitable evidence
+ * never clears the strategy quote gate.
  */
 export function getFreshExecutableQuoteCostPct(
   value: unknown,
@@ -45,7 +46,11 @@ export function getFreshExecutableQuoteCostPct(
       result.exactFeeEvidence?.sell?.status !== "AVAILABLE" ||
       !economics || typeof economics.roundTripCostPct !== "number" ||
       !Number.isFinite(economics.roundTripCostPct) ||
-      economics.roundTripCostPct < 0) {
+      economics.roundTripCostPct < 0 ||
+      typeof economics.roundTripNetReturnPct !== "number" ||
+      !Number.isFinite(economics.roundTripNetReturnPct) ||
+      economics.roundTripNetReturnPct <= 0 ||
+      economics.meetsMinimumNetReturn !== true) {
     return null;
   }
   return economics.roundTripCostPct;
