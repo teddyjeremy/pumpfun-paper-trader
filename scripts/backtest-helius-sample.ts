@@ -94,7 +94,8 @@ async function main(): Promise<void> {
     initialStakeUsd: 1,
     initialConcurrentPositions: 1,
     stakeIncreaseMultiplier: 1.5,
-    maxStakeUsd: 100
+    maxStakeUsd: 100,
+    dailyDrawdownKillPct: 20
   }, cost.rentLamports / 1e9 * cost.solUsd);
   const costs = tradeCost(STAKE, null, cost);
   const chosen = {
@@ -187,7 +188,8 @@ async function main(): Promise<void> {
       initialStakeUsd: 1,
       initialConcurrentPositions: 1,
       stakeIncreaseMultiplier: 1.5,
-      maxStakeUsd: 100
+      maxStakeUsd: 100,
+      dailyDrawdownKillPct: 20
     },
     strategyAuthorization: {
       status: "NOT_AUTHORIZED",
@@ -233,7 +235,7 @@ async function main(): Promise<void> {
       takenAfterConcurrency: portfolio.taken,
       observedTradesPerValidationDay: portfolio.tradesPerDay,
       fiveHundredPerDay: false,
-      reason: "The holdout day produced 77 candle-path signals before portfolio constraints. This research simulation applies the $1 initial stake, one initial slot, +1 slot and +50% stake at each realized-equity doubling, and a $100 stake cap. Missing price paths remain excluded."
+      reason: "The holdout day produced 77 candle-path signals before portfolio constraints. This research simulation applies the $1 initial stake, one initial slot, +1 slot and +50% stake at each realized-equity doubling, a $100 stake cap, and the 20% UTC-day drawdown kill switch. Missing price paths remain excluded."
     }
   };
   await writeFile(resolve("data/helius/chosen-strategy.json"), `${JSON.stringify(chosen, null, 2)}\n`);
