@@ -155,6 +155,9 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
 
     const buyObservedAt = Date.parse(buyQuote.observedAt);
     const sellObservedAt = Date.parse(sellQuote.observedAt);
+    if (sellQuote.slot < buyQuote.slot || sellObservedAt < buyObservedAt) {
+      return { status: "BLOCKED", reason: "Initial sellability quote is older than the final buy snapshot." };
+    }
     if (Math.abs(sellObservedAt - buyObservedAt) > 2_000) {
       return { status: "BLOCKED", reason: "Buy and initial sell quotes are not from a coherent two-second market window." };
     }
