@@ -87,7 +87,7 @@ export interface ExecutableRoundTripQuote {
   assumptions: {
     quoteTtlMs: number;
     executionDelayMs: number;
-    quoteAcquisitionLatencyMs: { buy: number; sell: number };
+    preValidationLatencyMs: { buy: number; sell: number };
     providerFeeUsdPerTransaction: number;
     priceImpactLimitPct: number;
     priorityFeePercentile: number;
@@ -320,7 +320,7 @@ export async function fetchExecutableRoundTripQuote(input: {
     } : {}),
     assumptions: {
       quoteTtlMs, executionDelayMs,
-      quoteAcquisitionLatencyMs: { buy: buyLatencyMs, sell: sellLatencyMs },
+      preValidationLatencyMs: { buy: buyLatencyMs, sell: sellLatencyMs },
       providerFeeUsdPerTransaction: providerFeeUsd,
       priceImpactLimitPct: maxPriceImpactPct, priorityFeePercentile: percentile,
       priorityFeeScope: buyFeeEstimate && sellFeeEstimate ? "ACCOUNT_SPECIFIC" : networkFeeEstimate.priorityFeeScope
