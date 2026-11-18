@@ -58,7 +58,7 @@ The research runner now uses the repository's agreed portfolio constraints rathe
 - A position keeps its slot occupied until its recorded exit; a mint can be entered only once.
 - The historical runner scales each $1 reference-trade PnL to the stake active at that entry and reserves token-account rent while a position is open.
 
-The historical comparison metrics in this document were generated with the older $0.35 stake and two-slot cap. They are retained as historical evidence, **not** presented as results under the new sizing policy. Run `npm run backtest:rules` to regenerate the report with the updated portfolio simulator. This remains candle-path research only: no output from this runner authorizes a Worker entry or relaxes creator/cluster, freshness, calibration, exact-size quote, sellability, cost, or durable-journal gates.
+The historical comparison metrics in this document were generated with the older $0.35 stake and two-slot cap. They are retained as historical evidence, **not** presented as results under the new sizing policy. The checked-in `data/helius/backtest-report.json` explicitly labels its embedded portfolio/throughput figures as stale; regenerate it with `npm run backtest:rules` before using any portfolio metrics. The generated `chosen-strategy.json` is marked research-only and `authorizedForPaperTrading=false` because the expanded risk replay has zero risk-cleared candidates. This remains candle-path research only: no output from this runner authorizes a Worker entry or relaxes creator/cluster, freshness, calibration, exact-size quote, sellability, cost, or durable-journal gates.
 
 ## Preliminary candidate entry rules (not authorized)
 
