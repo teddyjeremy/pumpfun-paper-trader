@@ -1,0 +1,47 @@
+name: Historical research portfolio replay
+
+on:
+  push:
+    branches:
+      - research/update-pump-strategy-equity-doubling
+    paths:
+      - "scripts/backtest-helius-sample.ts"
+      - "src/strategy/equity-doubling-portfolio.ts"
+      - "src/strategy/helius-sample.ts"
+      - "data/helius/**"
+      - ".github/workflows/research-backtest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-backtest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out research branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install
+      - name: Run chronological candle-path portfolio replay
+        run: npm run backtest:rules
+      - name: Upload generated research artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumpfun-equity-doubling-replay-${{ github.run_id }}
+          path: |
+            data/helius/chosen-strategy.json
+            data/helius/backtest-report.json
+            wallets.json
+          if-no-files-found: error
+          retention-days: 7
