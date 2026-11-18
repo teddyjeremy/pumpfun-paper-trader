@@ -16,7 +16,10 @@ export interface EquityDoublingPortfolioResult {
   skippedConcurrency: number;
   skippedCapital: number;
   skippedDuplicateMint: number;
+  /** Highest number of positions actually open at the same time. */
   maxConcurrentPositions: number;
+  /** Highest slot capacity unlocked by equity doublings, whether all slots were used or not. */
+  maxConcurrentSlots: number;
   highestDoublingLevel: number;
   largestStakeUsd: number;
   maxDrawdownPct: number;
@@ -55,7 +58,8 @@ export function simulateEquityDoublingPortfolio(
   let highWaterEquity = startingEquity;
   let highestDoublingLevel = 0;
   let largestStakeUsd = initialStake;
-  let maxConcurrentPositions = initialSlots;
+  let maxConcurrentPositions = 0;
+  let maxConcurrentSlots = initialSlots;
   let maxDrawdownPct = 0;
   let taken = 0;
   let skippedConcurrency = 0;
@@ -71,7 +75,7 @@ export function simulateEquityDoublingPortfolio(
     highWaterEquity = Math.max(highWaterEquity, equity());
     highestDoublingLevel = Math.max(highestDoublingLevel,
       Math.floor(Math.log2(highWaterEquity / startingEquity) + 1e-12));
-    maxConcurrentPositions = Math.max(maxConcurrentPositions, initialSlots + highestDoublingLevel);
+    maxConcurrentSlots = Math.max(maxConcurrentSlots, initialSlots + highestDoublingLevel);
     largestStakeUsd = Math.max(largestStakeUsd,
       Math.min(maxStake, initialStake * multiplier ** highestDoublingLevel));
     if (highWaterEquity > 0) {
@@ -113,6 +117,7 @@ export function simulateEquityDoublingPortfolio(
     const scaledPnl = trade.pnlUsd * (stake / trade.stakeUsd);
     cash -= stake + rentUsd;
     open.push({ mint: trade.mint, exitTime: trade.exitTime, stake, pnl: scaledPnl });
+    maxConcurrentPositions = Math.max(maxConcurrentPositions, open.length);
     seenMints.add(trade.mint);
     taken += 1;
     updateGrowthLevel();
@@ -128,6 +133,7 @@ export function simulateEquityDoublingPortfolio(
     skippedCapital,
     skippedDuplicateMint,
     maxConcurrentPositions,
+    maxConcurrentSlots,
     highestDoublingLevel,
     largestStakeUsd,
     maxDrawdownPct,
