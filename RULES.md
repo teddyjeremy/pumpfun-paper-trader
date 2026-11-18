@@ -55,6 +55,7 @@ The research runner now uses the repository's agreed portfolio constraints rathe
 - Initial concurrent positions: **1**.
 - At each achieved doubling of realized portfolio equity: add **one** concurrent slot and increase the next stake by **50%**.
 - Maximum position stake: **$100**.
+- Stop opening new trades after a **20% loss from the UTC day's starting equity**; open positions still follow their normal exit lifecycle.
 - A position keeps its slot occupied until its recorded exit; a mint can be entered only once.
 - The historical runner scales each $1 reference-trade PnL to the stake active at that entry and reserves token-account rent while a position is open.
 
