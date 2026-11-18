@@ -1173,6 +1173,8 @@ export async function getPaperLifecyclePersistenceStatus(
         AND buy_quote.mint=buy.mint
         AND buy_quote.side='BUY'
         AND buy_quote.venue IS NOT NULL
+        AND buy_quote.output_amount_base_units>0
+        AND buy_quote.output_usd>0
         AND buy.token_amount_base_units=buy_quote.output_amount_base_units
        JOIN paper_trade_projection sell
          ON sell.session_id=p.session_id
@@ -1186,9 +1188,17 @@ export async function getPaperLifecyclePersistenceStatus(
         AND sell_quote.mint=sell.mint
         AND sell_quote.side='SELL'
         AND sell_quote.venue IS NOT NULL
+        AND sell_quote.output_amount_base_units>0
+        AND sell_quote.output_usd>0
         AND sell.token_amount_base_units=sell_quote.input_amount_base_units
        WHERE p.status='CLOSED'
          AND p.closed_at IS NOT NULL
+         AND p.closed_at>p.opened_at
+         AND p.realized_pnl_usd IS NOT NULL
+         AND p.exit_reason IS NOT NULL
+         AND buy.executed_at<sell.executed_at
+         AND buy_quote.simulated_fill_at<sell_quote.simulated_fill_at
+         AND buy_quote.observed_at<sell_quote.observed_at
          AND p.token_amount_base_units=sell_quote.input_amount_base_units
          AND ($1::text IS NULL OR p.session_id=$1)
          AND EXISTS (
@@ -1200,6 +1210,8 @@ export async function getPaperLifecyclePersistenceStatus(
              AND initial_sell_quote.side='SELL'
              AND initial_sell_quote.venue=buy_quote.venue
              AND initial_sell_quote.venue IS NOT NULL
+             AND initial_sell_quote.output_amount_base_units>0
+             AND initial_sell_quote.output_usd>0
              AND initial_sell_quote.input_amount_base_units=buy.token_amount_base_units
              AND initial_sell_quote.external_quote_id<>sell_quote.external_quote_id
              AND initial_sell_quote.observed_at<sell_quote.observed_at
