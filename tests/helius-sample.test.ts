@@ -22,6 +22,28 @@ describe("Helius sample backtest", () => {
     expect(stats.winRate).toBeLessThan(0.5);
   });
 
+  it("keeps the candle-path candidate research-only when the expanded risk replay clears no mints", () => {
+    const chosen = JSON.parse(readFileSync("data/helius/chosen-strategy.json", "utf8")) as {
+      researchOnly?: boolean;
+      authorizedForPaperTrading?: boolean;
+      profitabilityEvidence?: string;
+      riskAudit?: { status?: string; riskClearedCandidates?: number };
+      sizing?: Record<string, number>;
+    };
+    expect(chosen.researchOnly).toBe(true);
+    expect(chosen.authorizedForPaperTrading).toBe(false);
+    expect(chosen.profitabilityEvidence).toBe("CANDLE_PATH_ONLY_NOT_RISK_CLEARED");
+    expect(chosen.riskAudit).toMatchObject({ status: "NO_ELIGIBLE_TRADES", riskClearedCandidates: 0 });
+    expect(chosen.sizing).toMatchObject({
+      startingEquityUsd: 2.7,
+      stakeUsd: 1,
+      maxConcurrent: 1,
+      initialConcurrentPositions: 1,
+      stakeIncreaseMultiplier: 1.5,
+      maxStakeUsd: 100
+    });
+  });
+
   it("is also positive on the earlier days", () => {
     const trades = train.flatMap(token => {
       const trade = simulateSampleToken(token, LIGHT_SNIPE, 1, cost);
