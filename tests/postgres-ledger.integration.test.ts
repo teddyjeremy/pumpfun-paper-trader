@@ -31,7 +31,7 @@ function quote(side: "BUY" | "SELL", quoteId: string) {
     quoteId,
     mint,
     side,
-    provider: "integration-test",
+    provider: "pump-sdk-4.3.1",
     venue: "PUMP_CURVE",
     slot: 123,
     observedAt: "2026-11-12T10:00:00.100Z",
@@ -211,6 +211,62 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     expect(completedLifecycle).toMatchObject({
       available: true, verifiedLifecycleCount: 1, reason: null
     });
+ 
+    // A later exit must not make an unrelated, older sell quote look like
+    // entry-time sellability evidence. The initial SELL quote must be from
+    // the same-or-newer SDK snapshot than the BUY quote and remain fresh
+    // through its own simulated fill.
+    const staleSessionId = `${sessionId}-stale-initial-sell`;
+    const stalePosition = { ...position, positionId: "integration-stale-position" };
+    const staleBuyQuote = quote("BUY", "integration-stale-buy-q");
+    const staleInitialSellQuote = {
+      ...quote("SELL", "integration-stale-initial-sell-q"),
+      observedAt: "2026-11-12T09:59:59.900Z"
+    };
+    const staleEntryEvent = {
+      ...entryEvent,
+      sessionId: staleSessionId,
+      eventId: "integration-stale-entry-1",
+      sequence: 1,
+      data: {
+        position: stalePosition,
+        buyQuoteId: staleBuyQuote.quoteId,
+        initialSellQuoteId: staleInitialSellQuote.quoteId,
+        buyQuote: staleBuyQuote,
+        initialSellQuote: staleInitialSellQuote
+      }
+    };
+    await ledgerPersistence!.persistPaperAuditEvents(staleSessionId, [staleEntryEvent]);
+    const staleClosedAt = "2026-11-12T10:01:00.000Z";
+    const staleExitQuote = {
+      ...quote("SELL", "integration-stale-exit-q"),
+      observedAt: "2026-11-12T10:00:59.000Z",
+      expiresAt: "2026-11-12T10:01:01.000Z",
+      simulatedFillAt: "2026-11-12T10:01:00.050Z"
+    };
+    const staleExitEvent = {
+      ...staleEntryEvent,
+      sequence: 2,
+      eventId: "integration-stale-exit-2",
+      kind: "PAPER_EXIT",
+      occurredAt: staleClosedAt,
+      data: {
+        position: {
+          ...stalePosition,
+          status: "CLOSED",
+          closedAt: staleClosedAt,
+          latestLiquidationValueUsd: 0,
+          realizedPnlUsd: -0.021,
+          exitReason: "TEST_EXIT"
+        },
+        sellQuoteId: staleExitQuote.quoteId,
+        exitReason: "TEST_EXIT",
+        sellQuote: staleExitQuote
+      }
+    };
+    await ledgerPersistence!.persistPaperAuditEvents(staleSessionId, [staleExitEvent]);
+    expect(await ledgerPersistence!.getPaperLifecyclePersistenceStatus(staleSessionId))
+      .toMatchObject({ available: true, verifiedLifecycleCount: 0, reason: null });
 
     const next = await ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
