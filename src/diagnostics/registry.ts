@@ -27,11 +27,7 @@ const counters = new Map<string, number>();
 const failures: DiagnosticEvent[] = [];
 const startedAt = new Date().toISOString();
 let lastEventAt: string | null = null;
-const blockers = new Set<string>([
-  "Launch discovery adapter is not configured",
-  "Verified Pump.fun bonding-curve quote adapter is not configured",
-  "Persistent trade ledger is not configured"
-]);
+const blockers = new Set<string>(["Production readiness has not been checked"]);
 
 export function increment(name: string, by = 1): void {
   counters.set(name, (counters.get(name) ?? 0) + by);
@@ -48,6 +44,14 @@ export function recordFailure(event: Omit<DiagnosticEvent, "at">): void {
 export function setReadinessBlocker(blocker: string, active: boolean): void {
   if (active) blockers.add(blocker);
   else blockers.delete(blocker);
+}
+
+export function replaceReadinessBlockers(next: readonly string[]): void {
+  blockers.clear();
+  for (const blocker of next) {
+    const normalized = blocker.trim();
+    if (normalized) blockers.add(normalized);
+  }
 }
 
 export function snapshot(): DiagnosticSnapshot {
@@ -72,7 +76,7 @@ export function diagnose(): {
     .sort((a, b) => b.count - a.count);
   const readiness = snapshot().readiness;
   const notes: string[] = [];
-  if (readiness.blockers.length) notes.push("Live trading simulation is not ready: required adapters or persistence are missing.");
+  if (readiness.blockers.length) notes.push("Paper-trading readiness is not verified; inspect the current Worker, durable ledger and closed-lifecycle blockers.");
   if ((all["candidate.discovered"] ?? 0) === 0) notes.push("No launches have been ingested in this process. Check provider configuration and stream health before changing strategy filters.");
   if ((all["candidate.rejected"] ?? 0) > 0) notes.push("Review rejection reason counts before relaxing any hard safety gate.");
   if ((all["quote.success"] ?? 0) === 0 && (all["candidate.discovered"] ?? 0) > 0) notes.push("Candidates exist but no successful quote is recorded; investigate quote adapter, curve state and provider latency.");

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { diagnose, increment, recordFailure, setReadinessBlocker, snapshot } from "../src/diagnostics/registry.js";
+import { diagnose, increment, recordFailure, replaceReadinessBlockers, setReadinessBlocker, snapshot } from "../src/diagnostics/registry.js";
 
 describe("diagnostics registry", () => {
   beforeEach(() => {
-    // Registry is process-scoped; tests assert monotonic behavior without resetting production state.
+    replaceReadinessBlockers(["Production readiness has not been checked"]);
   });
 
   it("records categorized failures with actionable guidance", () => {
@@ -17,6 +17,14 @@ describe("diagnostics registry", () => {
   it("tracks operational counters", () => {
     increment("candidate.discovered");
     expect(snapshot().counters["candidate.discovered"]).toBeGreaterThan(0);
+  });
+
+  it("replaces stale readiness placeholders with the current runtime blockers", () => {
+    replaceReadinessBlockers(["Cloudflare Worker reports paused=true."]);
+    expect(snapshot().readiness).toEqual({
+      ready: false,
+      blockers: ["Cloudflare Worker reports paused=true."]
+    });
   });
 
   it("does not report ready while blockers remain", () => {
