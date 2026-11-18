@@ -18,7 +18,8 @@ describe("equity-doubling portfolio policy", () => {
     ], { startingEquityUsd: 2.7, initialStakeUsd: 1, initialConcurrentPositions: 1 });
     expect(result.taken).toBe(2);
     expect(result.highestDoublingLevel).toBe(1);
-    expect(result.maxConcurrentPositions).toBe(2);
+    expect(result.maxConcurrentPositions).toBe(1);
+    expect(result.maxConcurrentSlots).toBe(2);
     expect(result.largestStakeUsd).toBe(1.5);
   });
 
@@ -31,6 +32,20 @@ describe("equity-doubling portfolio policy", () => {
     expect(result.taken).toBe(1);
     expect(result.skippedConcurrency).toBe(1);
     expect(result.skippedDuplicateMint).toBe(1);
+    expect(result.maxConcurrentPositions).toBe(1);
+    expect(result.maxConcurrentSlots).toBe(1);
+  });
+
+  it("uses the extra slot only after a completed equity doubling and reports actual overlap", () => {
+    const result = simulateEquityDoublingPortfolio([
+      trade("A", 100, 200, 2.7),
+      trade("B", 210, 400, 0),
+      trade("C", 220, 300, 0)
+    ], { startingEquityUsd: 2.7, initialStakeUsd: 1, initialConcurrentPositions: 1 });
+    expect(result.highestDoublingLevel).toBe(1);
+    expect(result.maxConcurrentSlots).toBe(2);
+    expect(result.maxConcurrentPositions).toBe(2);
+    expect(result.taken).toBe(3);
   });
 
   it("caps stake at $100", () => {
