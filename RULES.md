@@ -2,9 +2,23 @@
 
 > **Research only — not the production paper strategy.** These one-minute candle-path comparisons are not authorized for forward paper fills. The production strategy remains the fail-closed 15-rule audit in `src/paper/strategy-audit.ts`. The standalone `npm run paper` polling mode is blocked until it uses fresh exact-size SDK quotes, verified sellability, complete risk evidence and the durable Worker journal.
 
-Strategy that won: **early-launch snipe on the pump.fun path, one minute after launch.** Momentum scalping lost money on the holdout day. Graduation was profitable and took fewer trades. Copy-trading could not be tested as an entry rule. This is paper research on a biased sample, not a claim that a $2.40 wallet should trade live.
+No strategy is approved for forward paper entries. The earlier one-minute candle-path comparison favored a light-filter launch candidate, but the expanded 2026-11-14 risk replay supersedes it for risk-cleared decisions: 65 of 218 discovered launches were selected, only 2 reached a market-pattern setup, and **0 passed the complete risk gates**. Both setup candidates showed direct creator sales; wallet-cluster clearance remained UNKNOWN. The table below is retained as preliminary exploratory research only, not as a current profitability claim or an authorized strategy.
 
 ## What was compared
+
+## Expanded risk replay — 2026-11-14
+
+The completed replay artifact is recorded in [`data/helius/expanded-risk-replay-2026-11-14.json`](data/helius/expanded-risk-replay-2026-11-14.json) and comes from [GitHub Actions run #43715745622](https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43715745622).
+
+- Discovery found **218** launches; the replay selected **65** (29.8%), chosen by highest activity rank rather than random sampling.
+- All **65** selected launch collections completed; none was marked incomplete.
+- **63** had no qualifying market-pattern setup.
+- **2** reached a setup, but **0** were risk-cleared. Both were `RISK_NOT_CLEARED`.
+- Both setup candidates had `creatorSellRiskStatus=REJECT_OBSERVED`; wallet-cluster risk remained `UNKNOWN` despite `NO_HIGH_CONFIDENCE_LINKS`. Absence of a detected link is not clearance without complete holder and wallet evidence.
+- Their reserve-price outcomes are labeled `UNKNOWN`, with net return and round-trip cost left null. These are not strategy trades and must not be used to estimate executable expectancy.
+
+This replay therefore provides **no eligible trade sample** for calibration or strategy promotion. Keep the production Worker paused and retain all mandatory creator, cluster, quote, freshness, and persistence gates. The sample is still activity-biased and cannot establish population-wide performance.
+
 
 Source: `data/helius/tokens.csv`, 746 pump.fun tokens from 2026-11-08 through 2026-11-14. Price paths exist for the coins GeckoTerminal/GMGN still had candles for. **409 tokens have no path and are excluded from every pnl number.** Day counts are piled on Nov 13–14 (283 and 431). Nov 8–12 together are 32 tokens. Holdout is **2026-11-14**. Train is everything earlier.
 
@@ -26,7 +40,7 @@ Round-trip variable cost is **3.08%** of stake. At a **$0.35** stake the all-in 
 | Graduation | Same 1-minute entry, only coins that reached PumpSwap | — | $0.043 | 36 | $0.026 |
 | Copy-trading | Buy when tracked wallets cluster | not tested | — | not tested | — |
 
-The strict filter has the best expectancy and the fewest trades. The unfiltered snipe has the most trades and less total holdout profit ($2.00 vs $2.22). The default is the light filter because it is still positive on both splits and it made the most holdout dollars.
+The earlier candle-path table did not include complete creator/cluster evidence or executable full-size SDK round-trip quotes. Its positive expectancy values are not risk-cleared trade outcomes. No candidate is selected for forward execution.
 
 Momentum's holdout expectancy is negative. It is not enabled.
 
@@ -46,7 +60,7 @@ The research runner now uses the repository's agreed portfolio constraints rathe
 
 The historical comparison metrics in this document were generated with the older $0.35 stake and two-slot cap. They are retained as historical evidence, **not** presented as results under the new sizing policy. Run `npm run backtest:rules` to regenerate the report with the updated portfolio simulator. This remains candle-path research only: no output from this runner authorizes a Worker entry or relaxes creator/cluster, freshness, calibration, exact-size quote, sellability, cost, or durable-journal gates.
 
-## Default entry
+## Preliminary candidate entry rules (not authorized)
 
 1. Wait until **1 minute** after launch. Do not buy the create slot. A 5% stop cannot save a same-block rug, and these paths are 5-minute snapshots, so the first tradable print we trust is the 1-minute price.
 2. Reject the mint if **mint authority or freeze authority is still set**. In this file every coin that had a 1-minute price had already revoked both, so the filter did not change the backtest. Live, a set authority is a skip. Public RPC can read this with no Helius credits.
@@ -55,7 +69,7 @@ The historical comparison metrics in this document were generated with the older
 5. Missing rug fields do not count as a pass or a fail, except authorities and the creator read on a live entry: if the create transaction cannot be read, the paper loop skips the mint.
 6. Stricter flags were measured and not adopted as hard gates because they cut the book from 77 holdout trades to 24. When a later CSV supplies them, `maxTop10HolderPct`, `maxBundledBuyPct`, `min` unique buyers, and `maxCreatorPriorRugs` can be tightened without a code change. The shipped thresholds for those columns are deliberately loose (top-10 100, prior rugs 99) so they do not pretend the strict filter won.
 
-## Default exit
+## Preliminary candidate exit rules (not authorized)
 
 - **Take profit: +100%** (sell at 2x the 1-minute price).
 - **Stop: -5%** from the entry price. On these 5-minute snapshots the next print often gaps through that stop. Holdout losers exited at about **-$0.087** on a $0.35 stake (about **-25%** of the position, not -5%, and not -100%). Worst holdout print was **-81%**. Train losers averaged about **-19%** of the position. The stop is there so a loser is a partial loss. It does not cap the loss at 5% when the candle gaps.
