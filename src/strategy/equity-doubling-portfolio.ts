@@ -6,6 +6,8 @@ export interface EquityDoublingPolicy {
   initialConcurrentPositions?: number;
   stakeIncreaseMultiplier?: number;
   maxStakeUsd?: number;
+  /** Stop opening new positions after this loss from the UTC day's starting equity. */
+  dailyDrawdownKillPct?: number;
 }
 
 export interface EquityDoublingPortfolioResult {
@@ -16,6 +18,8 @@ export interface EquityDoublingPortfolioResult {
   skippedConcurrency: number;
   skippedCapital: number;
   skippedDuplicateMint: number;
+  skippedDailyDrawdown: number;
+  killedDays: number;
   /** Highest number of positions actually open at the same time. */
   maxConcurrentPositions: number;
   /** Highest slot capacity unlocked by equity doublings, whether all slots were used or not. */
@@ -42,11 +46,13 @@ export function simulateEquityDoublingPortfolio(
   const initialSlots = policy.initialConcurrentPositions ?? 1;
   const multiplier = policy.stakeIncreaseMultiplier ?? 1.5;
   const maxStake = policy.maxStakeUsd ?? 100;
+  const dailyDrawdownKillPct = policy.dailyDrawdownKillPct ?? 20;
   if (!Number.isFinite(startingEquity) || startingEquity <= 0 ||
       !Number.isFinite(initialStake) || initialStake <= 0 ||
       !Number.isSafeInteger(initialSlots) || initialSlots < 1 ||
       !Number.isFinite(multiplier) || multiplier < 1 ||
       !Number.isFinite(maxStake) || maxStake < initialStake ||
+      !Number.isFinite(dailyDrawdownKillPct) || dailyDrawdownKillPct <= 0 || dailyDrawdownKillPct > 100 ||
       !Number.isFinite(rentUsd) || rentUsd < 0) {
     throw new Error("Invalid equity-doubling portfolio policy.");
   }
@@ -65,6 +71,9 @@ export function simulateEquityDoublingPortfolio(
   let skippedConcurrency = 0;
   let skippedCapital = 0;
   let skippedDuplicateMint = 0;
+  let skippedDailyDrawdown = 0;
+  const dayStartEquity = new Map<string, number>();
+  const killedDays = new Set<string>();
   const seenMints = new Set<string>();
   const open: Array<{ mint: string; exitTime: number; stake: number; pnl: number }> = [];
   const days = new Set(ordered.map(trade =>
@@ -100,6 +109,14 @@ export function simulateEquityDoublingPortfolio(
         !Number.isFinite(trade.stakeUsd) || trade.stakeUsd <= 0 ||
         !Number.isFinite(trade.pnlUsd)) continue;
     closeDue(trade.entryTime);
+    const day = new Date(trade.entryTime * 1_000).toISOString().slice(0, 10);
+    if (!dayStartEquity.has(day)) dayStartEquity.set(day, equity());
+    const dayStart = dayStartEquity.get(day)!;
+    if (equity() <= dayStart * (1 - dailyDrawdownKillPct / 100)) killedDays.add(day);
+    if (killedDays.has(day)) {
+      skippedDailyDrawdown += 1;
+      continue;
+    }
     if (seenMints.has(trade.mint)) {
       skippedDuplicateMint += 1;
       continue;
@@ -132,6 +149,8 @@ export function simulateEquityDoublingPortfolio(
     skippedConcurrency,
     skippedCapital,
     skippedDuplicateMint,
+    skippedDailyDrawdown,
+    killedDays: killedDays.size,
     maxConcurrentPositions,
     maxConcurrentSlots,
     highestDoublingLevel,
