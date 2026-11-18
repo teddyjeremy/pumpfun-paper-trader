@@ -43,7 +43,7 @@ function quote(side: "BUY" | "SELL", quoteId: string) {
     priceImpactPct: 0.2,
     simulatedLatencyMs: 75,
     simulatedFillAt: "2026-11-12T10:00:00.150Z",
-    feeBreakdownUsd: { pump: 0.001, network: 0, priority: 0 }
+    feeBreakdownUsd: { protocol: 0, creator: 0, pool: 0, pumpAggregate: 0.001, network: 0, priority: 0, provider: 0, transfer: 0 }
   };
 }
 
