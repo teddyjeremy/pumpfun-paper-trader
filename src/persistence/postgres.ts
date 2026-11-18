@@ -1178,6 +1178,9 @@ export async function getPaperLifecyclePersistenceStatus(
         AND buy_quote.observed_at<=buy_quote.simulated_fill_at
         AND buy_quote.expires_at>buy_quote.simulated_fill_at
         AND buy_quote.price_impact_pct<=2
+        AND buy_quote.simulated_latency_ms BETWEEN 0 AND 1500
+        AND (buy_quote.fee_breakdown_usd->>'transfer')::numeric=0
+        AND buy_quote.raw_quote @> '{"executionReady":true,"taxPct":0}'::jsonb
         AND jsonb_typeof(buy_quote.fee_breakdown_usd)='object'
         AND buy_quote.fee_breakdown_usd ?& ARRAY['protocol','creator','pool','pumpAggregate','network','priority','provider','transfer']
         AND buy_quote.output_amount_base_units>0
@@ -1201,6 +1204,9 @@ export async function getPaperLifecyclePersistenceStatus(
         AND sell_quote.observed_at<=sell_quote.simulated_fill_at
         AND sell_quote.expires_at>sell_quote.simulated_fill_at
         AND sell_quote.price_impact_pct<=2
+        AND sell_quote.simulated_latency_ms BETWEEN 0 AND 1500
+        AND (sell_quote.fee_breakdown_usd->>'transfer')::numeric=0
+        AND sell_quote.raw_quote @> '{"executionReady":true,"taxPct":0}'::jsonb
         AND jsonb_typeof(sell_quote.fee_breakdown_usd)='object'
         AND sell_quote.fee_breakdown_usd ?& ARRAY['protocol','creator','pool','pumpAggregate','network','priority','provider','transfer']
         AND sell_quote.output_amount_base_units>0
@@ -1212,7 +1218,9 @@ export async function getPaperLifecyclePersistenceStatus(
          AND p.realized_pnl_usd IS NOT NULL
          AND p.exit_reason IS NOT NULL
          AND buy.executed_at=buy_quote.simulated_fill_at
+         AND buy.simulated_latency_ms=buy_quote.simulated_latency_ms
          AND sell.executed_at=sell_quote.simulated_fill_at
+         AND sell.simulated_latency_ms=sell_quote.simulated_latency_ms
          AND buy.executed_at<sell.executed_at
          AND buy_quote.simulated_fill_at<sell_quote.simulated_fill_at
          AND buy_quote.observed_at<sell_quote.observed_at
@@ -1235,6 +1243,9 @@ export async function getPaperLifecyclePersistenceStatus(
              AND initial_sell_quote.observed_at<=initial_sell_quote.simulated_fill_at
              AND initial_sell_quote.expires_at>initial_sell_quote.simulated_fill_at
              AND initial_sell_quote.price_impact_pct<=2
+        AND initial_sell_quote.simulated_latency_ms BETWEEN 0 AND 1500
+        AND (initial_sell_quote.fee_breakdown_usd->>'transfer')::numeric=0
+        AND initial_sell_quote.raw_quote @> '{"executionReady":true,"taxPct":0}'::jsonb
              AND jsonb_typeof(initial_sell_quote.fee_breakdown_usd)='object'
              AND initial_sell_quote.fee_breakdown_usd ?& ARRAY['protocol','creator','pool','pumpAggregate','network','priority','provider','transfer']
              AND initial_sell_quote.output_amount_base_units>0
