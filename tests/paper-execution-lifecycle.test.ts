@@ -94,6 +94,28 @@ describe("paper execution lifecycle", () => {
     expect(committed!.position.tokenAmountBaseUnits).toBe("1000000");
   });
 
+  it("blocks when the buy quote expires while the exact-size sellability quote is being collected", async () => {
+    let clock = now;
+    const commitEntry = vi.fn();
+    const result = await executePaperEntry({
+      mint, positionId: "p-stale-buy", occurredAt: new Date(now).toISOString(),
+      now: () => clock,
+      strategy: approved, portfolio: createPaperPortfolio(),
+      quoteBuy: async () => ({ quote: quote("BUY"), context: { solUsd, costs } }),
+      quoteSell: async () => {
+        clock = now + 2_100;
+        return {
+          quote: { ...quote("SELL"), observedAt: new Date(clock - 100).toISOString() },
+          context: { solUsd, costs }
+        };
+      },
+      commitEntry
+    });
+    expect(result.status).toBe("BLOCKED");
+    expect(result.reason).toMatch(/stale|expired/i);
+    expect(commitEntry).not.toHaveBeenCalled();
+  });
+
   it("blocks paper entry when either side exceeds the 2% price-impact limit", async () => {
     const commitEntry = vi.fn();
     const result = await executePaperEntry({
