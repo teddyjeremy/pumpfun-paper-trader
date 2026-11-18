@@ -90,6 +90,22 @@ describe("executable quote service",()=>{
     expect(result.exactFeeEvidence?.sell.status).toBe("AVAILABLE");
     expect(result.paperEntryAuthorized).toBe(false);
   });
+  it("blocks when the buy snapshot expires during sellability-quote acquisition",async()=>{
+    let clock=Date.parse(observedAt);
+    await expect(fetchExecutableRoundTripQuote({
+      fetchQuote:async({side,amountBaseUnits})=>{
+        if(side==="BUY") return quote("BUY",100,amountBaseUnits);
+        clock+=2_100;
+        return {...quote("SELL",101,amountBaseUnits),inputAmountBaseUnits:amountBaseUnits,
+          observedAt:new Date(clock).toISOString()};
+      },
+      helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
+        result:[{slot:99,prioritizationFee:1000}]
+      }),{status:200})},
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,
+      solUsd,now:()=>clock,executionDelayMs:100
+    })).rejects.toThrow(/stale|future|expire/i);
+  });
   it("blocks when the sell quote does not match the exact buy output",async()=>{
     await expect(fetchExecutableRoundTripQuote({
       fetchQuote:async({side,amountBaseUnits})=>side==="BUY"?quote("BUY",100,amountBaseUnits):{
