@@ -1172,7 +1172,14 @@ export async function getPaperLifecyclePersistenceStatus(
         AND buy_quote.external_quote_id=buy.quote_id
         AND buy_quote.mint=buy.mint
         AND buy_quote.side='BUY'
+        AND buy_quote.provider='pump-sdk-4.3.1'
         AND buy_quote.venue IS NOT NULL
+        AND buy_quote.context_slot IS NOT NULL
+        AND buy_quote.observed_at<=buy_quote.simulated_fill_at
+        AND buy_quote.expires_at>buy_quote.simulated_fill_at
+        AND buy_quote.price_impact_pct<=2
+        AND jsonb_typeof(buy_quote.fee_breakdown_usd)='object'
+        AND buy_quote.fee_breakdown_usd ?& ARRAY['protocol','creator','pool','pumpAggregate','network','priority','provider','transfer']
         AND buy_quote.output_amount_base_units>0
         AND buy_quote.output_usd>0
         AND buy.token_amount_base_units=buy_quote.output_amount_base_units
@@ -1187,7 +1194,15 @@ export async function getPaperLifecyclePersistenceStatus(
         AND sell_quote.external_quote_id=sell.quote_id
         AND sell_quote.mint=sell.mint
         AND sell_quote.side='SELL'
+        AND sell_quote.provider='pump-sdk-4.3.1'
         AND sell_quote.venue IS NOT NULL
+        AND sell_quote.context_slot IS NOT NULL
+        AND sell_quote.context_slot>=buy_quote.context_slot
+        AND sell_quote.observed_at<=sell_quote.simulated_fill_at
+        AND sell_quote.expires_at>sell_quote.simulated_fill_at
+        AND sell_quote.price_impact_pct<=2
+        AND jsonb_typeof(sell_quote.fee_breakdown_usd)='object'
+        AND sell_quote.fee_breakdown_usd ?& ARRAY['protocol','creator','pool','pumpAggregate','network','priority','provider','transfer']
         AND sell_quote.output_amount_base_units>0
         AND sell_quote.output_usd>0
         AND sell.token_amount_base_units=sell_quote.input_amount_base_units
@@ -1196,6 +1211,8 @@ export async function getPaperLifecyclePersistenceStatus(
          AND p.closed_at>p.opened_at
          AND p.realized_pnl_usd IS NOT NULL
          AND p.exit_reason IS NOT NULL
+         AND buy.executed_at=buy_quote.simulated_fill_at
+         AND sell.executed_at=sell_quote.simulated_fill_at
          AND buy.executed_at<sell.executed_at
          AND buy_quote.simulated_fill_at<sell_quote.simulated_fill_at
          AND buy_quote.observed_at<sell_quote.observed_at
@@ -1208,8 +1225,18 @@ export async function getPaperLifecyclePersistenceStatus(
              AND initial_sell_quote.external_position_id=p.external_position_id
              AND initial_sell_quote.mint=p.mint
              AND initial_sell_quote.side='SELL'
+             AND initial_sell_quote.provider='pump-sdk-4.3.1'
              AND initial_sell_quote.venue=buy_quote.venue
              AND initial_sell_quote.venue IS NOT NULL
+             AND initial_sell_quote.context_slot IS NOT NULL
+             AND initial_sell_quote.context_slot>=buy_quote.context_slot
+             AND initial_sell_quote.context_slot<=sell_quote.context_slot
+             AND initial_sell_quote.observed_at>=buy_quote.observed_at
+             AND initial_sell_quote.observed_at<=initial_sell_quote.simulated_fill_at
+             AND initial_sell_quote.expires_at>initial_sell_quote.simulated_fill_at
+             AND initial_sell_quote.price_impact_pct<=2
+             AND jsonb_typeof(initial_sell_quote.fee_breakdown_usd)='object'
+             AND initial_sell_quote.fee_breakdown_usd ?& ARRAY['protocol','creator','pool','pumpAggregate','network','priority','provider','transfer']
              AND initial_sell_quote.output_amount_base_units>0
              AND initial_sell_quote.output_usd>0
              AND initial_sell_quote.input_amount_base_units=buy.token_amount_base_units
