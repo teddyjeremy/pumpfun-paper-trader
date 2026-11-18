@@ -154,13 +154,21 @@
       "worstReturnPct": -81.0412147505423
     },
     "portfolio": {
-      "endingEquityUsd": 4.237703492144984,
-      "maxDrawdownPct": 17.5401157090731,
-      "taken": 60,
-      "skippedConcurrency": 17,
+      "startingEquityUsd": 2.7,
+      "endingEquityUsd": 4.993431207067138,
+      "pnlUsd": 2.2934312070671536,
+      "taken": 59,
+      "skippedConcurrency": 9,
+      "skippedCapital": 9,
+      "skippedDuplicateMint": 0,
+      "skippedDailyDrawdown": 0,
       "killedDays": 0,
-      "pnlUsd": 1.8377034921449837,
-      "tradesPerDay": 60
+      "maxConcurrentPositions": 3,
+      "maxConcurrentSlots": 3,
+      "highestDoublingLevel": 2,
+      "largestStakeUsd": 2.25,
+      "maxDrawdownPct": 68.5603634789111,
+      "tradesPerDay": 59
     },
     "costs": {
       "solUsd": 73.5,
@@ -186,26 +194,19 @@
   },
   "throughput": {
     "observedValidationSignals": 77,
-    "takenAfterConcurrency": 60,
-    "observedTradesPerValidationDay": 60,
+    "takenAfterConcurrency": 59,
+    "observedTradesPerValidationDay": 59,
     "fiveHundredPerDay": false,
-    "reason": "Historical throughput figures were generated with the older $2.40 bankroll, $0.35 stake and two-slot cap. They are not measurements under the current $2.70 / $1 / one-slot equity-doubling policy. Missing price paths remain excluded."
+    "reason": "The holdout day produced 77 candle-path signals before portfolio constraints. This research simulation applies the $1 initial stake, one initial slot, +1 slot and +50% stake at each realized-equity doubling, a $100 stake cap, and the 20% UTC-day drawdown kill switch. The daily kill was not triggered. Missing price paths remain excluded."
   },
   "portfolioPolicy": {
-    "status": "STALE_HISTORICAL_OUTPUT",
-    "generatedUnder": {
-      "startingEquityUsd": 2.4,
-      "stakeUsd": 0.35,
-      "maxConcurrent": 2
-    },
-    "currentPolicy": {
-      "startingEquityUsd": 2.7,
-      "initialStakeUsd": 1,
-      "initialConcurrentPositions": 1,
-      "stakeIncreaseMultiplier": 1.5,
-      "maxStakeUsd": 100
-    },
-    "note": "The embedded winner.portfolio and throughput figures predate the equity-doubling simulator. Regenerate with npm run backtest:rules before using portfolio metrics."
+    "status": "CURRENT_RESEARCH_POLICY",
+    "startingEquityUsd": 2.7,
+    "initialStakeUsd": 1,
+    "initialConcurrentPositions": 1,
+    "stakeIncreaseMultiplier": 1.5,
+    "maxStakeUsd": 100,
+    "dailyDrawdownKillPct": 20
   },
   "strategyAuthorization": {
     "status": "NOT_AUTHORIZED",
