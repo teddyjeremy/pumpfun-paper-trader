@@ -52,6 +52,14 @@ function run(tokens: SampleToken[], sampleRule: SampleRule, cost: CostAssumption
 
 async function main(): Promise<void> {
   const tokens = parseSampleCsv(await readFile(resolve("data/helius/tokens.csv"), "utf8"));
+  const riskReplay = JSON.parse(await readFile(
+    resolve("data/helius/expanded-risk-replay-2026-11-14.json"), "utf8"
+  )) as { replay?: { riskClearedCandidates?: number } };
+  const riskClearedCandidates = Number(riskReplay.replay?.riskClearedCandidates);
+  if (!Number.isSafeInteger(riskClearedCandidates) || riskClearedCandidates < 0) {
+    throw new Error("Expanded risk replay must provide a non-negative risk-cleared candidate count.");
+  }
+  const riskAuditStatus = riskClearedCandidates === 0 ? "NO_ELIGIBLE_TRADES" : "REVIEW_REQUIRED";
   const train = tokens.filter(token => token.launchDate < HOLDOUT_DATE);
   const valid = tokens.filter(token => token.launchDate >= HOLDOUT_DATE);
   const cost: CostAssumptions = { ...MEASURED_COSTS, solUsd: 73.5 };
@@ -93,6 +101,14 @@ async function main(): Promise<void> {
     id: LIGHT_SNIPE.id,
     family: "launch" as const,
     profitableOnHoldout: winner.validation.expectancyUsd > 0 && winner.train.expectancyUsd > 0,
+    researchOnly: true,
+    authorizedForPaperTrading: false,
+    profitabilityEvidence: "CANDLE_PATH_ONLY_NOT_RISK_CLEARED",
+    riskAudit: {
+      status: riskAuditStatus,
+      riskClearedCandidates,
+      artifact: "data/helius/expanded-risk-replay-2026-11-14.json"
+    },
     entry: {
       family: "launch" as const,
       delayMinutes: 1,
@@ -165,6 +181,20 @@ async function main(): Promise<void> {
     };
   });
   const report = {
+    portfolioPolicy: {
+      status: "CURRENT_RESEARCH_POLICY",
+      startingEquityUsd: 2.7,
+      initialStakeUsd: 1,
+      initialConcurrentPositions: 1,
+      stakeIncreaseMultiplier: 1.5,
+      maxStakeUsd: 100
+    },
+    strategyAuthorization: {
+      status: "NOT_AUTHORIZED",
+      riskClearedCandidates,
+      reason: "Candle-path profitability is exploratory; the expanded creator and wallet-cluster replay has not cleared any candidate.",
+      sourceArtifact: "data/helius/expanded-risk-replay-2026-11-14.json"
+    },
     dataset: {
       file: "data/helius/tokens.csv",
       tokens: tokens.length,
@@ -182,6 +212,11 @@ async function main(): Promise<void> {
     })),
     winner: {
       id: chosen.id,
+      researchOnly: true,
+      authorizedForPaperTrading: false,
+      profitabilityEvidence: "CANDLE_PATH_ONLY_NOT_RISK_CLEARED",
+      riskAuditStatus,
+      riskClearedCandidates,
       why: "Highest validation profit among rules that stay positive on both splits and still reject an early dev sale or a creator holding more than 8%. Unfiltered sniping takes more trades but less money. Stricter rug flags and copy-trading take fewer trades.",
       train: winner.train,
       validation: winner.validation,
