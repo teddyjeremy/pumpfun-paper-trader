@@ -2,12 +2,14 @@ import Fastify from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import { authorizeDashboardRequest } from "./dashboard-auth.js";
 import { config } from "./config.js";
+import { evaluateProductionReadiness, type WorkerReadinessSnapshot } from "./diagnostics/production-readiness.js";
 import { isStrongServiceToken } from "./service-token.js";
-import { diagnose, increment, snapshot } from "./diagnostics/registry.js";
+import { diagnose, increment, replaceReadinessBlockers, snapshot } from "./diagnostics/registry.js";
 import { trackingSnapshot } from "./diagnostics/tracker.js";
 import {
   acquireWorkerLease, heartbeatWorkerLease, persistPaperAuditEvents,
   releaseWorkerLease, getPersistenceStatus, getTradingDashboardSnapshot, getPaperSessionLedgerSnapshot,
+  getPaperLifecyclePersistenceStatus,
   persistHeliusBackfillArchive, persistHeliusGapRecoveryArchive, getHeliusBackfillReplayDataset,
   getHeliusBackfillDashboardSnapshot, getHistoricalBacktestDashboardSnapshot
 } from "./persistence/postgres.js";
@@ -149,10 +151,67 @@ app.get("/health", async () => ({
   timestamp: new Date().toISOString()
 }));
 
+async function readWorkerReadinessSnapshot(): Promise<WorkerReadinessSnapshot> {
+  if (!config.PAPER_WORKER_URL) {
+    return {
+      configured: false, controlTokenConfigured: false, reachable: false,
+      enabled: false, paused: true, tradingReady: false,
+      blockers: ["Configure PAPER_WORKER_URL to verify the deployed Cloudflare Worker."]
+    };
+  }
+  if (!isStrongServiceToken(config.PAPER_WORKER_CONTROL_TOKEN)) {
+    return {
+      configured: true, controlTokenConfigured: false, reachable: false,
+      enabled: false, paused: true, tradingReady: false,
+      blockers: ["A valid PAPER_WORKER_CONTROL_TOKEN is required to read Worker trading readiness."]
+    };
+  }
+  try {
+    const response = await fetch(new URL("/dashboard", config.PAPER_WORKER_URL), {
+      headers: { authorization: `Bearer ${config.PAPER_WORKER_CONTROL_TOKEN}` },
+      signal: AbortSignal.timeout(5_000), cache: "no-store"
+    });
+    if (!response.ok) {
+      return {
+        configured: true, controlTokenConfigured: true, reachable: false,
+        enabled: false, paused: true, tradingReady: false,
+        blockers: [`Worker dashboard request failed (HTTP ${response.status}).`]
+      };
+    }
+    const payload = await response.json() as Record<string, unknown>;
+    const status = payload.status && typeof payload.status === "object"
+      ? payload.status as Record<string, unknown> : payload;
+    const blockers = Array.isArray(status.readinessBlockers)
+      ? status.readinessBlockers.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+    if (typeof status.blocker === "string" && status.blocker.trim() && !blockers.includes(status.blocker.trim())) {
+      blockers.push(status.blocker.trim());
+    }
+    return {
+      configured: true, controlTokenConfigured: true, reachable: true,
+      enabled: status.enabled === true,
+      paused: status.paused === true,
+      tradingReady: status.tradingReady === true,
+      blockers
+    };
+  } catch {
+    return {
+      configured: true, controlTokenConfigured: true, reachable: false,
+      enabled: false, paused: true, tradingReady: false,
+      blockers: ["Cloudflare Worker dashboard status is unreachable."]
+    };
+  }
+}
+
 app.get("/ready", async (_request, reply) => {
-  const state = snapshot().readiness;
-  if (!state.ready) return reply.code(503).send({ ready: false, blockers: state.blockers });
-  return { ready: true, blockers: [] };
+  const [worker, persistence] = await Promise.all([
+    readWorkerReadinessSnapshot(),
+    getPaperLifecyclePersistenceStatus()
+  ]);
+  const readiness = evaluateProductionReadiness({ worker, persistence });
+  replaceReadinessBlockers(readiness.blockers);
+  if (!readiness.ready) return reply.code(503).send(readiness);
+  return readiness;
 });
 
 app.get("/api/diagnostics", async () => ({
