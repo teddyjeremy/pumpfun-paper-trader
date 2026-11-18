@@ -136,6 +136,11 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
       session_id: sessionId, mint, side: "buy", quote_id: "integration-buy-q"
     });
 
+    const entryOnlyLifecycle = await ledgerPersistence!.getPaperLifecyclePersistenceStatus(sessionId);
+    expect(entryOnlyLifecycle).toMatchObject({
+      available: true, verifiedLifecycleCount: 0, reason: null
+    });
+
     await expect(ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
       data: { ...entryEvent.data, position: { ...position, stakeUsd: 1.25 } }
@@ -201,6 +206,11 @@ describe.skipIf(!databaseUrl)("PostgreSQL paper ledger integration", () => {
     expect(recoveredLedger.trades).toHaveLength(2);
     expect(recoveredLedger.trades.map((trade: { side: string }) => trade.side).sort())
       .toEqual(["buy", "sell"]);
+
+    const completedLifecycle = await ledgerPersistence!.getPaperLifecyclePersistenceStatus(sessionId);
+    expect(completedLifecycle).toMatchObject({
+      available: true, verifiedLifecycleCount: 1, reason: null
+    });
 
     const next = await ledgerPersistence!.persistPaperAuditEvents(sessionId, [{
       ...entryEvent,
