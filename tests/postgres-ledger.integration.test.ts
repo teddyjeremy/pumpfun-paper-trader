@@ -42,6 +42,8 @@ function quote(side: "BUY" | "SELL", quoteId: string) {
     outputUsd: side === "BUY" ? 1 : 0.98,
     priceImpactPct: 0.2,
     simulatedLatencyMs: 75,
+    taxPct: 0,
+    executionReady: true,
     simulatedFillAt: "2026-11-12T10:00:00.150Z",
     feeBreakdownUsd: { protocol: 0, creator: 0, pool: 0, pumpAggregate: 0.001, network: 0, priority: 0, provider: 0, transfer: 0 }
   };
