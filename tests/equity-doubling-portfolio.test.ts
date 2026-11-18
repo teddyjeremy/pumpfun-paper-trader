@@ -48,6 +48,22 @@ describe("equity-doubling portfolio policy", () => {
     expect(result.taken).toBe(3);
   });
 
+  it("stops opening new trades after a 20% loss from the UTC day's starting equity", () => {
+    const result = simulateEquityDoublingPortfolio([
+      trade("LOSS", 100, 200, -0.7),
+      trade("AFTER-LOSS", 210, 300, 2)
+    ], {
+      startingEquityUsd: 2.7,
+      initialStakeUsd: 1,
+      initialConcurrentPositions: 1,
+      dailyDrawdownKillPct: 20
+    }, 0);
+    expect(result.taken).toBe(1);
+    expect(result.skippedDailyDrawdown).toBe(1);
+    expect(result.killedDays).toBe(1);
+    expect(result.endingEquityUsd).toBeCloseTo(2);
+  });
+
   it("caps stake at $100", () => {
     const trades: ClosedTrade[] = [];
     let time = 100;
