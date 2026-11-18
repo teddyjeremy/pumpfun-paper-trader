@@ -172,7 +172,12 @@
       "roundTripVariablePct": 3.0759749999999864,
       "rentUsd": 0.10940034,
       "costPerTradeUsdAtStake": 0.012970912499999952
-    }
+    },
+    "researchOnly": true,
+    "authorizedForPaperTrading": false,
+    "profitabilityEvidence": "CANDLE_PATH_ONLY_NOT_RISK_CLEARED",
+    "riskAuditStatus": "NO_ELIGIBLE_TRADES",
+    "riskClearedCandidates": 0
   },
   "copyTrading": {
     "sourceRows": 61,
@@ -184,6 +189,28 @@
     "takenAfterConcurrency": 60,
     "observedTradesPerValidationDay": 60,
     "fiveHundredPerDay": false,
-    "reason": "The holdout day produced well under 500 qualified entries even before the two-slot cap. A 15-minute hold and $2.40 bankroll cannot fund 500 simultaneous attempts, and the other ~400 tokens that day had no price path to support them."
+    "reason": "Historical throughput figures were generated with the older $2.40 bankroll, $0.35 stake and two-slot cap. They are not measurements under the current $2.70 / $1 / one-slot equity-doubling policy. Missing price paths remain excluded."
+  },
+  "portfolioPolicy": {
+    "status": "STALE_HISTORICAL_OUTPUT",
+    "generatedUnder": {
+      "startingEquityUsd": 2.4,
+      "stakeUsd": 0.35,
+      "maxConcurrent": 2
+    },
+    "currentPolicy": {
+      "startingEquityUsd": 2.7,
+      "initialStakeUsd": 1,
+      "initialConcurrentPositions": 1,
+      "stakeIncreaseMultiplier": 1.5,
+      "maxStakeUsd": 100
+    },
+    "note": "The embedded winner.portfolio and throughput figures predate the equity-doubling simulator. Regenerate with npm run backtest:rules before using portfolio metrics."
+  },
+  "strategyAuthorization": {
+    "status": "NOT_AUTHORIZED",
+    "riskClearedCandidates": 0,
+    "reason": "The expanded chronological creator and wallet-cluster replay found zero risk-cleared candidates; candle-path expectancy is not executable trade evidence.",
+    "sourceArtifact": "data/helius/expanded-risk-replay-2026-11-14.json"
   }
 }
