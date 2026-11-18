@@ -1120,3 +1120,98 @@ export async function getHistoricalBacktestDashboardSnapshot(date?: string) {
     return { available: false, reason: "Historical research tables are not migrated or the database query failed", runs: [], candidates: [] };
   }
 }
+
+
+export interface PaperLifecyclePersistenceStatus {
+  available: boolean;
+  verifiedLifecycleCount: number;
+  reason: string | null;
+}
+
+/**
+ * Verifies a closed position from the durable projections, not volatile Worker
+ * memory. The BUY and SELL trades must reference matching persisted SDK quote
+ * rows; the entry must also have a distinct exact-size initial sellability quote.
+ */
+export async function getPaperLifecyclePersistenceStatus(
+  sessionId?: string
+): Promise<PaperLifecyclePersistenceStatus> {
+  const unavailable = (reason: string): PaperLifecyclePersistenceStatus => ({
+    available: false,
+    verifiedLifecycleCount: 0,
+    reason
+  });
+  if (!pool) return unavailable("DATABASE_URL is not configured.");
+  if (sessionId !== undefined && (!sessionId.trim() || sessionId.length > 128)) {
+    return unavailable("Invalid paper session id.");
+  }
+
+  const persistence = await getPersistenceStatus();
+  if (!persistence.connected) return unavailable("PostgreSQL is not connected.");
+  if (!persistence.schemaReady) return unavailable("The paper-trading database schema is not applied.");
+
+  try {
+    const projectionMigration = await pool.query(
+      "SELECT 1 FROM schema_migrations WHERE version='0005_paper_trade_projections' LIMIT 1"
+    );
+    if (projectionMigration.rows.length === 0) {
+      return unavailable("Migration 0005_paper_trade_projections is not applied.");
+    }
+
+    const result = await pool.query<{ verified_count: number | string }>(
+      `SELECT COUNT(DISTINCT (p.session_id, p.external_position_id))::int AS verified_count
+       FROM paper_position_projection p
+       JOIN paper_trade_projection buy
+         ON buy.session_id=p.session_id
+        AND buy.external_position_id=p.external_position_id
+        AND buy.mint=p.mint
+        AND buy.side='buy'
+       JOIN paper_execution_quote_projection buy_quote
+         ON buy_quote.session_id=buy.session_id
+        AND buy_quote.external_position_id=buy.external_position_id
+        AND buy_quote.external_quote_id=buy.quote_id
+        AND buy_quote.mint=buy.mint
+        AND buy_quote.side='BUY'
+        AND buy_quote.venue IS NOT NULL
+        AND buy.token_amount_base_units=buy_quote.output_amount_base_units
+       JOIN paper_trade_projection sell
+         ON sell.session_id=p.session_id
+        AND sell.external_position_id=p.external_position_id
+        AND sell.mint=p.mint
+        AND sell.side='sell'
+       JOIN paper_execution_quote_projection sell_quote
+         ON sell_quote.session_id=sell.session_id
+        AND sell_quote.external_position_id=sell.external_position_id
+        AND sell_quote.external_quote_id=sell.quote_id
+        AND sell_quote.mint=sell.mint
+        AND sell_quote.side='SELL'
+        AND sell_quote.venue IS NOT NULL
+        AND sell.token_amount_base_units=sell_quote.input_amount_base_units
+       WHERE p.status='CLOSED'
+         AND p.closed_at IS NOT NULL
+         AND p.token_amount_base_units=sell_quote.input_amount_base_units
+         AND ($1::text IS NULL OR p.session_id=$1)
+         AND EXISTS (
+           SELECT 1
+           FROM paper_execution_quote_projection initial_sell_quote
+           WHERE initial_sell_quote.session_id=p.session_id
+             AND initial_sell_quote.external_position_id=p.external_position_id
+             AND initial_sell_quote.mint=p.mint
+             AND initial_sell_quote.side='SELL'
+             AND initial_sell_quote.venue=buy_quote.venue
+             AND initial_sell_quote.venue IS NOT NULL
+             AND initial_sell_quote.input_amount_base_units=buy.token_amount_base_units
+             AND initial_sell_quote.external_quote_id<>sell_quote.external_quote_id
+             AND initial_sell_quote.observed_at<sell_quote.observed_at
+         )`,
+      [sessionId ?? null]
+    );
+    return {
+      available: true,
+      verifiedLifecycleCount: Number(result.rows[0]?.verified_count ?? 0),
+      reason: null
+    };
+  } catch {
+    return unavailable("Durable paper entry/exit projections could not be verified; inspect migration 0005 and database logs.");
+  }
+}
