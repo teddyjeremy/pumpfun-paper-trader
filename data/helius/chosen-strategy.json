@@ -34,9 +34,12 @@
     "maxCreatorPriorRugs": 99
   },
   "sizing": {
-    "startingEquityUsd": 2.4,
-    "stakeUsd": 0.35,
-    "maxConcurrent": 2,
+    "startingEquityUsd": 2.7,
+    "stakeUsd": 1,
+    "maxConcurrent": 1,
+    "initialConcurrentPositions": 1,
+    "stakeIncreaseMultiplier": 1.5,
+    "maxStakeUsd": 100,
     "dailyDrawdownKillPct": 20
   },
   "copyWallets": [],
@@ -50,5 +53,13 @@
     "roundTripVariablePct": 3.0759749999999864,
     "rentUsd": 0.10940034,
     "costPerTradeUsdAtStake": 0.012970912499999952
+  },
+  "researchOnly": true,
+  "authorizedForPaperTrading": false,
+  "profitabilityEvidence": "CANDLE_PATH_ONLY_NOT_RISK_CLEARED",
+  "riskAudit": {
+    "status": "NO_ELIGIBLE_TRADES",
+    "riskClearedCandidates": 0,
+    "artifact": "data/helius/expanded-risk-replay-2026-11-14.json"
   }
 }
