@@ -18,6 +18,7 @@ class MemoryDurableStorage {
   private values: Stored = new Map();
   private transactionTail: Promise<unknown> = Promise.resolve();
   failNextPut = false;
+  writeCount = 0;
   lastAlarmAt: number | null = null;
   async setAlarm(timestamp: number): Promise<void> { this.lastAlarmAt = timestamp; }
 
@@ -33,14 +34,20 @@ class MemoryDurableStorage {
       this.failNextPut = false;
       throw new Error("simulated storage quota failure");
     }
-    if (typeof keyOrValues === "string") this.values.set(keyOrValues, structuredClone(value));
-    else for (const [key, item] of Object.entries(keyOrValues)) this.values.set(key, structuredClone(item));
+    if (typeof keyOrValues === "string") {
+      this.values.set(keyOrValues, structuredClone(value));
+      this.writeCount += 1;
+    } else {
+      for (const [key, item] of Object.entries(keyOrValues)) this.values.set(key, structuredClone(item));
+      this.writeCount += Object.keys(keyOrValues).length;
+    }
   }
   async transaction<T>(callback: (txn: this) => Promise<T>): Promise<T> {
     const run = this.transactionTail.then(async () => {
       const before = structuredClone(this.values);
+      const writesBefore = this.writeCount;
       try { return await callback(this); }
-      catch (error) { this.values = before; throw error; }
+      catch (error) { this.values = before; this.writeCount = writesBefore; throw error; }
     });
     this.transactionTail = run.then(() => undefined, () => undefined);
     return run;
@@ -73,6 +80,14 @@ function append(coordinator: PumpFunCoordinator) {
   return (coordinator as unknown as {
     appendAudit: (kind: string, mint: string | null, data: unknown, key?: string, sessionId?: string) => Promise<void>
   }).appendAudit.bind(coordinator);
+}
+function appendBatch(coordinator: PumpFunCoordinator) {
+  return (coordinator as unknown as {
+    appendAuditBatch: (
+      entries: Array<{ kind: string; mint: string | null; data: unknown; idempotencyKey: string }>,
+      batchId: string, sessionId?: string
+    ) => Promise<void>
+  }).appendAuditBatch.bind(coordinator);
 }
 
 describe("operator dashboard snapshot", () => {
@@ -122,6 +137,92 @@ describe("Durable Object audit storage contract", () => {
     expect(third.events.map(event => event.sequence)).toEqual([201, 202, 203, 204, 205]);
     expect([first.totalEvents, second.totalEvents, third.totalEvents]).toEqual([205, 205, 205]);
     expect(third.nextAfter).toBeNull();
+  });
+
+  it("writes a multi-rule audit batch with per-event dedupe markers", async () => {
+    const { coordinator, storage } = harness();
+    seedSession(storage);
+    const entries = Array.from({ length: 15 }, (_, index) => ({
+      kind: "RULE_EVALUATION",
+      mint: "mint",
+      data: { rule: `rule-${index + 1}`, status: "PASS" },
+      idempotencyKey: `rule:trigger:mint:rule-${index + 1}`
+    }));
+    const write = appendBatch(coordinator);
+    await write(entries, "strategy-audit:trigger:mint", "runtime-test-session");
+    expect(storage.writeCount).toBe(18);
+
+    await write(entries, "strategy-audit:trigger:mint", "runtime-test-session");
+    expect(storage.writeCount).toBe(18);
+
+    const page = await coordinator.listAuditEvents(0, 100, "runtime-test-session") as {
+      events: Array<{ sequence: number; eventId: string; kind: string; data: { rule: string } }>;
+      totalEvents: number;
+    };
+    expect(page.totalEvents).toBe(15);
+    expect(page.events.map(event => event.sequence)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
+    expect(page.events.map(event => event.eventId)).toEqual(entries.map(entry => entry.idempotencyKey));
+    expect(page.events.every(event => event.kind === "RULE_EVALUATION")).toBe(true);
+    expect(page.events[14]?.data.rule).toBe("rule-15");
+  });
+
+  it("deduplicates batch events already written individually and preserves dedupe for later individual appends", async () => {
+    const { coordinator, storage } = harness();
+    seedSession(storage);
+    const write = append(coordinator);
+    const writeBatch = appendBatch(coordinator);
+    await write("RULE_EVALUATION", "mint", { rule: "rule-1" },
+      "rule:trigger:mint:rule-1", "runtime-test-session");
+    storage.writeCount = 0;
+
+    const entries = [
+      { kind: "RULE_EVALUATION", mint: "mint", data: { rule: "rule-1" },
+        idempotencyKey: "rule:trigger:mint:rule-1" },
+      { kind: "RULE_EVALUATION", mint: "mint", data: { rule: "rule-2" },
+        idempotencyKey: "rule:trigger:mint:rule-2" }
+    ];
+    await writeBatch(entries, "strategy-audit:trigger:mint", "runtime-test-session");
+    expect(storage.writeCount).toBe(4);
+
+    const page = await coordinator.listAuditEvents(0, 100, "runtime-test-session") as {
+      events: Array<{ sequence: number; eventId: string; data: { rule: string } }>;
+      totalEvents: number;
+    };
+    expect(page.totalEvents).toBe(2);
+    expect(page.events.map(event => event.eventId)).toEqual(entries.map(entry => entry.idempotencyKey));
+    expect(page.events.map(event => event.data.rule)).toEqual(["rule-1", "rule-2"]);
+
+    await write("RULE_EVALUATION", "mint", { rule: "rule-2" },
+      "rule:trigger:mint:rule-2", "runtime-test-session");
+    await writeBatch(entries, "strategy-audit:trigger:mint", "runtime-test-session");
+    expect(storage.writeCount).toBe(4);
+    const afterRetries = await coordinator.listAuditEvents(0, 100, "runtime-test-session") as {
+      totalEvents: number;
+    };
+    expect(afterRetries.totalEvents).toBe(2);
+  });
+
+  it("keeps batched audit sequences monotonic when a batch crosses a journal page boundary", async () => {
+    const { coordinator, storage } = harness();
+    seedSession(storage);
+    const first = append(coordinator);
+    await Promise.all(Array.from({ length: 98 }, (_, index) =>
+      first("OBSERVATION", "mint", { index }, `before-${index}`, "runtime-test-session")
+    ));
+    storage.writeCount = 0;
+    const entries = Array.from({ length: 5 }, (_, index) => ({
+      kind: "RULE_EVALUATION",
+      mint: "mint",
+      data: { rule: `boundary-${index + 1}` },
+      idempotencyKey: `boundary:${index + 1}`
+    }));
+    await appendBatch(coordinator)(entries, "boundary-batch", "runtime-test-session");
+    expect(storage.writeCount).toBe(9);
+    const page = await coordinator.listAuditEvents(95, 10, "runtime-test-session") as {
+      events: Array<{ sequence: number; eventId: string }>;
+    };
+    expect(page.events.map(event => event.sequence)).toEqual([96, 97, 98, 99, 100, 101, 102, 103]);
+    expect(page.events.slice(-5).map(event => event.eventId)).toEqual(entries.map(entry => entry.idempotencyKey));
   });
 
   it("deduplicates repeated provider event IDs without consuming another sequence", async () => {
