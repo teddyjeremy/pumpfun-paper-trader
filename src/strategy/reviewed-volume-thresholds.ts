@@ -14,7 +14,7 @@ function finiteNumber(value: unknown): value is number {
 }
 
 function timestampWithZone(value: unknown): number {
-  if (typeof value !== "string" || !/(?:Z|[+-]\\d{2}:\\d{2})$/i.test(value)) {
+  if (typeof value !== "string" || !/(?:Z|[+-][0-9]{2}:[0-9]{2})$/i.test(value)) {
     return Number.NaN;
   }
   return Date.parse(value);
