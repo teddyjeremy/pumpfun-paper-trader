@@ -12,6 +12,15 @@ function payload(): string {
     sourceSessionId: "historical-session-001",
     calibration: {
       status: "CALIBRATION_CANDIDATE",
+      splitMethod: "CHRONOLOGICAL",
+      trainingWindow: {
+        startAt: "2026-11-10T00:00:00.000Z",
+        endAt: "2026-11-12T00:00:00.000Z"
+      },
+      holdoutWindow: {
+        startAt: "2026-11-12T00:00:00.000Z",
+        endAt: "2026-11-13T00:00:00.000Z"
+      },
       labeledCoins: 50,
       trainingCoins: 35,
       holdoutCoins: 15,
@@ -53,6 +62,34 @@ describe("reviewed volume threshold promotion", () => {
 
     value.calibration.status = "CALIBRATION_CANDIDATE";
     value.calibration.recommended.holdout.precision = 0.49;
+    expect(parseReviewedVolumeThresholds(JSON.stringify(value), now)).toBeNull();
+  });
+
+  it("requires explicit, non-overlapping chronological windows completed before review", () => {
+    const missing = JSON.parse(payload()) as Record<string, any>;
+    delete missing.calibration.trainingWindow;
+    expect(parseReviewedVolumeThresholds(JSON.stringify(missing), now)).toBeNull();
+
+    const randomSplit = JSON.parse(payload()) as Record<string, any>;
+    randomSplit.calibration.splitMethod = "RANDOM";
+    expect(parseReviewedVolumeThresholds(JSON.stringify(randomSplit), now)).toBeNull();
+
+    const overlapping = JSON.parse(payload()) as Record<string, any>;
+    overlapping.calibration.trainingWindow.endAt = "2026-11-12T12:00:00.000Z";
+    expect(parseReviewedVolumeThresholds(JSON.stringify(overlapping), now)).toBeNull();
+
+    const uncompletedHoldout = JSON.parse(payload()) as Record<string, any>;
+    uncompletedHoldout.calibration.holdoutWindow.endAt = "2026-11-14T00:00:00.000Z";
+    expect(parseReviewedVolumeThresholds(JSON.stringify(uncompletedHoldout), now)).toBeNull();
+  });
+
+  it("rejects inconsistent labeled, training, holdout and class counts", () => {
+    const value = JSON.parse(payload()) as Record<string, any>;
+    value.calibration.trainingCoins = 36;
+    expect(parseReviewedVolumeThresholds(JSON.stringify(value), now)).toBeNull();
+
+    value.calibration.trainingCoins = 35;
+    value.calibration.negativeCoins = 37;
     expect(parseReviewedVolumeThresholds(JSON.stringify(value), now)).toBeNull();
   });
 
