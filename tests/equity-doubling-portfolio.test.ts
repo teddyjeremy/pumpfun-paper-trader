@@ -64,6 +64,56 @@ describe("equity-doubling portfolio policy", () => {
     expect(result.endingEquityUsd).toBeCloseTo(2);
   });
 
+  it("counts an overnight loss against the new UTC day's opening equity", () => {
+    const midnight = Date.UTC(2026, 10, 19, 0, 0, 0) / 1_000;
+    const result = simulateEquityDoublingPortfolio([
+      trade("OVERNIGHT-LOSS", midnight - 60, midnight + 300, -0.7),
+      trade("AFTER-OVERNIGHT-LOSS", midnight + 600, midnight + 660, 2)
+    ], {
+      startingEquityUsd: 2.7,
+      initialStakeUsd: 1,
+      initialConcurrentPositions: 1,
+      dailyDrawdownKillPct: 20
+    });
+    expect(result.taken).toBe(1);
+    expect(result.skippedDailyDrawdown).toBe(1);
+    expect(result.killedDays).toBe(1);
+    expect(result.endingEquityUsd).toBeCloseTo(2);
+  });
+
+  it("counts an exit exactly at midnight in the new UTC day's drawdown", () => {
+    const midnight = Date.UTC(2026, 10, 19, 0, 0, 0) / 1_000;
+    const result = simulateEquityDoublingPortfolio([
+      trade("MIDNIGHT-LOSS", midnight - 60, midnight, -0.7),
+      trade("AFTER-MIDNIGHT-LOSS", midnight + 60, midnight + 120, 2)
+    ], {
+      startingEquityUsd: 2.7,
+      initialStakeUsd: 1,
+      initialConcurrentPositions: 1,
+      dailyDrawdownKillPct: 20
+    });
+    expect(result.taken).toBe(1);
+    expect(result.skippedDailyDrawdown).toBe(1);
+    expect(result.killedDays).toBe(1);
+    expect(result.endingEquityUsd).toBeCloseTo(2);
+  });
+
+  it("does not carry a pre-midnight realized loss into the next UTC day's drawdown", () => {
+    const midnight = Date.UTC(2026, 10, 19, 0, 0, 0) / 1_000;
+    const result = simulateEquityDoublingPortfolio([
+      trade("PRE-MIDNIGHT-LOSS", midnight - 60, midnight - 1, -0.7),
+      trade("NEXT-DAY-ENTRY", midnight + 60, midnight + 120, 0)
+    ], {
+      startingEquityUsd: 2.7,
+      initialStakeUsd: 1,
+      initialConcurrentPositions: 1,
+      dailyDrawdownKillPct: 20
+    });
+    expect(result.taken).toBe(2);
+    expect(result.skippedDailyDrawdown).toBe(0);
+    expect(result.killedDays).toBe(0);
+  });
+
   it("caps stake at $100", () => {
     const trades: ClosedTrade[] = [];
     let time = 100;
