@@ -1385,13 +1385,30 @@ export class PumpFunCoordinator extends DurableObject<Env> {
     await this.ctx.storage.transaction(async txn => {
       const metaKey = `audit_session:${sessionId}`;
       const batchKey = `audit_batch_id:${sessionId}:${batchId}`;
-      if (await txn.get<number>(batchKey) !== undefined) return;
+      const batchMarker = await txn.get<number | { eventIds?: string[] }>(batchKey);
+      // A numeric marker is the legacy all-or-nothing format. Keep treating it
+      // as complete so upgrading this code cannot replay an already-written batch.
+      if (typeof batchMarker === "number") return;
+      const previouslyRecorded = new Set(
+        batchMarker && Array.isArray(batchMarker.eventIds) ? batchMarker.eventIds : []
+      );
+      const freshEntries: typeof entries = [];
+      for (const entry of entries) {
+        const dedupeKey = `audit_event_id:${sessionId}:${entry.idempotencyKey}`;
+        if (previouslyRecorded.has(entry.idempotencyKey) ||
+            await txn.get<number>(dedupeKey) !== undefined) continue;
+        freshEntries.push(entry);
+      }
+      const markerNeedsUpdate = batchMarker === undefined ||
+        entries.some(entry => !previouslyRecorded.has(entry.idempotencyKey));
+      if (freshEntries.length === 0 && !markerNeedsUpdate) return;
+
       const meta = await txn.get<AuditSessionMeta>(metaKey);
       if (!meta) throw new Error("Audit session metadata missing.");
 
       let eventCount = meta.eventCount;
       const pages = new Map<number, { key: string; events: StoredAuditEvent[] }>();
-      for (const entry of entries) {
+      for (const entry of freshEntries) {
         eventCount += 1;
         const pageNumber = Math.floor((eventCount - 1) / AUDIT_PAGE_SIZE);
         let page = pages.get(pageNumber);
@@ -1408,10 +1425,16 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             ? meta.strategyVersion : "paper-strategy-v1",
           data: jsonSafe(entry.data)
         });
+        await txn.put(`audit_event_id:${sessionId}:${entry.idempotencyKey}`, eventCount);
       }
       for (const page of pages.values()) await txn.put(page.key, page.events);
-      await txn.put(batchKey, eventCount);
-      await txn.put(metaKey, { ...meta, eventCount });
+      await txn.put(batchKey, {
+        eventIds: [...new Set([...previouslyRecorded, ...entries.map(entry => entry.idempotencyKey)])],
+        eventCount
+      });
+      if (freshEntries.length > 0) {
+        await txn.put(metaKey, { ...meta, eventCount });
+      }
     });
     this.ctx.waitUntil(this.flushAuditEventsToPostgres(sessionId));
   }
