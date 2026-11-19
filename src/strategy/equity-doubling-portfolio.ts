@@ -102,14 +102,42 @@ export function simulateEquityDoublingPortfolio(
     }
     updateGrowthLevel();
   };
+  const utcDayKey = (at: number) => new Date(at * 1_000).toISOString().slice(0, 10);
+  let lastAdvancedAt: number | null = null;
+  const advanceTo = (at: number) => {
+    if (lastAdvancedAt === null) {
+      closeDue(at);
+      const day = utcDayKey(at);
+      if (!dayStartEquity.has(day)) dayStartEquity.set(day, equity());
+      lastAdvancedAt = at;
+      return;
+    }
+
+    // Snapshot UTC opening equity before exits at exactly midnight. ClosedTrade
+    // has no intraday mark path, so positions carried into a new day remain
+    // valued at their entry stake plus refundable rent until their exit event.
+    let boundary = (Math.floor(lastAdvancedAt / 86_400) + 1) * 86_400;
+    while (boundary <= at) {
+      closeDue(boundary - 1);
+      const day = utcDayKey(boundary);
+      if (!dayStartEquity.has(day)) dayStartEquity.set(day, equity());
+      closeDue(boundary);
+      boundary += 86_400;
+    }
+
+    closeDue(at);
+    const day = utcDayKey(at);
+    if (!dayStartEquity.has(day)) dayStartEquity.set(day, equity());
+    lastAdvancedAt = at;
+  };
 
   for (const trade of ordered) {
     if (!trade.mint || !Number.isSafeInteger(trade.entryTime) ||
         !Number.isSafeInteger(trade.exitTime) || trade.exitTime < trade.entryTime ||
         !Number.isFinite(trade.stakeUsd) || trade.stakeUsd <= 0 ||
         !Number.isFinite(trade.pnlUsd)) continue;
-    closeDue(trade.entryTime);
-    const day = new Date(trade.entryTime * 1_000).toISOString().slice(0, 10);
+    advanceTo(trade.entryTime);
+    const day = utcDayKey(trade.entryTime);
     if (!dayStartEquity.has(day)) dayStartEquity.set(day, equity());
     const dayStart = dayStartEquity.get(day)!;
     if (equity() <= dayStart * (1 - dailyDrawdownKillPct / 100)) killedDays.add(day);
