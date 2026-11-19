@@ -1,0 +1,72 @@
+{
+  "source": {
+    "workflowRun": "https://github.com/teddyjeremy/pumpfun-paper-trader/actions/runs/43715745622",
+    "artifactId": 14164778934,
+    "artifactName": "pump-backtest-state-2026-11-14-expanded-final",
+    "generatedAt": "2026-11-15T14:05:20.915Z"
+  },
+  "discovery": {
+    "date": "2026-11-14",
+    "discoveredLaunches": 218,
+    "selectedLaunches": 65,
+    "selectedSharePct": 29.81651376146789,
+    "selectionMethod": "Highest activity-ranked 30% of discovered launches; not random sampling",
+    "completedMints": 65,
+    "incompleteMints": 0,
+    "creditsUsed": 22439,
+    "creditCeiling": 300000
+  },
+  "replay": {
+    "marketPatternCandidates": 2,
+    "riskClearedCandidates": 0,
+    "riskNotClearedCandidates": 2,
+    "noSetupCandidates": 63,
+    "statuses": {
+      "NO_SETUP": 63,
+      "RISK_NOT_CLEARED": 2
+    }
+  },
+  "riskBlockedCandidates": [
+    {
+      "mint": "J3EuJfLwmqzeLVSowL4hVWewChyquiD88fo2LozQpump",
+      "creatorSellRiskStatus": "REJECT_OBSERVED",
+      "walletClusterRiskStatus": "UNKNOWN",
+      "walletClusterAttributionStatus": "NO_HIGH_CONFIDENCE_LINKS",
+      "coverageStatus": "COMPLETE_FROM_LAUNCH",
+      "dataComplete": true,
+      "flowConfirmationPass": true,
+      "distinctBuyersAcrossLatestThree": 17,
+      "largestBuyerShareAcrossLatestThreeBps": 4984,
+      "grossFinalReturnPct": -69.31588513536204,
+      "maxFavorableExcursionPct": 10.756591904281887,
+      "maxAdverseExcursionPct": 69.5369588157377,
+      "outcomeLabel": "UNKNOWN",
+      "netFinalReturnPct": null,
+      "roundTripCostPct": null
+    },
+    {
+      "mint": "DU4spUVVGgEhWXMJFs55fzKmiv1XrymmMJyoXpE1pump",
+      "creatorSellRiskStatus": "REJECT_OBSERVED",
+      "walletClusterRiskStatus": "UNKNOWN",
+      "walletClusterAttributionStatus": "NO_HIGH_CONFIDENCE_LINKS",
+      "coverageStatus": "COMPLETE_FROM_LAUNCH",
+      "dataComplete": true,
+      "flowConfirmationPass": true,
+      "distinctBuyersAcrossLatestThree": 8,
+      "largestBuyerShareAcrossLatestThreeBps": 2504,
+      "grossFinalReturnPct": -49.12519436768681,
+      "maxFavorableExcursionPct": 0,
+      "maxAdverseExcursionPct": 49.12519436768681,
+      "outcomeLabel": "UNKNOWN",
+      "netFinalReturnPct": null,
+      "roundTripCostPct": null
+    }
+  ],
+  "interpretation": "No selected candidate passed complete risk clearance. Both setup candidates had observed direct creator sales and UNKNOWN wallet-cluster clearance. Reserve-price outcomes are exploratory and must not be labeled as strategy performance.",
+  "limitations": [
+    "The selected sample is the highest-activity-ranked 30%, not a representative random sample.",
+    "The 65 completed launch collections do not imply that all 218 discovered launches were fully replayed.",
+    "No executable full-size SDK quote, sellability, or fee-complete fill was produced by this historical reserve-price replay.",
+    "No candidate from this replay authorizes a paper entry."
+  ]
+}

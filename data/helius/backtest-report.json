@@ -154,13 +154,21 @@
       "worstReturnPct": -81.0412147505423
     },
     "portfolio": {
-      "endingEquityUsd": 4.237703492144984,
-      "maxDrawdownPct": 17.5401157090731,
-      "taken": 60,
-      "skippedConcurrency": 17,
+      "startingEquityUsd": 2.7,
+      "endingEquityUsd": 4.993431207067138,
+      "pnlUsd": 2.2934312070671536,
+      "taken": 59,
+      "skippedConcurrency": 9,
+      "skippedCapital": 9,
+      "skippedDuplicateMint": 0,
+      "skippedDailyDrawdown": 0,
       "killedDays": 0,
-      "pnlUsd": 1.8377034921449837,
-      "tradesPerDay": 60
+      "maxConcurrentPositions": 3,
+      "maxConcurrentSlots": 3,
+      "highestDoublingLevel": 2,
+      "largestStakeUsd": 2.25,
+      "maxDrawdownPct": 68.5603634789111,
+      "tradesPerDay": 59
     },
     "costs": {
       "solUsd": 73.5,
@@ -172,7 +180,12 @@
       "roundTripVariablePct": 3.0759749999999864,
       "rentUsd": 0.10940034,
       "costPerTradeUsdAtStake": 0.012970912499999952
-    }
+    },
+    "researchOnly": true,
+    "authorizedForPaperTrading": false,
+    "profitabilityEvidence": "CANDLE_PATH_ONLY_NOT_RISK_CLEARED",
+    "riskAuditStatus": "NO_ELIGIBLE_TRADES",
+    "riskClearedCandidates": 0
   },
   "copyTrading": {
     "sourceRows": 61,
@@ -181,9 +194,24 @@
   },
   "throughput": {
     "observedValidationSignals": 77,
-    "takenAfterConcurrency": 60,
-    "observedTradesPerValidationDay": 60,
+    "takenAfterConcurrency": 59,
+    "observedTradesPerValidationDay": 59,
     "fiveHundredPerDay": false,
-    "reason": "The holdout day produced well under 500 qualified entries even before the two-slot cap. A 15-minute hold and $2.40 bankroll cannot fund 500 simultaneous attempts, and the other ~400 tokens that day had no price path to support them."
+    "reason": "The holdout day produced 77 candle-path signals before portfolio constraints. This research simulation applies the $1 initial stake, one initial slot, +1 slot and +50% stake at each realized-equity doubling, a $100 stake cap, and the 20% UTC-day drawdown kill switch. The daily kill was not triggered. Missing price paths remain excluded."
+  },
+  "portfolioPolicy": {
+    "status": "CURRENT_RESEARCH_POLICY",
+    "startingEquityUsd": 2.7,
+    "initialStakeUsd": 1,
+    "initialConcurrentPositions": 1,
+    "stakeIncreaseMultiplier": 1.5,
+    "maxStakeUsd": 100,
+    "dailyDrawdownKillPct": 20
+  },
+  "strategyAuthorization": {
+    "status": "NOT_AUTHORIZED",
+    "riskClearedCandidates": 0,
+    "reason": "The expanded chronological creator and wallet-cluster replay found zero risk-cleared candidates; candle-path expectancy is not executable trade evidence.",
+    "sourceArtifact": "data/helius/expanded-risk-replay-2026-11-14.json"
   }
 }
