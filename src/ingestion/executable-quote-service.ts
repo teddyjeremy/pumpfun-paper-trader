@@ -87,6 +87,7 @@ export interface ExecutableRoundTripQuote {
   assumptions: {
     quoteTtlMs: number;
     executionDelayMs: number;
+    preValidationLatencyMs: { buy: number; sell: number };
     providerFeeUsdPerTransaction: number;
     priceImpactLimitPct: number;
     priorityFeePercentile: number;
@@ -111,7 +112,7 @@ export async function fetchExecutableRoundTripQuote(input: {
   priorityFeePercentile?: number;
   maxPriorityFeeLamports?: string;
   baseFeeLamportsPerSignature?: number;
-  providerFeeUsdPerTransaction?: number;
+  providerFeeUsdPerTransaction: number;
   executionDelayMs?: number;
   quoteTtlMs?: number;
   maxPriceImpactPct?: number;
@@ -126,7 +127,7 @@ export async function fetchExecutableRoundTripQuote(input: {
   const maxPriceImpactPct = input.maxPriceImpactPct ?? 2;
   const minimumNetReturnPct = input.minimumRoundTripNetReturnPct ?? 0;
   const maximumRoundTripCostPct = input.maximumRoundTripCostPct ?? 4;
-  const providerFeeUsd = input.providerFeeUsdPerTransaction ?? 0;
+  const providerFeeUsd = input.providerFeeUsdPerTransaction;
   const percentile = input.priorityFeePercentile ?? 75;
   if (!/^\d+$/.test(input.buyAmountBaseUnits) || BigInt(input.buyAmountBaseUnits) <= 0n ||
       BigInt(input.buyAmountBaseUnits) > 18_446_744_073_709_551_615n) {
@@ -198,20 +199,20 @@ export async function fetchExecutableRoundTripQuote(input: {
     networkFeeLamports: buyFeeEstimate?.networkFeeLamports ?? networkFeeEstimate.networkFeeLamports,
     priorityFeeLamports: buyFeeEstimate?.priorityFeeLamports ?? networkFeeEstimate.priorityFeeLamports,
     providerFeeUsd,
-    simulatedLatencyMs: buyLatencyMs + executionDelayMs,
+    simulatedLatencyMs: executionDelayMs,
     quoteTtlMs
   };
   if (rawBuy.side !== "BUY") throw new Error("Buy quote adapter returned a non-BUY quote.");
-  const buyQuote = buildExecutablePaperQuote({
+  const buyQuoteForSizing = buildExecutablePaperQuote({
     quote: rawBuy, solUsd: priceResult.observation, costs: buyCosts, nowMs: buyFetchedAt
   });
-  if (buyQuote.priceImpactPct > maxPriceImpactPct) {
+  if (buyQuoteForSizing.priceImpactPct > maxPriceImpactPct) {
     throw new Error("Buy quote exceeds the configured maximum price impact.");
   }
 
   const sellStartedAt = now();
   const rawSell = await input.fetchQuote({
-    side: "SELL", amountBaseUnits: buyQuote.outputAmountBaseUnits
+    side: "SELL", amountBaseUnits: buyQuoteForSizing.outputAmountBaseUnits
   });
   const sellExactFeeEvidence = input.buildExactFeeEvidence
     ? await input.buildExactFeeEvidence({ side: "SELL", quote: rawSell })
@@ -227,12 +228,22 @@ export async function fetchExecutableRoundTripQuote(input: {
     ...buyCosts,
     networkFeeLamports: sellFeeEstimate?.networkFeeLamports ?? buyCosts.networkFeeLamports,
     priorityFeeLamports: sellFeeEstimate?.priorityFeeLamports ?? buyCosts.priorityFeeLamports,
-    simulatedLatencyMs: sellLatencyMs + executionDelayMs
+    simulatedLatencyMs: executionDelayMs
   };
   if (rawSell.side !== "SELL") throw new Error("Sell quote adapter returned a non-SELL quote.");
-  const initialSellQuote = buildExecutablePaperQuote({
-    quote: rawSell, solUsd: priceResult.observation, costs: sellCosts, nowMs: sellFetchedAt
+  // Both quotes are revalidated at the final entry-check time. Their simulated
+  // fills start after this common validation point, while acquisition delay is
+  // represented separately by the snapshot-age and acquisition-latency fields.
+  const finalValidationAt = now();
+  const buyQuote = buildExecutablePaperQuote({
+    quote: rawBuy, solUsd: priceResult.observation, costs: buyCosts, nowMs: finalValidationAt
   });
+  const initialSellQuote = buildExecutablePaperQuote({
+    quote: rawSell, solUsd: priceResult.observation, costs: sellCosts, nowMs: finalValidationAt
+  });
+  if (buyQuote.priceImpactPct > maxPriceImpactPct) {
+    throw new Error("Buy quote exceeds the configured maximum price impact at final validation.");
+  }
   if (initialSellQuote.priceImpactPct > maxPriceImpactPct) {
     throw new Error("Exact-size initial sell quote exceeds the configured maximum price impact.");
   }
@@ -250,8 +261,8 @@ export async function fetchExecutableRoundTripQuote(input: {
   if (Date.parse(rawSell.observedAt) < Date.parse(rawBuy.observedAt)) {
     throw new Error("Initial sell quote timestamp is older than the buy quote snapshot.");
   }
-  const buyAgeMs = Math.max(0, buyFetchedAt - Date.parse(rawBuy.observedAt));
-  const sellAgeMs = Math.max(0, sellFetchedAt - Date.parse(rawSell.observedAt));
+  const buyAgeMs = finalValidationAt - Date.parse(rawBuy.observedAt);
+  const sellAgeMs = finalValidationAt - Date.parse(rawSell.observedAt);
   if (buyAgeMs > quoteTtlMs || sellAgeMs > quoteTtlMs) {
     throw new Error("Buy or initial sell quote expired before the sellability check completed.");
   }
@@ -308,7 +319,9 @@ export async function fetchExecutableRoundTripQuote(input: {
       exactFeeEvidence: { buy: buyExactFeeEvidence, sell: sellExactFeeEvidence }
     } : {}),
     assumptions: {
-      quoteTtlMs, executionDelayMs, providerFeeUsdPerTransaction: providerFeeUsd,
+      quoteTtlMs, executionDelayMs,
+      preValidationLatencyMs: { buy: buyLatencyMs, sell: sellLatencyMs },
+      providerFeeUsdPerTransaction: providerFeeUsd,
       priceImpactLimitPct: maxPriceImpactPct, priorityFeePercentile: percentile,
       priorityFeeScope: buyFeeEstimate && sellFeeEstimate ? "ACCOUNT_SPECIFIC" : networkFeeEstimate.priorityFeeScope
     }

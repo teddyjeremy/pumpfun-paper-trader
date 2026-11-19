@@ -47,7 +47,7 @@ describe("executable quote service",()=>{
       helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
         result:[{slot:99,prioritizationFee:1000},{slot:100,prioritizationFee:2000}]
       }),{status:200})},
-      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,providerFeeUsdPerTransaction:0,
       solUsd,now:()=>Date.parse(observedAt),executionDelayMs:100
     });
     expect(calls).toBe(2);
@@ -62,6 +62,22 @@ describe("executable quote service",()=>{
     expect(result.economics.roundTripCostPct).toBeLessThan(2.1);
     expect(result.economics.meetsRoundTripCostLimit).toBe(true);
     expect(result.economics.meetsMinimumNetReturn).toBe(false);
+  });
+
+  it("blocks when the provider fee assumption is missing rather than silently assuming zero", async () => {
+    await expect(fetchExecutableRoundTripQuote({
+      fetchQuote: async ({ side, amountBaseUnits }) => side === "BUY"
+        ? quote("BUY", 100, amountBaseUnits)
+        : { ...quote("SELL", 101, amountBaseUnits), inputAmountBaseUnits: amountBaseUnits },
+      helius: { apiKey: "test", fetcher: async () => new Response(JSON.stringify({
+        result: [{ slot: 99, prioritizationFee: 1000 }]
+      }), { status: 200 }) },
+      buyAmountBaseUnits: "100000000",
+      computeUnitLimit: 200_000,
+      providerFeeUsdPerTransaction: undefined as unknown as number,
+      solUsd,
+      now: () => Date.parse(observedAt)
+    })).rejects.toThrow(/Provider fee must be finite and non-negative/);
   });
 
   it("requires exact unsigned-message fee evidence for both buy and exact-size sell quotes",async()=>{
@@ -80,7 +96,7 @@ describe("executable quote service",()=>{
       helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
         result:[{slot:99,prioritizationFee:1000}]
       }),{status:200})},
-      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,providerFeeUsdPerTransaction:0,
       solUsd,now:()=>Date.parse(observedAt),executionDelayMs:100
     });
     expect(calls.map(item=>item.side)).toEqual(["BUY","SELL"]);
@@ -90,6 +106,22 @@ describe("executable quote service",()=>{
     expect(result.exactFeeEvidence?.sell.status).toBe("AVAILABLE");
     expect(result.paperEntryAuthorized).toBe(false);
   });
+  it("blocks when the buy snapshot expires during sellability-quote acquisition",async()=>{
+    let clock=Date.parse(observedAt);
+    await expect(fetchExecutableRoundTripQuote({
+      fetchQuote:async({side,amountBaseUnits})=>{
+        if(side==="BUY") return quote("BUY",100,amountBaseUnits);
+        clock+=2_100;
+        return {...quote("SELL",101,amountBaseUnits),inputAmountBaseUnits:amountBaseUnits,
+          observedAt:new Date(clock).toISOString()};
+      },
+      helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
+        result:[{slot:99,prioritizationFee:1000}]
+      }),{status:200})},
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,providerFeeUsdPerTransaction:0,
+      solUsd,now:()=>clock,executionDelayMs:100
+    })).rejects.toThrow(/stale|future|expire/i);
+  });
   it("blocks when the sell quote does not match the exact buy output",async()=>{
     await expect(fetchExecutableRoundTripQuote({
       fetchQuote:async({side,amountBaseUnits})=>side==="BUY"?quote("BUY",100,amountBaseUnits):{
@@ -98,7 +130,7 @@ describe("executable quote service",()=>{
       helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
         result:[{slot:99,prioritizationFee:0}]
       }),{status:200})},
-      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,solUsd,now:()=>Date.parse(observedAt)
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,providerFeeUsdPerTransaction:0,solUsd,now:()=>Date.parse(observedAt)
     })).rejects.toThrow(/exact net token output/);
   });
   it("blocks when buy and sell quotes describe different markets",async()=>{
@@ -109,7 +141,7 @@ describe("executable quote service",()=>{
       helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
         result:[{slot:99,prioritizationFee:0}]
       }),{status:200})},
-      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,solUsd,now:()=>Date.parse(observedAt)
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,providerFeeUsdPerTransaction:0,solUsd,now:()=>Date.parse(observedAt)
     })).rejects.toThrow(/same mint, venue and quote mint/);
   });
   it("reports a failed combined fee and impact budget without authorizing an entry",async()=>{
@@ -122,7 +154,7 @@ describe("executable quote service",()=>{
       helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
         result:[{slot:99,prioritizationFee:1000}]
       }),{status:200})},
-      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,solUsd,
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,providerFeeUsdPerTransaction:0,solUsd,
       now:()=>Date.parse(observedAt),maxPriceImpactPct:5,maximumRoundTripCostPct:4
     });
     expect(result.status).toBe("QUOTES_VALIDATED");
@@ -138,7 +170,7 @@ describe("executable quote service",()=>{
       helius:{apiKey:"test",fetcher:async()=>new Response(JSON.stringify({
         result:[{slot:99,prioritizationFee:0}]
       }),{status:200})},
-      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,solUsd,now:()=>Date.parse(observedAt)
+      buyAmountBaseUnits:"100000000",computeUnitLimit:200_000,providerFeeUsdPerTransaction:0,solUsd,now:()=>Date.parse(observedAt)
     })).rejects.toThrow(/maximum price impact/);
   });
 });

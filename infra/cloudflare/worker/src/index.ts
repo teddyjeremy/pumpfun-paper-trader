@@ -98,6 +98,7 @@ import type { UnsignedInstructionFeeEvidence } from "../../../../src/ingestion/s
 interface Env {
   COORDINATOR: DurableObjectNamespace<PumpFunCoordinator>;
   CONTROL_TOKEN: string;
+  PAPER_PROVIDER_FEE_USD_PER_TRANSACTION?: string;
   PAPER_WORKER_PAUSED?: string;
   PAPER_ENABLE_HISTORICAL_BACKFILL?: string;
   PAPER_ENABLE_GAP_RECOVERY?: string;
@@ -108,6 +109,13 @@ interface Env {
   FULL_WALLET_HISTORY_ENABLED?: string;
   FULL_WALLET_HISTORY_MAX_PAGES?: string;
   REVIEWED_VOLUME_THRESHOLDS_JSON?: string;
+}
+
+function configuredProviderFeeUsd(env: Pick<Env, "PAPER_PROVIDER_FEE_USD_PER_TRANSACTION">): number | null {
+  const raw = env.PAPER_PROVIDER_FEE_USD_PER_TRANSACTION;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const amount = Number(raw);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
 
 interface WalletLinkEvidenceSnapshot {
@@ -1278,7 +1286,8 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       persistenceLeaseHeld: this.postgresLeaseHeld,
       controlTokenConfigured: Boolean(this.env.CONTROL_TOKEN),
       pumpProgramConfigured: Boolean(this.env.PUMPFUN_PROGRAM_ID),
-      quoteSdkModulesAvailable: this.status.quoteSdkModules.curve && this.status.quoteSdkModules.pumpSwap
+      quoteSdkModulesAvailable: this.status.quoteSdkModules.curve && this.status.quoteSdkModules.pumpSwap,
+      providerFeeAssumptionConfigured: configuredProviderFeeUsd(this.env) !== null
     });
     this.status.tradingReady = readiness.tradingReady;
     this.status.readinessBlockers = readiness.blockers;
@@ -1643,6 +1652,10 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         : createPumpSwapOfflineQuoteFetcher({
             mint: input.mint, poolAddress: input.poolAddress!, config
           });
+      const providerFeeUsdPerTransaction = configuredProviderFeeUsd(this.env);
+      if (providerFeeUsdPerTransaction === null) {
+        throw new Error("PAPER_PROVIDER_FEE_USD_PER_TRANSACTION must be explicitly configured as a non-negative USD amount per transaction.");
+      }
       const buildExactFeeEvidence = createPumpUnsignedPlanFeeEvidenceBuilder({
         identity, config, computeUnitLimit
       });
@@ -1651,6 +1664,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         requireExactMessageFees: true,
         buyAmountBaseUnits: input.buyAmountBaseUnits,
         computeUnitLimit,
+        providerFeeUsdPerTransaction,
         ...(input.solUsd ? { solUsd: input.solUsd } : {}),
         executionDelayMs: 250,
         quoteTtlMs: 2_000,

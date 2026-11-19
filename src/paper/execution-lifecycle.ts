@@ -16,6 +16,7 @@ export interface PaperEntryExecutionInput {
   positionId: string;
   occurredAt: string;
   nowMs?: number;
+  now?: () => number;
   strategy: PaperEntryStrategyDecision;
   portfolio: PaperPortfolioState;
   quoteBuy: (input: { mint: string; stakeUsd: number }) => Promise<{ quote: OfflinePumpQuote; context: PaperEntryQuoteContext }>;
@@ -58,7 +59,7 @@ export type PaperEntryExecutionResult =
  * volume thresholds and quote gate are calibrated.
  */
 export async function executePaperEntry(input: PaperEntryExecutionInput): Promise<PaperEntryExecutionResult> {
-  const executionNow = () => input.nowMs ?? Date.now();
+  const executionNow = input.now ?? (() => input.nowMs ?? Date.now());
   if (!input.mint.trim() || !input.positionId.trim() ||
       !Number.isFinite(Date.parse(input.occurredAt)) || !Number.isFinite(executionNow())) {
     return { status: "BLOCKED", reason: "Entry identity or execution clock is invalid." };
@@ -100,15 +101,25 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
     if (buy.quote.side !== "BUY" || buy.quote.mint !== input.mint) {
       return { status: "BLOCKED", reason: "Buy adapter returned a quote for the wrong side or mint." };
     }
-    const buyQuote = buildExecutablePaperQuote({
+    // Build once to determine the exact token amount required by the sellability check.
+    // This preliminary quote is never committed as a fill: both sides are rebuilt
+    // against one final validation clock after the SELL quote has been fetched.
+    const buyQuoteForSizing = buildExecutablePaperQuote({
       quote: buy.quote, solUsd: buy.context.solUsd, costs: buy.context.costs, nowMs: executionNow()
     });
-    if (Math.abs(buyQuote.requestedUsd - stakeUsd) > 0.00000001) {
+    if (Math.abs(buyQuoteForSizing.requestedUsd - stakeUsd) > 0.00000001) {
       return { status: "BLOCKED", reason: "Buy quote does not match the exact planned paper stake." };
     }
 
     const sell = await input.quoteSell({
-      mint: input.mint, tokenAmountBaseUnits: buyQuote.outputAmountBaseUnits
+      mint: input.mint, tokenAmountBaseUnits: buyQuoteForSizing.outputAmountBaseUnits
+    });
+    const validationNowMs = executionNow();
+    // Revalidate the original BUY snapshot at the final entry boundary. A BUY
+    // quote that expired while the exact-size SELL quote was being collected
+    // must never be used for a paper fill.
+    const buyQuote = buildExecutablePaperQuote({
+      quote: buy.quote, solUsd: buy.context.solUsd, costs: buy.context.costs, nowMs: validationNowMs
     });
     const buyVenue = "venue" in buy.quote ? buy.quote.venue : "PUMPSWAP";
     const sellVenue = "venue" in sell.quote ? sell.quote.venue : "PUMPSWAP";
@@ -118,8 +129,11 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
       return { status: "BLOCKED", reason: "Initial sell quote is not exact-size for the complete purchased token balance on the same venue and quote mint." };
     }
     const sellQuote = buildExecutablePaperQuote({
-      quote: sell.quote, solUsd: sell.context.solUsd, costs: sell.context.costs, nowMs: executionNow()
+      quote: sell.quote, solUsd: sell.context.solUsd, costs: sell.context.costs, nowMs: validationNowMs
     });
+    if (Math.abs(buyQuote.requestedUsd - stakeUsd) > 0.00000001) {
+      return { status: "BLOCKED", reason: "Buy quote does not match the exact planned paper stake at final validation." };
+    }
 
     // These limits are already part of the documented strategy audit. Keep
     // them enforced at the final execution boundary as well: a passing signal
@@ -141,6 +155,9 @@ export async function executePaperEntry(input: PaperEntryExecutionInput): Promis
 
     const buyObservedAt = Date.parse(buyQuote.observedAt);
     const sellObservedAt = Date.parse(sellQuote.observedAt);
+    if (sellQuote.slot < buyQuote.slot || sellObservedAt < buyObservedAt) {
+      return { status: "BLOCKED", reason: "Initial sellability quote is older than the final buy snapshot." };
+    }
     if (Math.abs(sellObservedAt - buyObservedAt) > 2_000) {
       return { status: "BLOCKED", reason: "Buy and initial sell quotes are not from a coherent two-second market window." };
     }

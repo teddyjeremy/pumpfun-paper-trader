@@ -13,6 +13,7 @@ export interface TradingReadinessInput {
   controlTokenConfigured: boolean;
   pumpProgramConfigured: boolean;
   quoteSdkModulesAvailable: boolean;
+  providerFeeAssumptionConfigured: boolean;
 }
 
 export interface TradingReadinessResult {
@@ -47,6 +48,9 @@ export function evaluateTradingReadiness(input: TradingReadinessInput): TradingR
   if (!input.controlTokenConfigured) blockers.push("Worker control token is not configured.");
   if (!input.pumpProgramConfigured) blockers.push("Pump program ID is not configured.");
   if (!input.quoteSdkModulesAvailable) blockers.push("Official Pump SDK quote modules are not available.");
+  if (!input.providerFeeAssumptionConfigured) {
+    blockers.push("An explicit non-negative per-transaction provider fee assumption is not configured.");
+  }
 
   return { tradingReady: blockers.length === 0, blockers };
 }

@@ -15,7 +15,8 @@ const ready: TradingReadinessInput = {
   persistenceLeaseHeld: true,
   controlTokenConfigured: true,
   pumpProgramConfigured: true,
-  quoteSdkModulesAvailable: true
+  quoteSdkModulesAvailable: true,
+  providerFeeAssumptionConfigured: true
 };
 
 describe("system-level paper trading readiness", () => {
@@ -52,6 +53,16 @@ describe("system-level paper trading readiness", () => {
       "Full wallet transaction-history collection is not enabled.",
       "Reviewed chronological volume calibration is not configured."
     ]));
+  });
+
+  it("requires an explicit provider fee assumption before trading can be ready", () => {
+    const result = evaluateTradingReadiness({
+      ...ready, providerFeeAssumptionConfigured: false
+    });
+    expect(result.tradingReady).toBe(false);
+    expect(result.blockers).toContain(
+      "An explicit non-negative per-transaction provider fee assumption is not configured."
+    );
   });
 
   it("requires configured event ingestion, a fenced lease, control and program configuration", () => {
