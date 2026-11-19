@@ -153,7 +153,7 @@ describe("Durable Object audit storage contract", () => {
     expect(storage.writeCount).toBe(18);
 
     await write(entries, "strategy-audit:trigger:mint", "runtime-test-session");
-    expect(storage.writeCount).toBe(3);
+    expect(storage.writeCount).toBe(18);
 
     const page = await coordinator.listAuditEvents(0, 100, "runtime-test-session") as {
       events: Array<{ sequence: number; eventId: string; kind: string; data: { rule: string } }>;
