@@ -139,7 +139,7 @@ describe("Durable Object audit storage contract", () => {
     expect(third.nextAfter).toBeNull();
   });
 
-  it("writes a multi-rule audit batch with one page, group marker and metadata update", async () => {
+  it("writes a multi-rule audit batch with per-event dedupe markers", async () => {
     const { coordinator, storage } = harness();
     seedSession(storage);
     const entries = Array.from({ length: 15 }, (_, index) => ({
@@ -150,7 +150,7 @@ describe("Durable Object audit storage contract", () => {
     }));
     const write = appendBatch(coordinator);
     await write(entries, "strategy-audit:trigger:mint", "runtime-test-session");
-    expect(storage.writeCount).toBe(3);
+    expect(storage.writeCount).toBe(18);
 
     await write(entries, "strategy-audit:trigger:mint", "runtime-test-session");
     expect(storage.writeCount).toBe(3);
@@ -164,6 +164,42 @@ describe("Durable Object audit storage contract", () => {
     expect(page.events.map(event => event.eventId)).toEqual(entries.map(entry => entry.idempotencyKey));
     expect(page.events.every(event => event.kind === "RULE_EVALUATION")).toBe(true);
     expect(page.events[14]?.data.rule).toBe("rule-15");
+  });
+
+  it("deduplicates batch events already written individually and preserves dedupe for later individual appends", async () => {
+    const { coordinator, storage } = harness();
+    seedSession(storage);
+    const write = append(coordinator);
+    const writeBatch = appendBatch(coordinator);
+    await write("RULE_EVALUATION", "mint", { rule: "rule-1" },
+      "rule:trigger:mint:rule-1", "runtime-test-session");
+    storage.writeCount = 0;
+
+    const entries = [
+      { kind: "RULE_EVALUATION", mint: "mint", data: { rule: "rule-1" },
+        idempotencyKey: "rule:trigger:mint:rule-1" },
+      { kind: "RULE_EVALUATION", mint: "mint", data: { rule: "rule-2" },
+        idempotencyKey: "rule:trigger:mint:rule-2" }
+    ];
+    await writeBatch(entries, "strategy-audit:trigger:mint", "runtime-test-session");
+    expect(storage.writeCount).toBe(4);
+
+    const page = await coordinator.listAuditEvents(0, 100, "runtime-test-session") as {
+      events: Array<{ sequence: number; eventId: string; data: { rule: string } }>;
+      totalEvents: number;
+    };
+    expect(page.totalEvents).toBe(2);
+    expect(page.events.map(event => event.eventId)).toEqual(entries.map(entry => entry.idempotencyKey));
+    expect(page.events.map(event => event.data.rule)).toEqual(["rule-1", "rule-2"]);
+
+    await write("RULE_EVALUATION", "mint", { rule: "rule-2" },
+      "rule:trigger:mint:rule-2", "runtime-test-session");
+    await writeBatch(entries, "strategy-audit:trigger:mint", "runtime-test-session");
+    expect(storage.writeCount).toBe(4);
+    const afterRetries = await coordinator.listAuditEvents(0, 100, "runtime-test-session") as {
+      totalEvents: number;
+    };
+    expect(afterRetries.totalEvents).toBe(2);
   });
 
   it("keeps batched audit sequences monotonic when a batch crosses a journal page boundary", async () => {
@@ -181,7 +217,7 @@ describe("Durable Object audit storage contract", () => {
       idempotencyKey: `boundary:${index + 1}`
     }));
     await appendBatch(coordinator)(entries, "boundary-batch", "runtime-test-session");
-    expect(storage.writeCount).toBe(4);
+    expect(storage.writeCount).toBe(9);
     const page = await coordinator.listAuditEvents(95, 10, "runtime-test-session") as {
       events: Array<{ sequence: number; eventId: string }>;
     };
