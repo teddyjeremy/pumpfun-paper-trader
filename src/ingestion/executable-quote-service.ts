@@ -112,7 +112,7 @@ export async function fetchExecutableRoundTripQuote(input: {
   priorityFeePercentile?: number;
   maxPriorityFeeLamports?: string;
   baseFeeLamportsPerSignature?: number;
-  providerFeeUsdPerTransaction?: number;
+  providerFeeUsdPerTransaction: number;
   executionDelayMs?: number;
   quoteTtlMs?: number;
   maxPriceImpactPct?: number;
@@ -127,7 +127,7 @@ export async function fetchExecutableRoundTripQuote(input: {
   const maxPriceImpactPct = input.maxPriceImpactPct ?? 2;
   const minimumNetReturnPct = input.minimumRoundTripNetReturnPct ?? 0;
   const maximumRoundTripCostPct = input.maximumRoundTripCostPct ?? 4;
-  const providerFeeUsd = input.providerFeeUsdPerTransaction ?? 0;
+  const providerFeeUsd = input.providerFeeUsdPerTransaction;
   const percentile = input.priorityFeePercentile ?? 75;
   if (!/^\d+$/.test(input.buyAmountBaseUnits) || BigInt(input.buyAmountBaseUnits) <= 0n ||
       BigInt(input.buyAmountBaseUnits) > 18_446_744_073_709_551_615n) {
