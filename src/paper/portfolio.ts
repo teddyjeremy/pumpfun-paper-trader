@@ -122,7 +122,7 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
   }
   if (quote.priceImpactPct > PAPER_PORTFOLIO_POLICY.maxImpactPerSidePct ||
       quote.taxPct !== 0 || quote.transferFeeUsd !== 0) {
-    throw new Error("Quote has unsupported non-zero transfer tax/fee or exceeds the per-side impact limit.");
+    throw new Error("Quote has unsupported non-zero transfer tax/fee or exceeds the per-side impact or tax limit.");
   }
   if (!validPositive(quote.requestedUsd) || !validPositive(quote.outputUsd) ||
       !Number.isInteger(quote.tokenDecimals) || quote.tokenDecimals < 0 || quote.tokenDecimals > 18 ||
