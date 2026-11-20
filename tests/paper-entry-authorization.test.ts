@@ -22,7 +22,7 @@ function quote(side: "BUY" | "SELL"): ExecutablePaperQuote {
     requestedUsd: 1, inputAmountBaseUnits,
     outputAmountBaseUnits: side === "BUY" ? "1000000" : "10000000",
     tokenDecimals: 6, outputUsd: side === "BUY" ? 1 : 0.993,
-    priceImpactPct: 0.1, taxPct: 0.1,
+    priceImpactPct: 0.1, taxPct: 0,
     networkFeeUsd: 0.001, priorityFeeUsd: 0.001, providerFeeUsd: 0.001,
     protocolFeeUsd: 0.002, creatorFeeUsd: 0.001, poolFeeUsd: 0.001,
     transferFeeUsd: 0, routeId: `${venue}:${quoteMint}:${slot}`, executable: true
