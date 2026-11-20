@@ -70,7 +70,7 @@ function quote(
     requestedUsd: 1,
     inputAmountBaseUnits,
     outputAmountBaseUnits: side === "BUY" ? amount : "10000000",
-    tokenDecimals: 6, outputUsd, priceImpactPct: 0.1, taxPct: 0.1,
+    tokenDecimals: 6, outputUsd, priceImpactPct: 0.1, taxPct: 0,
     networkFeeUsd: 0.001, priorityFeeUsd: 0.001, providerFeeUsd: 0,
     protocolFeeUsd: 0.002, creatorFeeUsd: 0.001, poolFeeUsd: 0.001,
     transferFeeUsd: 0, routeId: `${venue}:${quoteMint}:${slot}`, executable: true,
