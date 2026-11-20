@@ -1,4 +1,5 @@
 import { createBankrollState, markPaperEquity, replenishPaperBankroll, type BankrollState } from "./session-ledger.js";
+import { isSolQuoteMint } from "../ingestion/trade-flow.js";
 
 export interface ExecutablePaperQuote {
   quoteId: string;
@@ -103,7 +104,7 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
       !quote.quoteId || !quote.routeId) throw new Error("Executable quote identity or status is invalid.");
   if (quote.provider !== "pump-sdk-4.3.1" ||
       (quote.venue !== "PUMP_CURVE" && quote.venue !== "PUMPSWAP") ||
-      !quote.quoteMint || !Number.isSafeInteger(quote.slot) || quote.slot < 0 ||
+      !isSolQuoteMint(quote.quoteMint) || !Number.isSafeInteger(quote.slot) || quote.slot < 0 ||
       quote.routeId !== `${quote.venue}:${quote.quoteMint}:${quote.slot}`) {
     throw new Error("Quote is not bound to a verified official Pump SDK market snapshot.");
   }
@@ -120,8 +121,8 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
     throw new Error("Executable quote is stale or expired.");
   }
   if (quote.priceImpactPct > PAPER_PORTFOLIO_POLICY.maxImpactPerSidePct ||
-      quote.taxPct > PAPER_PORTFOLIO_POLICY.maxTaxPerSidePct) {
-    throw new Error("Quote exceeds the per-side impact or tax limit.");
+      quote.taxPct !== 0 || quote.transferFeeUsd !== 0) {
+    throw new Error("Quote has unsupported non-zero transfer tax/fee or exceeds the per-side impact limit.");
   }
   if (!validPositive(quote.requestedUsd) || !validPositive(quote.outputUsd) ||
       !Number.isInteger(quote.tokenDecimals) || quote.tokenDecimals < 0 || quote.tokenDecimals > 18 ||
