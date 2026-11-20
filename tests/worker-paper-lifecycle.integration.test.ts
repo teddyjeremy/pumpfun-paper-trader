@@ -58,18 +58,22 @@ function quote(
   mint: string, side: "BUY" | "SELL", now: string,
   amount = "1000000", outputUsd = 1
 ): ExecutablePaperQuote {
+  const venue = "PUMP_CURVE" as const;
+  const quoteMint = "So11111111111111111111111111111111111111112";
+  const slot = side === "BUY" ? 100 : 101;
+  const inputAmountBaseUnits = side === "BUY" ? "10000000" : amount;
   return {
-    quoteId: `${side.toLowerCase()}-${mint}-${side === "BUY" ? "entry" : "exit"}`,
-    provider: "worker-lifecycle-test", mint, side,
+    quoteId: ["pump-sdk-4.3.1", venue, side, mint, slot, inputAmountBaseUnits, now].join(":"),
+    provider: "pump-sdk-4.3.1", mint, side, venue, quoteMint, slot,
     observedAt: now,
-    expiresAt: new Date(Date.parse(now) + 30_000).toISOString(),
+    expiresAt: new Date(Date.parse(now) + 2_000).toISOString(),
     requestedUsd: 1,
-    inputAmountBaseUnits: side === "BUY" ? "10000000" : amount,
+    inputAmountBaseUnits,
     outputAmountBaseUnits: side === "BUY" ? amount : "10000000",
-    tokenDecimals: 6, outputUsd, priceImpactPct: 0.1, taxPct: 0.1,
+    tokenDecimals: 6, outputUsd, priceImpactPct: 0.1, taxPct: 0,
     networkFeeUsd: 0.001, priorityFeeUsd: 0.001, providerFeeUsd: 0,
     protocolFeeUsd: 0.002, creatorFeeUsd: 0.001, poolFeeUsd: 0.001,
-    transferFeeUsd: 0, routeId: "worker-lifecycle-test", executable: true,
+    transferFeeUsd: 0, routeId: `${venue}:${quoteMint}:${slot}`, executable: true,
     simulatedLatencyMs: 100,
     simulatedFillAt: new Date(Date.parse(now) + 100).toISOString()
   };
