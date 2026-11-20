@@ -2,9 +2,14 @@ import { describe, expect, it } from "vitest";
 import { createPaperPortfolio, openPaperPosition, markPaperPosition, closePaperPosition, type ExecutablePaperQuote } from "../src/paper/portfolio.js";
 const now = "2026-11-12T12:00:00.000Z";
 function quote(mint:string,side:"BUY"|"SELL",amount="1000000",outputUsd=1):ExecutablePaperQuote {
- return {quoteId:side+mint,provider:"test-adapter",mint,side,observedAt:now,expiresAt:"2026-11-12T12:00:02.000Z",
- requestedUsd:1,inputAmountBaseUnits:side==="SELL"?amount:"1000000",outputAmountBaseUnits:side==="BUY"?amount:"1000000",tokenDecimals:6,outputUsd,priceImpactPct:0.5,taxPct:0.5,
- networkFeeUsd:0.001,priorityFeeUsd:0.001,providerFeeUsd:0.001,protocolFeeUsd:0.002,creatorFeeUsd:0.001,poolFeeUsd:0.001,transferFeeUsd:0,routeId:"verified-route",executable:true};
+ const venue = "PUMP_CURVE" as const;
+ const quoteMint = "So11111111111111111111111111111111111111112";
+ const slot = side === "BUY" ? 100 : 101;
+ const inputAmountBaseUnits = side === "SELL" ? amount : "1000000";
+ const quoteId = ["pump-sdk-4.3.1",venue,side,mint,slot,inputAmountBaseUnits,now].join(":");
+ return {quoteId,provider:"pump-sdk-4.3.1",mint,side,venue,quoteMint,slot,observedAt:now,expiresAt:"2026-11-12T12:00:02.000Z",
+ requestedUsd:1,inputAmountBaseUnits,outputAmountBaseUnits:side==="BUY"?amount:"1000000",tokenDecimals:6,outputUsd,priceImpactPct:0.5,taxPct:0.5,
+ networkFeeUsd:0.001,priorityFeeUsd:0.001,providerFeeUsd:0.001,protocolFeeUsd:0.002,creatorFeeUsd:0.001,poolFeeUsd:0.001,transferFeeUsd:0,routeId:`${venue}:${quoteMint}:${slot}`,executable:true};
 }
 describe("paper portfolio accounting",()=>{
  it("starts with $2.70, $1 stake and one slot",()=>{
@@ -23,6 +28,26 @@ describe("paper portfolio accounting",()=>{
   expect(()=>openPaperPosition(p,{mint:"rounded-stake-large",positionId:"rounded-position-large",occurredAt:now,
     buyQuote:tooLarge,sellQuote:quote("rounded-stake-large","SELL"),nowMs:Date.parse(now)})).toThrow(/exact planned stake/);
  });
+ it("rejects an initial sellability quote older than the buy snapshot",()=>{
+  const p=createPaperPortfolio();
+  const buy=quote("old-sell","BUY");
+  const sell=quote("old-sell","SELL");
+  sell.slot=99;
+  sell.observedAt="2026-11-12T11:59:59.900Z";
+  sell.quoteId=["pump-sdk-4.3.1",sell.venue,sell.side,sell.mint,sell.slot,sell.inputAmountBaseUnits,sell.observedAt].join(":");
+  sell.routeId=`${sell.venue}:${sell.quoteMint}:${sell.slot}`;
+  expect(()=>openPaperPosition(p,{mint:"old-sell",positionId:"old-sell-position",occurredAt:now,
+    buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)})).toThrow(/later or same-slot observation/);
+ });
+ it("rejects quote metadata that is not bound to the official SDK identity",()=>{
+  const p=createPaperPortfolio();
+  const buy=quote("forged-provider","BUY");
+  Object.assign(buy,{provider:"test-adapter"});
+  expect(()=>openPaperPosition(p,{mint:"forged-provider",positionId:"forged-provider-position",occurredAt:now,
+    buyQuote:buy,sellQuote:quote("forged-provider","SELL"),nowMs:Date.parse(now)}))
+    .toThrow(/official Pump SDK market snapshot/);
+ });
+
  it("requires fresh exact-size quotes and refuses repeat mints",()=>{
   const p=createPaperPortfolio();
   const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
