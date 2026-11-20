@@ -28,16 +28,33 @@ describe("paper portfolio accounting",()=>{
   expect(()=>openPaperPosition(p,{mint:"rounded-stake-large",positionId:"rounded-position-large",occurredAt:now,
     buyQuote:tooLarge,sellQuote:quote("rounded-stake-large","SELL"),nowMs:Date.parse(now)})).toThrow(/exact planned stake/);
  });
- it("rejects an initial sellability quote older than the buy snapshot",()=>{
-  const p=createPaperPortfolio();
-  const buy=quote("old-sell","BUY");
-  const sell=quote("old-sell","SELL");
-  sell.slot=99;
-  sell.observedAt="2026-11-12T11:59:59.900Z";
-  sell.quoteId=["pump-sdk-4.3.1",sell.venue,sell.side,sell.mint,sell.slot,sell.inputAmountBaseUnits,sell.observedAt].join(":");
-  sell.routeId=`${sell.venue}:${sell.quoteMint}:${sell.slot}`;
-  expect(()=>openPaperPosition(p,{mint:"old-sell",positionId:"old-sell-position",occurredAt:now,
-    buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)})).toThrow(/later or same-slot observation/);
+ it("rejects initial sellability quotes with an older slot or observation time",()=>{
+  for (const older of [
+   {slot:99,observedAt:now},
+   {slot:101,observedAt:"2026-11-12T11:59:59.900Z"}
+  ]) {
+   const p=createPaperPortfolio();
+   const buy=quote("old-sell","BUY");
+   const sell=quote("old-sell","SELL");
+   sell.slot=older.slot;
+   sell.observedAt=older.observedAt;
+   sell.quoteId=["pump-sdk-4.3.1",sell.venue,sell.side,sell.mint,sell.slot,sell.inputAmountBaseUnits,sell.observedAt].join(":");
+   sell.routeId=`${sell.venue}:${sell.quoteMint}:${sell.slot}`;
+   expect(()=>openPaperPosition(p,{mint:"old-sell",positionId:"old-sell-position",occurredAt:now,
+     buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)})).toThrow(/later or same-slot observation/);
+  }
+ });
+ it("rejects initial sellability quotes from a different venue or SOL quote mint",()=>{
+  for (const change of [{venue:"PUMPSWAP"},{quoteMint:"11111111111111111111111111111111"}]) {
+   const p=createPaperPortfolio();
+   const buy=quote("different-market","BUY");
+   const sell=quote("different-market","SELL");
+   Object.assign(sell,change);
+   sell.quoteId=["pump-sdk-4.3.1",sell.venue,sell.side,sell.mint,sell.slot,sell.inputAmountBaseUnits,sell.observedAt].join(":");
+   sell.routeId=`${sell.venue}:${sell.quoteMint}:${sell.slot}`;
+   expect(()=>openPaperPosition(p,{mint:"different-market",positionId:"different-market-position",occurredAt:now,
+     buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)})).toThrow(/same venue and quote mint/);
+  }
  });
  it("rejects non-SOL quote mints at the portfolio boundary",()=>{
   const p=createPaperPortfolio();
