@@ -2,9 +2,12 @@ import { createBankrollState, markPaperEquity, replenishPaperBankroll, type Bank
 
 export interface ExecutablePaperQuote {
   quoteId: string;
-  provider: string;
+  provider: "pump-sdk-4.3.1";
   mint: string;
   side: "BUY" | "SELL";
+  venue: "PUMP_CURVE" | "PUMPSWAP";
+  quoteMint: string;
+  slot: number;
   observedAt: string;
   expiresAt: string;
   requestedUsd: number;
@@ -97,7 +100,20 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
   }
   if (!Number.isFinite(now)) throw new Error("Quote validation clock is invalid.");
   if (!quote.executable || quote.side !== side || quote.mint !== mint ||
-      !quote.quoteId || !quote.provider || !quote.routeId) throw new Error("Executable quote identity or status is invalid.");
+      !quote.quoteId || !quote.routeId) throw new Error("Executable quote identity or status is invalid.");
+  if (quote.provider !== "pump-sdk-4.3.1" ||
+      (quote.venue !== "PUMP_CURVE" && quote.venue !== "PUMPSWAP") ||
+      !quote.quoteMint || !Number.isSafeInteger(quote.slot) || quote.slot < 0 ||
+      quote.routeId !== `${quote.venue}:${quote.quoteMint}:${quote.slot}`) {
+    throw new Error("Quote is not bound to a verified official Pump SDK market snapshot.");
+  }
+  const expectedQuoteId = [
+    "pump-sdk-4.3.1", quote.venue, side, mint, quote.slot,
+    quote.inputAmountBaseUnits, quote.observedAt
+  ].join(":");
+  if (quote.quoteId !== expectedQuoteId) {
+    throw new Error("Quote ID does not match its official SDK market snapshot and exact input amount.");
+  }
   const observed = Date.parse(quote.observedAt), expires = Date.parse(quote.expiresAt);
   if (!Number.isFinite(observed) || !Number.isFinite(expires) || observed > now ||
       now - observed > PAPER_PORTFOLIO_POLICY.maxQuoteAgeMs || expires <= now) {
@@ -201,6 +217,15 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
   }
   assertQuote(input.buyQuote, now, "BUY", input.mint);
   assertQuote(input.sellQuote, now, "SELL", input.mint);
+  const buyObservedAt = Date.parse(input.buyQuote.observedAt);
+  const sellObservedAt = Date.parse(input.sellQuote.observedAt);
+  if (input.sellQuote.venue !== input.buyQuote.venue ||
+      input.sellQuote.quoteMint !== input.buyQuote.quoteMint ||
+      input.sellQuote.slot < input.buyQuote.slot ||
+      sellObservedAt < buyObservedAt ||
+      sellObservedAt - buyObservedAt > PAPER_PORTFOLIO_POLICY.maxQuoteAgeMs) {
+    throw new Error("Initial sellability quote must be a later or same-slot observation on the same venue and quote mint as the buy quote.");
+  }
   // SOL lamport sizing is discrete: allow at most $0.000001 of rounding
   // around the configured USD stake while retaining the exact SDK base-unit quote.
   if (Math.abs(input.buyQuote.requestedUsd - stake) > 0.000001 ||
