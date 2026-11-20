@@ -75,7 +75,7 @@ export const PAPER_PORTFOLIO_POLICY = Object.freeze({
   topUpUsd: 2.70,
   topUpBelowUsd: 1,
   maxImpactPerSidePct: 2,
-  maxTaxPerSidePct: 2,
+  maxTaxPerSidePct: 0,
   maxRoundTripCostPct: 4,
   maxQuoteAgeMs: 2_000
 });
