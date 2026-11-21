@@ -91,13 +91,17 @@ export function parseReviewedVolumeThresholds(
       recommended.maxPullbackVolumeVsImpulsePct < 0 || recommended.maxPullbackVolumeVsImpulsePct > 10_000 ||
       !finiteNumber(recommended.minReclaimVolumeVsPullbackPct) ||
       recommended.minReclaimVolumeVsPullbackPct < 0 || recommended.minReclaimVolumeVsPullbackPct > 10_000 ||
-      !finiteNumber(training.samples) || !Number.isSafeInteger(training.samples) || training.samples < 30 ||
-      !finiteNumber(training.accepted) || training.accepted < 5 ||
+      !finiteNumber(training.samples) || !Number.isSafeInteger(training.samples) ||
+      training.samples < 30 || training.samples !== calibration.trainingCoins ||
+      !finiteNumber(training.accepted) || !Number.isSafeInteger(training.accepted) ||
+      training.accepted < 5 || training.accepted > training.samples ||
       !finiteNumber(training.precision) || training.precision < 0 || training.precision > 1 ||
       !finiteNumber(training.recall) || training.recall < 0 || training.recall > 1 ||
       !finiteNumber(training.f1) || training.f1 < 0 || training.f1 > 1 ||
-      !finiteNumber(holdout.samples) || !Number.isSafeInteger(holdout.samples) || holdout.samples < 10 ||
-      !finiteNumber(holdout.accepted) || holdout.accepted < 2 ||
+      !finiteNumber(holdout.samples) || !Number.isSafeInteger(holdout.samples) ||
+      holdout.samples < 10 || holdout.samples !== calibration.holdoutCoins ||
+      !finiteNumber(holdout.accepted) || !Number.isSafeInteger(holdout.accepted) ||
+      holdout.accepted < 2 || holdout.accepted > holdout.samples ||
       !finiteNumber(holdout.precision) || holdout.precision < 0.5 || holdout.precision > 1 ||
       !finiteNumber(holdout.recall) || holdout.recall < 0 || holdout.recall > 1 ||
       !finiteNumber(holdout.f1) || holdout.f1 < 0.5 || holdout.f1 > 1 ||

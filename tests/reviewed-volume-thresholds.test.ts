@@ -93,6 +93,24 @@ describe("reviewed volume threshold promotion", () => {
     expect(parseReviewedVolumeThresholds(JSON.stringify(value), now)).toBeNull();
   });
 
+  it("reconciles metric sample counts and bounds accepted counts to each chronological partition", () => {
+    const trainingMismatch = JSON.parse(payload()) as Record<string, any>;
+    trainingMismatch.calibration.recommended.training.samples = 34;
+    expect(parseReviewedVolumeThresholds(JSON.stringify(trainingMismatch), now)).toBeNull();
+
+    const holdoutMismatch = JSON.parse(payload()) as Record<string, any>;
+    holdoutMismatch.calibration.recommended.holdout.samples = 14;
+    expect(parseReviewedVolumeThresholds(JSON.stringify(holdoutMismatch), now)).toBeNull();
+
+    const fractionalAccepted = JSON.parse(payload()) as Record<string, any>;
+    fractionalAccepted.calibration.recommended.training.accepted = 5.5;
+    expect(parseReviewedVolumeThresholds(JSON.stringify(fractionalAccepted), now)).toBeNull();
+
+    const acceptedExceedsSamples = JSON.parse(payload()) as Record<string, any>;
+    acceptedExceedsSamples.calibration.recommended.holdout.accepted = 16;
+    expect(parseReviewedVolumeThresholds(JSON.stringify(acceptedExceedsSamples), now)).toBeNull();
+  });
+
   it("rejects insufficient samples and non-profitable holdout results", () => {
     const value = JSON.parse(payload()) as Record<string, any>;
     value.calibration.trainingCoins = 29;
