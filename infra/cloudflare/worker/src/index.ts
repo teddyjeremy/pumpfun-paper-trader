@@ -45,6 +45,7 @@ import {
   type CandidateMonitoringEvidence
 } from "../../../../src/ingestion/helius-monitor.js";
 import { TokenBucket } from "../../../../src/ingestion/rpc-budget.js";
+import { parseProviderFeeUsdPerTransaction } from "../../../../src/ingestion/provider-fee.js";
 import { buildCandidateTradeFlows, isSolQuoteMint, SOL_QUOTE_MINT, type CandidateTradeFlow } from "../../../../src/ingestion/trade-flow.js";
 import { fetchCompleteHolderConcentration, type HolderConcentrationResult } from "../../../../src/ingestion/holder-risk.js";
 import { buildCandidatePriceVolumeProfiles } from "../../../../src/ingestion/price-volume-profile.js";
@@ -109,13 +110,6 @@ interface Env {
   FULL_WALLET_HISTORY_ENABLED?: string;
   FULL_WALLET_HISTORY_MAX_PAGES?: string;
   REVIEWED_VOLUME_THRESHOLDS_JSON?: string;
-}
-
-function configuredProviderFeeUsd(env: Pick<Env, "PAPER_PROVIDER_FEE_USD_PER_TRANSACTION">): number | null {
-  const raw = env.PAPER_PROVIDER_FEE_USD_PER_TRANSACTION;
-  if (typeof raw !== "string" || !raw.trim()) return null;
-  const amount = Number(raw);
-  return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
 
 interface WalletLinkEvidenceSnapshot {
@@ -752,6 +746,12 @@ export class PumpFunCoordinator extends DurableObject<Env> {
             if (feeEvidence.status !== "AVAILABLE") {
               throw new Error(`Exact sell-message fee evidence unavailable: ${feeEvidence.reason}`);
             }
+            const providerFeeUsdPerTransaction = parseProviderFeeUsdPerTransaction(
+              this.env.PAPER_PROVIDER_FEE_USD_PER_TRANSACTION
+            );
+            if (providerFeeUsdPerTransaction === null) {
+              throw new Error("PAPER_PROVIDER_FEE_USD_PER_TRANSACTION must be explicitly configured as a non-negative USD amount per transaction.");
+            }
             return {
               quote,
               context: {
@@ -759,7 +759,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
                 costs: {
                   networkFeeLamports: feeEvidence.estimate.networkFeeLamports,
                   priorityFeeLamports: feeEvidence.estimate.priorityFeeLamports,
-                  providerFeeUsd: 0,
+                  providerFeeUsd: providerFeeUsdPerTransaction,
                   simulatedLatencyMs: 250,
                   quoteTtlMs: 2_000
                 }
@@ -1287,7 +1287,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
       controlTokenConfigured: Boolean(this.env.CONTROL_TOKEN),
       pumpProgramConfigured: Boolean(this.env.PUMPFUN_PROGRAM_ID),
       quoteSdkModulesAvailable: this.status.quoteSdkModules.curve && this.status.quoteSdkModules.pumpSwap,
-      providerFeeAssumptionConfigured: configuredProviderFeeUsd(this.env) !== null
+      providerFeeAssumptionConfigured: parseProviderFeeUsdPerTransaction(this.env.PAPER_PROVIDER_FEE_USD_PER_TRANSACTION) !== null
     });
     this.status.tradingReady = readiness.tradingReady;
     this.status.readinessBlockers = readiness.blockers;
@@ -1652,7 +1652,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         : createPumpSwapOfflineQuoteFetcher({
             mint: input.mint, poolAddress: input.poolAddress!, config
           });
-      const providerFeeUsdPerTransaction = configuredProviderFeeUsd(this.env);
+      const providerFeeUsdPerTransaction = parseProviderFeeUsdPerTransaction(this.env.PAPER_PROVIDER_FEE_USD_PER_TRANSACTION);
       if (providerFeeUsdPerTransaction === null) {
         throw new Error("PAPER_PROVIDER_FEE_USD_PER_TRANSACTION must be explicitly configured as a non-negative USD amount per transaction.");
       }
