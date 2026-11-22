@@ -11,3 +11,16 @@ describe("Cloudflare Worker approved wallet-history budget", () => {
     expect(config.vars?.FULL_WALLET_HISTORY_MAX_PAGES).toBe("2");
   });
 });
+
+describe("Cloudflare Worker execution fee accounting", () => {
+  it("applies the explicit provider fee to scheduled sell quotes instead of assuming zero", () => {
+    const worker = readFileSync(
+      new URL("../infra/cloudflare/worker/src/index.ts", import.meta.url),
+      "utf8"
+    );
+
+    expect(worker).not.toMatch(/providerFeeUsd:\s*0\b/);
+    expect(worker).toContain("providerFeeUsd: providerFeeUsdPerTransaction");
+    expect(worker).toContain("parseProviderFeeUsdPerTransaction(this.env.PAPER_PROVIDER_FEE_USD_PER_TRANSACTION)");
+  });
+});
