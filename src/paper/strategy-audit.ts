@@ -122,7 +122,8 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
       ? result("WALLET_CLUSTER_RISK", "PASS", input.walletClusterRiskStatus, "PASS_COMPLETE", "Complete wallet and holder risk evidence passed.")
       : result("WALLET_CLUSTER_RISK", "UNKNOWN", input.walletClusterRiskStatus, "PASS_COMPLETE", "Wallet-cluster evaluator does not clear risk on missing evidence."));
   const attributionConfidenceBps = input.attributionConfidenceBps;
-  const validAttributionConfidence = Number.isSafeInteger(attributionConfidenceBps) &&
+  const validAttributionConfidence = attributionConfidenceBps !== null &&
+    Number.isSafeInteger(attributionConfidenceBps) &&
     attributionConfidenceBps >= 7_000 && attributionConfidenceBps <= 10_000;
   rules.push(!validAttributionConfidence
     ? result("ATTRIBUTION_CONFIDENCE", "UNKNOWN", attributionConfidenceBps,
