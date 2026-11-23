@@ -154,7 +154,7 @@ const researchReturns = researchOnly.map(row => Number(row.modeledNetReturnPct))
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
 function simulatePortfolio(rows: Array<Record<string, unknown>>) {
-  const startingBankrollUsd = PAPER_PORTFOLIO_POLICY.initialBankrollUsd;
+  const startingBankrollUsd: number = PAPER_PORTFOLIO_POLICY.initialBankrollUsd;
   const topUpUsd = PAPER_PORTFOLIO_POLICY.topUpUsd;
   const topUpBelowUsd = PAPER_PORTFOLIO_POLICY.topUpBelowUsd;
   let cash = startingBankrollUsd;
