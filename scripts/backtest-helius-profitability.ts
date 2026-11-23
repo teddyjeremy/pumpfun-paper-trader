@@ -7,6 +7,7 @@ import { simulateHistoricalProfitability } from "../src/strategy/historical-prof
 import { buildCandidatePriceVolumeProfiles } from "../src/ingestion/price-volume-profile.js";
 import { buildCandidateTradeFlows } from "../src/ingestion/trade-flow.js";
 import { calculateReclaimConfirmation, evaluateStrictStrategyAudit } from "../src/paper/strategy-audit.js";
+import { PAPER_PORTFOLIO_POLICY, paperPortfolioLimitsForEquity } from "../src/paper/portfolio.js";
 
 
 function strictAuditForReplay(input: {
@@ -153,10 +154,9 @@ const researchReturns = researchOnly.map(row => Number(row.modeledNetReturnPct))
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
 function simulatePortfolio(rows: Array<Record<string, unknown>>) {
-  const startingBankrollUsd = 2.70;
-  const initialStakeUsd = 1;
-  const topUpUsd = 2.70;
-  const topUpBelowUsd = 1;
+  const startingBankrollUsd = PAPER_PORTFOLIO_POLICY.initialBankrollUsd;
+  const topUpUsd = PAPER_PORTFOLIO_POLICY.topUpUsd;
+  const topUpBelowUsd = PAPER_PORTFOLIO_POLICY.topUpBelowUsd;
   let cash = startingBankrollUsd;
   let topUps = 0;
   let realizedPnlUsd = 0;
@@ -191,10 +191,9 @@ function simulatePortfolio(rows: Array<Record<string, unknown>>) {
     closeDue(entryAt);
     const growthEquity = Math.max(0, cash + open.reduce((sum, p) => sum + p.stakeUsd, 0) - topUps);
     highWaterGrowthEquityUsd = Math.max(highWaterGrowthEquityUsd, growthEquity);
-    const levels = highWaterGrowthEquityUsd < 5 ? 0
-      : 1 + Math.floor(Math.log2(highWaterGrowthEquityUsd / 5));
-    const stakeUsd = Math.min(100, initialStakeUsd * Math.pow(1.5, levels));
-    const maxPositions = Math.min(100, 1 + levels);
+    const limits = paperPortfolioLimitsForEquity(highWaterGrowthEquityUsd, startingBankrollUsd);
+    const stakeUsd = limits.stake;
+    const maxPositions = limits.slots;
     maximumConcurrentSlotsAvailable = Math.max(maximumConcurrentSlotsAvailable, maxPositions);
     if (open.length >= maxPositions) { skippedForCapacity += 1; continue; }
     const preEntryEquity = cash + open.reduce((sum, item) => sum + item.stakeUsd, 0);
@@ -230,7 +229,7 @@ function simulatePortfolio(rows: Array<Record<string, unknown>>) {
     maxConcurrentSlotsAvailable: maximumConcurrentSlotsAvailable,
     maxOpenPositionsObserved,
     skippedForCapacity, skippedForCash, maxDrawdownPct,
-    stakePolicy: "Starts at $1; increases 50% at each doubling from $5 growth equity; maximum $100. Concurrent slots increase by one at each doubling.",
+    stakePolicy: "Starts at $1; increases 50% at each exact doubling from the $2.70 initial growth equity; maximum $100. Concurrent slots increase by one at each doubling.",
     note: "Only risk-cleared candidate rows are admitted. Open-at-horizon positions are marked, not realized. This portfolio ledger inherits the reserve-price proxy and modeled-cost limitations of each trade."
   };
 }
