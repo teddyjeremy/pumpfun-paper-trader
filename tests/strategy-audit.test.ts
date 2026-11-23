@@ -25,6 +25,25 @@ describe("strict strategy audit timing", () => {
 
 
 
+  it("keeps malformed or out-of-range attribution confidence unknown", () => {
+    for (const confidence of [
+      Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY,
+      6_999, 10_001, 7_000.5, undefined
+    ]) {
+      const audit = evaluateStrictStrategyAudit({
+        ...base, attributionConfidenceBps: confidence as number
+      });
+      expect(audit.rules.find(rule => rule.rule === "ATTRIBUTION_CONFIDENCE")?.status).toBe("UNKNOWN");
+      expect(audit.buyAllowed).toBe(false);
+    }
+
+    const maximumValid = evaluateStrictStrategyAudit({
+      ...base, attributionConfidenceBps: 10_000
+    });
+    expect(maximumValid.rules.find(rule => rule.rule === "ATTRIBUTION_CONFIDENCE")?.status).toBe("PASS");
+    expect(maximumValid.buyAllowed).toBe(false);
+  });
+
   it("rejects non-overlapping flow windows as evidence for the one-second sampling rule", () => {
     const audit = evaluateStrictStrategyAudit({
       ...base,

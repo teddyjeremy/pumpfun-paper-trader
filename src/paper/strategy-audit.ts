@@ -121,9 +121,15 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
     : input.walletClusterRiskStatus === "PASS_COMPLETE"
       ? result("WALLET_CLUSTER_RISK", "PASS", input.walletClusterRiskStatus, "PASS_COMPLETE", "Complete wallet and holder risk evidence passed.")
       : result("WALLET_CLUSTER_RISK", "UNKNOWN", input.walletClusterRiskStatus, "PASS_COMPLETE", "Wallet-cluster evaluator does not clear risk on missing evidence."));
-  rules.push(input.attributionConfidenceBps === null || input.attributionConfidenceBps < 7_000
-    ? result("ATTRIBUTION_CONFIDENCE", "UNKNOWN", input.attributionConfidenceBps, ">= 7000 bps", "No independently verified wallet link meets the 70% confidence floor.")
-    : result("ATTRIBUTION_CONFIDENCE", "PASS", input.attributionConfidenceBps, ">= 7000 bps", "Attribution confidence meets the minimum threshold."));
+  const attributionConfidenceBps = input.attributionConfidenceBps;
+  const validAttributionConfidence = attributionConfidenceBps !== null &&
+    Number.isSafeInteger(attributionConfidenceBps) &&
+    attributionConfidenceBps >= 7_000 && attributionConfidenceBps <= 10_000;
+  rules.push(!validAttributionConfidence
+    ? result("ATTRIBUTION_CONFIDENCE", "UNKNOWN", attributionConfidenceBps,
+      "integer 7000-10000 bps", "Attribution confidence is missing or outside the valid basis-point range.")
+    : result("ATTRIBUTION_CONFIDENCE", "PASS", attributionConfidenceBps,
+      "integer 7000-10000 bps", "Attribution confidence meets the minimum threshold and valid basis-point range."));
   const thresholds = input.volumeThresholds ?? null;
   const validVolumeThresholds = thresholds !== null &&
     Number.isFinite(thresholds!.maxPullbackVolumeVsImpulsePct) &&
