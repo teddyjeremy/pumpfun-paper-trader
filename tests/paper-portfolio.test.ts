@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPaperPortfolio, openPaperPosition, markPaperPosition, closePaperPosition, type ExecutablePaperQuote } from "../src/paper/portfolio.js";
+import { createPaperPortfolio, openPaperPosition, markPaperPosition, closePaperPosition, paperPortfolioLimitsForEquity, type ExecutablePaperQuote } from "../src/paper/portfolio.js";
 const now = "2026-11-12T12:00:00.000Z";
 function quote(mint:string,side:"BUY"|"SELL",amount="1000000",outputUsd=1):ExecutablePaperQuote {
  return {quoteId:side+mint,provider:"test-adapter",mint,side,observedAt:now,expiresAt:"2026-11-12T12:00:02.000Z",
@@ -7,6 +7,14 @@ function quote(mint:string,side:"BUY"|"SELL",amount="1000000",outputUsd=1):Execu
  networkFeeUsd:0.001,priorityFeeUsd:0.001,providerFeeUsd:0.001,protocolFeeUsd:0.002,creatorFeeUsd:0.001,poolFeeUsd:0.001,transferFeeUsd:0,routeId:"verified-route",executable:true};
 }
 describe("paper portfolio accounting",()=>{
+ it("shares exact initial-bankroll doubling thresholds with historical profitability replay",()=>{
+  expect(paperPortfolioLimitsForEquity(5.399,2.7)).toEqual({stake:1,slots:1});
+  expect(paperPortfolioLimitsForEquity(5.4,2.7)).toEqual({stake:1.5,slots:2});
+  expect(paperPortfolioLimitsForEquity(10.799,2.7)).toEqual({stake:1.5,slots:2});
+  expect(paperPortfolioLimitsForEquity(10.8,2.7)).toEqual({stake:2.25,slots:3});
+  expect(paperPortfolioLimitsForEquity(21.6,2.7)).toEqual({stake:3.375,slots:4});
+  expect(paperPortfolioLimitsForEquity(2.7)).toEqual({stake:1,slots:1});
+ });
  it("starts with $2.70, $1 stake and one slot",()=>{
   const p=createPaperPortfolio();expect(p.availableCashUsd).toBe(2.7);
   expect(p.positionSizeUsd).toBe(1);expect(p.maxConcurrentPositions).toBe(1);

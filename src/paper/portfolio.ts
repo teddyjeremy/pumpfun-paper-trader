@@ -145,7 +145,7 @@ function applyEquityAndTopUp(state: PaperPortfolioState, equity: number, occurre
   const cash = round(state.availableCashUsd + (topped.event ? PAPER_PORTFOLIO_POLICY.topUpUsd : 0));
   const highWaterEquityUsd = Math.max(state.highWaterEquityUsd,
     growthEquity({ ...state, bankroll: topped.state }));
-  const limits = capacityForEquity(highWaterEquityUsd, state.bankroll.initialBankrollUsd);
+  const limits = paperPortfolioLimitsForEquity(highWaterEquityUsd, state.bankroll.initialBankrollUsd);
   return {
     bankroll: topped.state, availableCashUsd: cash,
     reservedAccountRentUsd: state.reservedAccountRentUsd ?? 0,
@@ -162,7 +162,10 @@ export function createPaperPortfolio(initialBankrollUsd = PAPER_PORTFOLIO_POLICY
     maxConcurrentPositions: 1, positions: [], enteredMints: [], lastMarkedAt: null
   };
 }
-function capacityForEquity(equity: number, initialBankrollUsd: number): { stake: number; slots: number } {
+export function paperPortfolioLimitsForEquity(
+  equity: number,
+  initialBankrollUsd: number = PAPER_PORTFOLIO_POLICY.initialBankrollUsd
+): { stake: number; slots: number } {
   if (!Number.isFinite(initialBankrollUsd) || initialBankrollUsd <= 0) {
     throw new Error("Initial bankroll must be positive before portfolio growth can be calculated.");
   }
