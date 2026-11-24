@@ -75,6 +75,14 @@ export function canRequestExecutableQuote(audit: Pick<StrictStrategyAudit, "rule
 function result(rule: string, status: RuleStatus, actual: unknown, expected: string, reason: string): RuleResult {
   return { rule, status, actual, expected, reason };
 }
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isSafeNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
 export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, evaluatedAt = new Date().toISOString()): StrictStrategyAudit {
   const rules: RuleResult[] = [];
   rules.push(input.candidateAgeSeconds === null || !Number.isFinite(input.candidateAgeSeconds) || input.candidateAgeSeconds < 0
@@ -83,34 +91,46 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
       "monitor eligible candidates for at least 10 minutes; no 60-second entry cutoff",
       "Candidate age is informational. A valid setup may develop after the first minute."));
   const profile = input.profile;
-  rules.push(!profile || !profile.dataComplete || profile.microTradeFilterStatus !== "APPLIED" || profile.impulsePriceChangePct === null
-    ? result("IMPULSE", "UNKNOWN", profile?.impulsePriceChangePct ?? null, ">= +20%", "Insufficient verified price history.")
+  rules.push(!profile || profile.dataComplete !== true || profile.microTradeFilterStatus !== "APPLIED" || !isFiniteNumber(profile.impulsePriceChangePct)
+    ? result("IMPULSE", "UNKNOWN", profile?.impulsePriceChangePct ?? null, ">= +20%", "Insufficient or invalid verified price history.")
     : result("IMPULSE", profile.impulsePriceChangePct >= 20 ? "PASS" : "FAIL", profile.impulsePriceChangePct, ">= +20%", "Impulse measured from the observed launch baseline."));
-  rules.push(!profile || !profile.dataComplete || profile.microTradeFilterStatus !== "APPLIED" || profile.pullbackPct === null
-    ? result("PULLBACK", "UNKNOWN", profile?.pullbackPct ?? null, "10% to 40%", "Pullback has not been established.")
+  rules.push(!profile || profile.dataComplete !== true || profile.microTradeFilterStatus !== "APPLIED" || !isFiniteNumber(profile.pullbackPct)
+    ? result("PULLBACK", "UNKNOWN", profile?.pullbackPct ?? null, "10% to 40%", "Pullback has not been established from finite verified measurements.")
     : result("PULLBACK", profile.pullbackPct >= 10 && profile.pullbackPct <= 40 ? "PASS" : "FAIL", profile.pullbackPct, "10% to 40%", "Pullback depth must remain within the agreed range."));
-  rules.push(!profile || !profile.dataComplete || profile.microTradeFilterStatus !== "APPLIED" || profile.reclaimAbovePreviousFiveSecondHighPct === null
-    ? result("RECLAIM", "UNKNOWN", profile?.reclaimAbovePreviousFiveSecondHighPct ?? null, ">= +1% above previous completed 5-second high", "No verified reclaim measurement is available.")
-    : result("RECLAIM", profile.reclaimDetected && profile.reclaimAbovePreviousFiveSecondHighPct >= 1 ? "PASS" : "FAIL",
+  rules.push(!profile || profile.dataComplete !== true || profile.microTradeFilterStatus !== "APPLIED" ||
+      !isFiniteNumber(profile.reclaimAbovePreviousFiveSecondHighPct) || typeof profile.reclaimDetected !== "boolean"
+    ? result("RECLAIM", "UNKNOWN", profile?.reclaimAbovePreviousFiveSecondHighPct ?? null, ">= +1% above previous completed 5-second high", "No valid reclaim measurement and boolean confirmation are available.")
+    : result("RECLAIM", profile.reclaimDetected === true && profile.reclaimAbovePreviousFiveSecondHighPct >= 1 ? "PASS" : "FAIL",
       profile.reclaimAbovePreviousFiveSecondHighPct, ">= +1%", "Reclaim must exceed the previous completed 5-second high."));
-  const windows = input.flow?.windows.slice(-3) ?? [];
-  const threeWindowsAvailable = windows.length === 3 &&
+  const windows = Array.isArray(input.flow?.windows) ? input.flow.windows.slice(-3) : [];
+  const validWindowEvidence = windows.length === 3 && windows.every(window =>
+    window !== null && typeof window === "object" &&
+    isFiniteNumber(window.startTime) &&
+    isSafeNonNegativeInteger(window.uniqueBuyers) &&
+    isSafeNonNegativeInteger(window.uniqueSellers) &&
+    typeof window.flowWindowPass === "boolean"
+  );
+  const threeWindowsAvailable = validWindowEvidence &&
     input.flow?.sampleIntervalSeconds === 1 &&
     windows[1]!.startTime === windows[0]!.startTime + 1 &&
     windows[2]!.startTime === windows[1]!.startTime + 1;
-  const flowWindowsPass = Boolean(input.flow?.latestThreeWindowFlowPass) && threeWindowsAvailable && windows.every(window =>
-    window.flowWindowPass && window.uniqueBuyers >= 3 && window.uniqueSellers <= window.uniqueBuyers / 2
+  const flowWindowsPass = input.flow?.latestThreeWindowFlowPass === true && threeWindowsAvailable && windows.every(window =>
+    window.flowWindowPass === true && window.uniqueBuyers >= 3 && window.uniqueSellers <= window.uniqueBuyers / 2
   );
-  rules.push(!input.flow || !input.flow.dataComplete || !threeWindowsAvailable || input.flow.microTradeFilterStatus !== "APPLIED"
-    ? result("THREE_FLOW_WINDOWS", "UNKNOWN", windows, "3 consecutive completed 2-second windows sampled 1 second apart; each >3:1, >=3 buyers, sellers <= half buyers", "Three fully covered consecutive windows are not available.")
+  rules.push(!input.flow || input.flow.dataComplete !== true || !threeWindowsAvailable ||
+      typeof input.flow.latestThreeWindowFlowPass !== "boolean" || input.flow.microTradeFilterStatus !== "APPLIED"
+    ? result("THREE_FLOW_WINDOWS", "UNKNOWN", windows, "3 consecutive completed 2-second windows sampled 1 second apart; each >3:1, >=3 buyers, sellers <= half buyers", "Three fully covered windows with valid boolean and count evidence are not available.")
     : result("THREE_FLOW_WINDOWS", flowWindowsPass ? "PASS" : "FAIL", windows, "each window >3:1, >=3 buyers, sellers <= half buyers", "Every one of the three latest completed windows must pass."));
-  rules.push(!input.flow || !input.flow.dataComplete || input.flow.microTradeFilterStatus !== "APPLIED"
-    ? result("DISTINCT_BUYERS", "UNKNOWN", input.flow?.distinctBuyersAcrossLatestThree ?? null, ">= 5 distinct buyers", "Buyer coverage is incomplete.")
+  rules.push(!input.flow || input.flow.dataComplete !== true || input.flow.microTradeFilterStatus !== "APPLIED" ||
+      !isSafeNonNegativeInteger(input.flow.distinctBuyersAcrossLatestThree)
+    ? result("DISTINCT_BUYERS", "UNKNOWN", input.flow?.distinctBuyersAcrossLatestThree ?? null, ">= 5 distinct buyers", "Buyer coverage is incomplete or its count is invalid.")
     : result("DISTINCT_BUYERS", input.flow.distinctBuyersAcrossLatestThree >= 5 ? "PASS" : "FAIL", input.flow.distinctBuyersAcrossLatestThree, ">= 5", "At least five distinct buyers are required across the three windows."));
-  rules.push(!input.flow || !input.flow.dataComplete || input.flow.microTradeFilterStatus !== "APPLIED" || input.flow.largestBuyerShareAcrossLatestThreeBps === null
-    ? result("BUYER_CONCENTRATION", "UNKNOWN", input.flow?.largestBuyerShareAcrossLatestThreeBps ?? null, "<= 72%", "Buyer concentration cannot be established from complete evidence.")
-    : result("BUYER_CONCENTRATION", input.flow.largestBuyerShareAcrossLatestThreeBps <= 7_200 ? "PASS" : "FAIL",
-      input.flow.largestBuyerShareAcrossLatestThreeBps, "<= 7200 bps", "No single buyer may exceed 72% of buy quote volume."));
+  const largestBuyerShareBps = input.flow?.largestBuyerShareAcrossLatestThreeBps;
+  const validLargestBuyerShare = isSafeNonNegativeInteger(largestBuyerShareBps) && largestBuyerShareBps <= 10_000;
+  rules.push(!input.flow || input.flow.dataComplete !== true || input.flow.microTradeFilterStatus !== "APPLIED" || !validLargestBuyerShare
+    ? result("BUYER_CONCENTRATION", "UNKNOWN", largestBuyerShareBps ?? null, "integer 0-7200 bps", "Buyer concentration cannot be established from a valid complete measurement.")
+    : result("BUYER_CONCENTRATION", largestBuyerShareBps <= 7_200 ? "PASS" : "FAIL",
+      largestBuyerShareBps, "<= 7200 bps", "No single buyer may exceed 72% of buy quote volume."));
   rules.push(input.creatorRiskStatus === "REJECT_OBSERVED"
     ? result("CREATOR_SELL_RISK", "FAIL", input.creatorRiskStatus, "PASS_COMPLETE", "Observed creator-sale threshold breach.")
     : input.creatorRiskStatus === "PASS_COMPLETE"
@@ -136,28 +156,30 @@ export function evaluateStrictStrategyAudit(input: StrictStrategyAuditInput, eva
     thresholds!.maxPullbackVolumeVsImpulsePct >= 0 &&
     Number.isFinite(thresholds!.minReclaimVolumeVsPullbackPct) &&
     thresholds!.minReclaimVolumeVsPullbackPct >= 0;
-  rules.push(!profile || !profile.dataComplete || profile.pullbackVolumeVsImpulsePct === null || !validVolumeThresholds
+  rules.push(!profile || profile.dataComplete !== true || !isFiniteNumber(profile.pullbackVolumeVsImpulsePct) ||
+      profile.pullbackVolumeVsImpulsePct < 0 || !validVolumeThresholds
     ? result("PULLBACK_VOLUME_CONTRACTION", "UNKNOWN", profile?.pullbackVolumeVsImpulsePct ?? null,
-      "Reviewed max pullback/impulse volume ratio required", "Volume contraction is recorded but cannot be scored without complete data and an explicitly reviewed calibration.")
+      "Reviewed max pullback/impulse volume ratio required", "Volume contraction is recorded but cannot be scored without complete finite data and an explicitly reviewed calibration.")
     : result("PULLBACK_VOLUME_CONTRACTION",
       profile.pullbackVolumeVsImpulsePct <= thresholds!.maxPullbackVolumeVsImpulsePct ? "PASS" : "FAIL",
       profile.pullbackVolumeVsImpulsePct, `<= ${thresholds!.maxPullbackVolumeVsImpulsePct}%`,
       "Pullback volume is compared with the reviewed training-set threshold."));
-  rules.push(!profile || !profile.dataComplete || profile.reclaimVolumeVsPullbackPct === null || !validVolumeThresholds
+  rules.push(!profile || profile.dataComplete !== true || !isFiniteNumber(profile.reclaimVolumeVsPullbackPct) ||
+      profile.reclaimVolumeVsPullbackPct < 0 || !validVolumeThresholds
     ? result("RECLAIM_VOLUME_EXPANSION", "UNKNOWN", profile?.reclaimVolumeVsPullbackPct ?? null,
-      "Reviewed min reclaim/pullback volume ratio required", "Volume expansion is recorded but cannot be scored without complete data and an explicitly reviewed calibration.")
+      "Reviewed min reclaim/pullback volume ratio required", "Volume expansion is recorded but cannot be scored without complete finite data and an explicitly reviewed calibration.")
     : result("RECLAIM_VOLUME_EXPANSION",
       profile.reclaimVolumeVsPullbackPct >= thresholds!.minReclaimVolumeVsPullbackPct ? "PASS" : "FAIL",
       profile.reclaimVolumeVsPullbackPct, `>= ${thresholds!.minReclaimVolumeVsPullbackPct}%`,
       "Reclaim volume is compared with the reviewed training-set threshold."));
-  rules.push(input.signalAgeSeconds === null || input.nextObservationConfirmed === null
+  rules.push(!isFiniteNumber(input.signalAgeSeconds) || typeof input.nextObservationConfirmed !== "boolean"
     ? result("SIGNAL_FRESHNESS", "UNKNOWN", { ageSeconds: input.signalAgeSeconds, nextObservationConfirmed: input.nextObservationConfirmed },
-      "1-2 seconds and confirmed by next observation", "Signal freshness confirmation is not yet available.")
-    : result("SIGNAL_FRESHNESS", input.signalAgeSeconds >= 1 && input.signalAgeSeconds <= 2 && input.nextObservationConfirmed ? "PASS" : "FAIL",
+      "1-2 seconds and confirmed by next observation", "Signal freshness requires a finite age and an explicit boolean next-observation result.")
+    : result("SIGNAL_FRESHNESS", input.signalAgeSeconds >= 1 && input.signalAgeSeconds <= 2 && input.nextObservationConfirmed === true ? "PASS" : "FAIL",
       { ageSeconds: input.signalAgeSeconds, nextObservationConfirmed: input.nextObservationConfirmed },
       "1-2 seconds and confirmed by next observation", "Reclaim signal must be fresh and confirmed by a subsequent observation."));
-  rules.push(result("EXECUTABLE_QUOTE", input.executableQuoteAvailable ? "PASS" : "UNKNOWN",
-    input.executableQuoteAvailable, "Fresh size-specific executable quote", "No quote adapter is connected; reserve prices are not executable quotes."));
+  rules.push(result("EXECUTABLE_QUOTE", input.executableQuoteAvailable === true ? "PASS" : "UNKNOWN",
+    input.executableQuoteAvailable, "Fresh size-specific executable quote", "No verified size-specific executable quote is available."));
   const roundTripCostPct = input.roundTripCostPct;
   rules.push(roundTripCostPct === null || roundTripCostPct === undefined ||
       !Number.isFinite(roundTripCostPct) || roundTripCostPct < 0

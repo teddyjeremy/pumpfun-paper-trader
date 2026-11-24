@@ -305,4 +305,70 @@ describe("automatic quote preflight", () => {
       rules: [...audit.rules.slice(0, -1), { ...audit.rules[0]!, rule: "EXTRA" }]
     })).toBe(false);
   });
+  it("keeps malformed truthy evidence flags from passing mandatory rules", () => {
+    const malformedProfile = evaluateStrictStrategyAudit({
+      ...readyInput,
+      profile: { ...readyInput.profile!, dataComplete: "false" as unknown as boolean }
+    });
+    expect(malformedProfile.rules.find(rule => rule.rule === "IMPULSE")?.status).toBe("UNKNOWN");
+    expect(malformedProfile.rules.find(rule => rule.rule === "PULLBACK")?.status).toBe("UNKNOWN");
+    expect(malformedProfile.rules.find(rule => rule.rule === "RECLAIM")?.status).toBe("UNKNOWN");
+
+    const malformedFlow = evaluateStrictStrategyAudit({
+      ...readyInput,
+      flow: { ...readyInput.flow!, dataComplete: "false" as unknown as boolean }
+    });
+    expect(malformedFlow.rules.find(rule => rule.rule === "THREE_FLOW_WINDOWS")?.status).toBe("UNKNOWN");
+    expect(malformedFlow.rules.find(rule => rule.rule === "DISTINCT_BUYERS")?.status).toBe("UNKNOWN");
+    expect(malformedFlow.rules.find(rule => rule.rule === "BUYER_CONCENTRATION")?.status).toBe("UNKNOWN");
+
+    const malformedWindowFlag = evaluateStrictStrategyAudit({
+      ...readyInput,
+      flow: {
+        ...readyInput.flow!,
+        windows: readyInput.flow!.windows.map(window => ({
+          ...window, flowWindowPass: "false" as unknown as boolean
+        }))
+      }
+    });
+    expect(malformedWindowFlag.rules.find(rule => rule.rule === "THREE_FLOW_WINDOWS")?.status).toBe("UNKNOWN");
+
+    const malformedSummaryFlag = evaluateStrictStrategyAudit({
+      ...readyInput,
+      flow: { ...readyInput.flow!, latestThreeWindowFlowPass: "false" as unknown as boolean }
+    });
+    expect(malformedSummaryFlag.rules.find(rule => rule.rule === "THREE_FLOW_WINDOWS")?.status).toBe("UNKNOWN");
+
+    const malformedNextObservation = evaluateStrictStrategyAudit({
+      ...readyInput, nextObservationConfirmed: "false" as unknown as boolean
+    });
+    expect(malformedNextObservation.rules.find(rule => rule.rule === "SIGNAL_FRESHNESS")?.status).toBe("UNKNOWN");
+
+    const malformedQuoteFlag = evaluateStrictStrategyAudit({
+      ...readyInput, executableQuoteAvailable: "false" as unknown as boolean
+    });
+    expect(malformedQuoteFlag.rules.find(rule => rule.rule === "EXECUTABLE_QUOTE")?.status).toBe("UNKNOWN");
+  });
+
+  it("keeps non-finite and out-of-range measurements unknown at the authorization boundary", () => {
+    const cases: Array<{ input: StrictStrategyAuditInput; rule: string }> = [
+      { input: { ...readyInput, profile: { ...readyInput.profile!, impulsePriceChangePct: Number.POSITIVE_INFINITY } }, rule: "IMPULSE" },
+      { input: { ...readyInput, profile: { ...readyInput.profile!, pullbackPct: Number.NaN } }, rule: "PULLBACK" },
+      { input: { ...readyInput, profile: { ...readyInput.profile!, reclaimAbovePreviousFiveSecondHighPct: Number.POSITIVE_INFINITY } }, rule: "RECLAIM" },
+      { input: { ...readyInput, profile: { ...readyInput.profile!, reclaimDetected: "false" as unknown as boolean } }, rule: "RECLAIM" },
+      { input: { ...readyInput, profile: { ...readyInput.profile!, pullbackVolumeVsImpulsePct: -1 } }, rule: "PULLBACK_VOLUME_CONTRACTION" },
+      { input: { ...readyInput, profile: { ...readyInput.profile!, reclaimVolumeVsPullbackPct: Number.POSITIVE_INFINITY } }, rule: "RECLAIM_VOLUME_EXPANSION" },
+      { input: { ...readyInput, flow: { ...readyInput.flow!, distinctBuyersAcrossLatestThree: Number.POSITIVE_INFINITY } }, rule: "DISTINCT_BUYERS" },
+      { input: { ...readyInput, flow: { ...readyInput.flow!, largestBuyerShareAcrossLatestThreeBps: -1 } }, rule: "BUYER_CONCENTRATION" },
+      { input: { ...readyInput, flow: { ...readyInput.flow!, windows: readyInput.flow!.windows.map(window => ({ ...window, uniqueBuyers: Number.POSITIVE_INFINITY })) } }, rule: "THREE_FLOW_WINDOWS" },
+      { input: { ...readyInput, flow: { ...readyInput.flow!, windows: readyInput.flow!.windows.map(window => ({ ...window, startTime: Number.POSITIVE_INFINITY })) } }, rule: "THREE_FLOW_WINDOWS" }
+    ];
+
+    for (const testCase of cases) {
+      const audit = evaluateStrictStrategyAudit(testCase.input);
+      expect(audit.rules.find(rule => rule.rule === testCase.rule)?.status, testCase.rule).toBe("UNKNOWN");
+      expect(audit.buyAllowed).toBe(false);
+    }
+  });
+
 });
