@@ -87,6 +87,16 @@ describe("paper portfolio accounting",()=>{
     .toThrow(/official Pump SDK market snapshot/);
  });
 
+ it("rejects non-boolean executable quote flags at the atomic portfolio boundary",()=>{
+  for (const side of ["BUY","SELL"] as const) {
+   const p=createPaperPortfolio();
+   const buy=quote("malformed-executable","BUY");
+   const sell=quote("malformed-executable","SELL");
+   Object.assign(side === "BUY" ? buy : sell,{executable:"false"});
+   expect(()=>openPaperPosition(p,{mint:"malformed-executable",positionId:`malformed-${side.toLowerCase()}`,occurredAt:now,
+     buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)})).toThrow(/Executable quote identity or status is invalid/);
+  }
+ });
  it("requires fresh exact-size quotes and refuses repeat mints",()=>{
   const p=createPaperPortfolio();
   const opened=openPaperPosition(p,{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
