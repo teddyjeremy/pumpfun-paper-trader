@@ -100,7 +100,7 @@ function assertQuote(quote: ExecutablePaperQuote, now: number, side: "BUY"|"SELL
     throw new Error("Aggregate Pump SDK fee is invalid.");
   }
   if (!Number.isFinite(now)) throw new Error("Quote validation clock is invalid.");
-  if (!quote.executable || quote.side !== side || quote.mint !== mint ||
+  if (quote.executable !== true || quote.side !== side || quote.mint !== mint ||
       !quote.quoteId || !quote.routeId) throw new Error("Executable quote identity or status is invalid.");
   if (quote.provider !== "pump-sdk-4.3.1" ||
       (quote.venue !== "PUMP_CURVE" && quote.venue !== "PUMPSWAP") ||
