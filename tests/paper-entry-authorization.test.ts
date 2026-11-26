@@ -11,16 +11,21 @@ const mint = "11111111111111111111111111111111";
 const user = "11111111111111111111111111111111";
 
 function quote(side: "BUY" | "SELL"): ExecutablePaperQuote {
+  const venue = "PUMP_CURVE" as const;
+  const quoteMint = "So11111111111111111111111111111111111111112";
+  const slot = side === "BUY" ? 100 : 101;
+  const inputAmountBaseUnits = side === "BUY" ? "10000000" : "1000000";
   return {
-    quoteId: `${side.toLowerCase()}-quote`, provider: "test-adapter",
-    mint, side, observedAt: now, expiresAt: "2026-11-13T12:00:02.000Z",
-    requestedUsd: 1, inputAmountBaseUnits: side === "BUY" ? "10000000" : "1000000",
+    quoteId: ["pump-sdk-4.3.1", venue, side, mint, slot, inputAmountBaseUnits, now].join(":"),
+    provider: "pump-sdk-4.3.1", mint, side, venue, quoteMint, slot,
+    observedAt: now, expiresAt: "2026-11-13T12:00:02.000Z",
+    requestedUsd: 1, inputAmountBaseUnits,
     outputAmountBaseUnits: side === "BUY" ? "1000000" : "10000000",
-    tokenDecimals: 6, outputUsd: side === "BUY" ? 1 : 0.993,
-    priceImpactPct: 0.1, taxPct: 0.1,
+    tokenDecimals: 6, outputUsd: side === "BUY" ? 1 : 1.02,
+    priceImpactPct: 0.1, taxPct: 0,
     networkFeeUsd: 0.001, priorityFeeUsd: 0.001, providerFeeUsd: 0.001,
     protocolFeeUsd: 0.002, creatorFeeUsd: 0.001, poolFeeUsd: 0.001,
-    transferFeeUsd: 0, routeId: "verified-route", executable: true
+    transferFeeUsd: 0, routeId: `${venue}:${quoteMint}:${slot}`, executable: true
   };
 }
 
