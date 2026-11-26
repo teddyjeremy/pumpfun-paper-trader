@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { createPaperPortfolio, openPaperPosition, markPaperPosition, closePaperPosition, type ExecutablePaperQuote } from "../src/paper/portfolio.js";
 const now = "2026-11-12T12:00:00.000Z";
-function quote(mint:string,side:"BUY"|"SELL",amount="1000000",outputUsd=1):ExecutablePaperQuote {
+function quote(mint:string,side:"BUY"|"SELL",amount="1000000",outputUsd?:number):ExecutablePaperQuote {
+ const grossOutputUsd=outputUsd??(side==="SELL"?1.02:1);
  const venue = "PUMP_CURVE" as const;
  const quoteMint = "So11111111111111111111111111111111111111112";
  const slot = side === "BUY" ? 100 : 101;
  const inputAmountBaseUnits = side === "SELL" ? amount : "1000000";
  const quoteId = ["pump-sdk-4.3.1",venue,side,mint,slot,inputAmountBaseUnits,now].join(":");
  return {quoteId,provider:"pump-sdk-4.3.1",mint,side,venue,quoteMint,slot,observedAt:now,expiresAt:"2026-11-12T12:00:02.000Z",
- requestedUsd:1,inputAmountBaseUnits,outputAmountBaseUnits:side==="BUY"?amount:"1000000",tokenDecimals:6,outputUsd,priceImpactPct:0.5,taxPct:0,
+ requestedUsd:1,inputAmountBaseUnits,outputAmountBaseUnits:side==="BUY"?amount:"1000000",tokenDecimals:6,outputUsd:grossOutputUsd,priceImpactPct:0.5,taxPct:0,
  networkFeeUsd:0.001,priorityFeeUsd:0.001,providerFeeUsd:0.001,protocolFeeUsd:0.002,creatorFeeUsd:0.001,poolFeeUsd:0.001,transferFeeUsd:0,routeId:`${venue}:${quoteMint}:${slot}`,executable:true};
 }
 describe("paper portfolio accounting",()=>{
