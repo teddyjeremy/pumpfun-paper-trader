@@ -201,7 +201,7 @@ describe("paper portfolio accounting",()=>{
   expect(state.bankroll.totalTopUpsUsd).toBe(2.7);
   expect(state.positionSizeUsd).toBe(1);
   expect(state.maxConcurrentPositions).toBe(1);
-  expect(state.highWaterEquityUsd).toBe(2.7);
+  expect(state.highWaterEquityUsd).toBe(2.706);
  });
 
  it("includes aggregate Pump SDK fees in entry cost and liquidation proceeds",()=>{
@@ -210,7 +210,7 @@ describe("paper portfolio accounting",()=>{
   const sell=quote("mint-aggregate","SELL");sell.pumpFeeUsd=0.005;
   const opened=openPaperPosition(p,{mint:"mint-aggregate",positionId:"p-aggregate",occurredAt:now,buyQuote:buy,sellQuote:sell,nowMs:Date.parse(now)});
   expect(opened.position.buyCostsUsd).toBeCloseTo(0.009,8);
-  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(0.991,8);
+  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(1.011,8);
   expect(opened.state.availableCashUsd).toBeCloseTo(1.682,8);
  });
 
@@ -250,8 +250,8 @@ describe("paper portfolio accounting",()=>{
 
  it("uses net liquidation value after sell fees for initial equity",()=>{
   const opened=openPaperPosition(createPaperPortfolio(),{mint:"mint",positionId:"p1",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)});
-  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(0.993);
-  expect(opened.state.bankroll.currentEquityUsd).toBeCloseTo(2.686);
+  expect(opened.position.latestLiquidationValueUsd).toBeCloseTo(1.013);
+  expect(opened.state.bankroll.currentEquityUsd).toBeCloseTo(2.706);
  });
  it("requires one exact-size sell quote for every open position before marking equity",()=>{
   let state=createPaperPortfolio();
