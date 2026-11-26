@@ -104,6 +104,28 @@ describe("paper portfolio accounting",()=>{
   expect(opened.state.availableCashUsd).toBe(1.686);
   expect(()=>openPaperPosition(opened.state,{mint:"mint",positionId:"p2",occurredAt:now,buyQuote:quote("mint","BUY"),sellQuote:quote("mint","SELL"),nowMs:Date.parse(now)})).toThrow(/only be bought once/);
  });
+ it("fails closed when a persisted position is missing from enteredMints",()=>{
+  const opened=openPaperPosition(createPaperPortfolio(),{mint:"history-mint",positionId:"history-position",occurredAt:now,
+   buyQuote:quote("history-mint","BUY"),sellQuote:quote("history-mint","SELL"),nowMs:Date.parse(now)});
+  const corrupted={...opened.state,enteredMints:[]};
+  expect(()=>openPaperPosition(corrupted,{mint:"new-mint",positionId:"new-position",occurredAt:now,
+   buyQuote:quote("new-mint","BUY"),sellQuote:quote("new-mint","SELL"),nowMs:Date.parse(now)}))
+   .toThrow(/mint history is incomplete/);
+ });
+ it("fails closed when persisted position history contains a duplicate mint row",()=>{
+  const opened=openPaperPosition(createPaperPortfolio(),{mint:"history-mint",positionId:"history-position",occurredAt:now,
+   buyQuote:quote("history-mint","BUY"),sellQuote:quote("history-mint","SELL"),nowMs:Date.parse(now)});
+  const corrupted={...opened.state,positions:[...opened.state.positions,{...opened.position,positionId:"duplicate-history-position"}]};
+  expect(()=>openPaperPosition(corrupted,{mint:"new-mint",positionId:"new-position",occurredAt:now,
+   buyQuote:quote("new-mint","BUY"),sellQuote:quote("new-mint","SELL"),nowMs:Date.parse(now)}))
+   .toThrow(/duplicate mint/);
+ });
+ it("fails closed when the persisted entered-mint index contains duplicates",()=>{
+  const corrupted={...createPaperPortfolio(),enteredMints:["repeat-mint","repeat-mint"]};
+  expect(()=>openPaperPosition(corrupted,{mint:"new-mint",positionId:"new-position",occurredAt:now,
+   buyQuote:quote("new-mint","BUY"),sellQuote:quote("new-mint","SELL"),nowMs:Date.parse(now)}))
+   .toThrow(/entered-mint history is malformed or duplicated/);
+ });
  it("locks refundable ATA rent separately from trade costs and releases it on close",()=>{
   const p=createPaperPortfolio();
   const opened=openPaperPosition(p,{mint:"rent-mint",positionId:"rent-position",occurredAt:now,
