@@ -155,6 +155,38 @@ function growthEquity(state: PaperPortfolioState): number {
 function currentOpen(state: PaperPortfolioState): PaperPosition[] {
   return state.positions.filter(position => position.status !== "CLOSED");
 }
+
+/**
+ * The mint index is the fast duplicate-entry guard, but it is persisted beside
+ * the position history. Reconcile both before authorizing a new entry so a
+ * truncated or corrupted index can never permit a second entry for an old mint.
+ */
+function assertPortfolioMintHistory(state: PaperPortfolioState): void {
+  if (!Array.isArray(state.enteredMints) || !Array.isArray(state.positions)) {
+    throw new Error("Paper portfolio mint history is missing or invalid.");
+  }
+  const entered = new Set<string>();
+  for (const mint of state.enteredMints) {
+    if (typeof mint !== "string" || !mint.trim() || mint !== mint.trim() || entered.has(mint)) {
+      throw new Error("Paper portfolio entered-mint history is malformed or duplicated.");
+    }
+    entered.add(mint);
+  }
+  const positionMints = new Set<string>();
+  for (const position of state.positions) {
+    if (!position || typeof position.mint !== "string" || !position.mint.trim() ||
+        position.mint !== position.mint.trim()) {
+      throw new Error("Paper portfolio position history contains an invalid mint.");
+    }
+    if (positionMints.has(position.mint)) {
+      throw new Error("Paper portfolio position history contains a duplicate mint.");
+    }
+    positionMints.add(position.mint);
+    if (!entered.has(position.mint)) {
+      throw new Error("Paper portfolio mint history is incomplete: a recorded position is missing from enteredMints.");
+    }
+  }
+}
 function applyEquityAndTopUp(state: PaperPortfolioState, equity: number, occurredAt: string) {
   const bankroll = markPaperEquity(state.bankroll, equity);
   const topped = replenishPaperBankroll(bankroll, occurredAt,
@@ -204,6 +236,7 @@ export function openPaperPosition(state: PaperPortfolioState, input: {
 }): { state: PaperPortfolioState; position: PaperPosition } {
   const now = input.nowMs ?? Date.now();
   if (!input.mint || !input.positionId || !Number.isFinite(Date.parse(input.occurredAt))) throw new Error("Position identity or timestamp is invalid.");
+  assertPortfolioMintHistory(state);
   if (state.enteredMints.includes(input.mint)) throw new Error("A mint may only be bought once per paper session.");
   if (state.positions.some(position => position.positionId === input.positionId)) throw new Error("Paper position ID must be unique within the session.");
   const existingOpen = currentOpen(state);
