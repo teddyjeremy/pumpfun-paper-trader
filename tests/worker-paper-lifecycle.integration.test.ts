@@ -56,7 +56,7 @@ function context(storage: MemoryDurableStorage) {
 
 function quote(
   mint: string, side: "BUY" | "SELL", now: string,
-  amount = "1000000", outputUsd = 1
+  amount = "1000000", outputUsd = side === "SELL" ? 1.02 : 1
 ): ExecutablePaperQuote {
   const venue = "PUMP_CURVE" as const;
   const quoteMint = "So11111111111111111111111111111111111111112";
