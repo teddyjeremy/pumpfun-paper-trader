@@ -18,6 +18,20 @@ describe("paper entry persistence gate", () => {
     expect(canCommitPaperEntry(ready)).toBe(true);
   });
 
+  it("rejects malformed or missing runtime booleans even when they are truthy", () => {
+    const booleanFields = [
+      "systemTradingReady", "sessionEnabled", "workerLeaseHeld", "postgresIngestConfigured",
+      "buyAllowed", "executableQuoteAvailable", "hasBuyAndSellQuotes", "unsignedPlanAuthorized"
+    ] as const;
+    for (const field of booleanFields) {
+      expect(canCommitPaperEntry({ ...ready, [field]: "false" } as unknown as typeof ready)).toBe(false);
+      const missing = { ...ready } as Record<string, unknown>;
+      delete missing[field];
+      expect(canCommitPaperEntry(missing as unknown as typeof ready)).toBe(false);
+    }
+    expect(canCommitPaperEntry(null as unknown as typeof ready)).toBe(false);
+  });
+
   it.each([
     ["system readiness prerequisites are incomplete", { systemTradingReady: false }],
     ["disabled session", { sessionEnabled: false }],
