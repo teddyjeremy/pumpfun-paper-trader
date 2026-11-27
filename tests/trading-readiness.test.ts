@@ -54,6 +54,24 @@ describe("system-level paper trading readiness", () => {
     ]));
   });
 
+  it("fails closed on malformed or missing infrastructure booleans", () => {
+    const requiredTrueFields = [
+      "coordinatorEnabled", "activeSession", "discoveryConnected", "discoverySubscribed",
+      "heliusConnected", "heliusApiKeyConfigured", "fullWalletHistoryEnabled",
+      "reviewedVolumeThresholdsAvailable", "eventIngestConfigured", "persistenceLeaseHeld",
+      "controlTokenConfigured", "pumpProgramConfigured", "quoteSdkModulesAvailable"
+    ] as const;
+    for (const field of requiredTrueFields) {
+      expect(evaluateTradingReadiness({ ...ready, [field]: "false" } as unknown as TradingReadinessInput).tradingReady).toBe(false);
+      const missing = { ...ready } as Record<string, unknown>;
+      delete missing[field];
+      expect(evaluateTradingReadiness(missing as unknown as TradingReadinessInput).tradingReady).toBe(false);
+    }
+    expect(evaluateTradingReadiness({ ...ready, workerPaused: "false" } as unknown as TradingReadinessInput).tradingReady).toBe(false);
+    expect(evaluateTradingReadiness({ ...ready, workerPaused: undefined } as unknown as TradingReadinessInput).tradingReady).toBe(false);
+    expect(evaluateTradingReadiness(null as unknown as TradingReadinessInput).tradingReady).toBe(false);
+  });
+
   it("requires configured event ingestion, a fenced lease, control and program configuration", () => {
     const result = evaluateTradingReadiness({
       ...ready, eventIngestConfigured: false, persistenceLeaseHeld: false,
