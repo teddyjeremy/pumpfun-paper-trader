@@ -100,7 +100,6 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     try {
       const worker = new PumpFunCoordinator(context(storage) as never, {
         PAPER_WORKER_PAUSED: "false",
-        PAPER_WORKER_PAUSED: "false",
       PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
         PAPER_EVENT_INGEST_TOKEN: "o".repeat(40),
         PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64)
