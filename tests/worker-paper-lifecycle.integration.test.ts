@@ -99,7 +99,9 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     }));
     try {
       const worker = new PumpFunCoordinator(context(storage) as never, {
-        PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
+        PAPER_WORKER_PAUSED: "false",
+        PAPER_WORKER_PAUSED: "false",
+      PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
         PAPER_EVENT_INGEST_TOKEN: "o".repeat(40),
         PAPER_EVENT_INGEST_TOKEN_V2: "v".repeat(64)
       } as never);
@@ -144,7 +146,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     await storage.put(`paper_portfolio:${sessionId}`, createPaperPortfolio(2.7));
 
     const firstContext = context(storage);
-    const firstWorker = new PumpFunCoordinator(firstContext as never, {} as never);
+    const firstWorker = new PumpFunCoordinator(firstContext as never, { PAPER_WORKER_PAUSED: "false" } as never);
     const mint = "11111111111111111111111111111111";
     const entryTime = new Date().toISOString();
     const buyQuote = quote(mint, "BUY", entryTime);
@@ -160,7 +162,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     // Simulate eviction while the position is still open; the recovered
     // instance must retain the full position before it is allowed to exit.
     const openRestartContext = context(storage);
-    const openRestartWorker = new PumpFunCoordinator(openRestartContext as never, {} as never);
+    const openRestartWorker = new PumpFunCoordinator(openRestartContext as never, { PAPER_WORKER_PAUSED: "false" } as never);
     const recoveredOpen = await openRestartWorker.getPaperPortfolio() as {
       positions: Array<{ positionId: string; status: string; rentReserveUsd: number }>;
     };
@@ -181,7 +183,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     // A new Durable Object class instance over the same durable storage models
     // eviction/restart: it must read the already committed portfolio, not reset it.
     const restartedContext = context(storage);
-    const restartedWorker = new PumpFunCoordinator(restartedContext as never, {} as never);
+    const restartedWorker = new PumpFunCoordinator(restartedContext as never, { PAPER_WORKER_PAUSED: "false" } as never);
     const recovered = await restartedWorker.getPaperPortfolio() as {
       positions: Array<{ positionId: string; status: string; rentReserveUsd: number }>;
       reservedAccountRentUsd: number;
@@ -212,7 +214,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     }]);
     await storage.put(`paper_portfolio:${sessionId}`, createPaperPortfolio(2.7));
 
-    const worker = new PumpFunCoordinator(context(storage) as never, {} as never);
+    const worker = new PumpFunCoordinator(context(storage) as never, { PAPER_WORKER_PAUSED: "false" } as never);
     const mint = "11111111111111111111111111111111";
     const entryAt = new Date().toISOString();
     const buyQuote = quote(mint, "BUY", entryAt);
@@ -296,6 +298,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     await storage.put(`helius_archived_transaction_signatures:${sessionId}:${mint}`, [newer, older]);
 
     const coordinator = new PumpFunCoordinator(context(storage) as never, {
+      PAPER_WORKER_PAUSED: "false",
       PAPER_ENABLE_GAP_RECOVERY: "true",
       PAPER_ENABLE_HISTORICAL_BACKFILL: "true"
     } as never);
@@ -312,7 +315,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     const storage = new MemoryDurableStorage();
     const sessionId = "candidate-price-batch-session";
     const mint = "So11111111111111111111111111111111111111112";
-    const coordinator = new PumpFunCoordinator(context(storage) as never, {} as never) as unknown as {
+    const coordinator = new PumpFunCoordinator(context(storage) as never, { PAPER_WORKER_PAUSED: "false" } as never) as unknown as {
       activeSessionId: string | null;
       getStatus: () => Promise<unknown>;
       recordCandidateTradePrice: (trade: {
@@ -389,6 +392,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
     await storage.put(`helius_archived_transaction_signatures:${sessionId}:${mint}`, [older]);
 
     const coordinator = new PumpFunCoordinator(context(storage) as never, {
+      PAPER_WORKER_PAUSED: "false",
       PAPER_ENABLE_GAP_RECOVERY: "true",
       PAPER_ENABLE_HISTORICAL_BACKFILL: "true"
     } as never);
@@ -415,6 +419,7 @@ describe("Cloudflare Worker paper lifecycle durability", () => {
       occurredAt, mint: null, strategyVersion: "strict-v1", data: {}
     }]);
     const coordinator = new PumpFunCoordinator(context(storage) as never, {
+      PAPER_WORKER_PAUSED: "false",
       PAPER_EVENT_INGEST_URL: "https://paper-api.example.test",
       PAPER_EVENT_INGEST_TOKEN: "t".repeat(40)
     } as never);
