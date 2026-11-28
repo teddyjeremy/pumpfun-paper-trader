@@ -21,6 +21,14 @@ export interface TradingReadinessResult {
 }
 
 /**
+ * The operator must explicitly set PAPER_WORKER_PAUSED="false" to unpause.
+ * Missing, empty or malformed values remain paused across status and alarm paths.
+ */
+export function isPaperWorkerPaused(value: unknown): boolean {
+  return value !== "false";
+}
+
+/**
  * System-level readiness only. Candidate-specific creator/cluster evidence,
  * exact quote economics and the durable entry/exit lifecycle remain enforced
  * independently at the point of each simulated trade.
