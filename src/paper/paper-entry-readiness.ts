@@ -17,13 +17,14 @@ export interface PaperEntryReadinessInput {
  * 15-rule strategy audit or account/quote prerequisites.
  */
 export function canCommitPaperEntry(input: PaperEntryReadinessInput): boolean {
-  return input.systemTradingReady &&
-    input.sessionEnabled &&
-    input.workerLeaseHeld &&
-    input.postgresIngestConfigured &&
+  if (!input || typeof input !== "object") return false;
+  return input.systemTradingReady === true &&
+    input.sessionEnabled === true &&
+    input.workerLeaseHeld === true &&
+    input.postgresIngestConfigured === true &&
     input.strategyDecision === "BUY" &&
-    input.buyAllowed &&
-    input.executableQuoteAvailable &&
-    input.hasBuyAndSellQuotes &&
-    input.unsignedPlanAuthorized;
+    input.buyAllowed === true &&
+    input.executableQuoteAvailable === true &&
+    input.hasBuyAndSellQuotes === true &&
+    input.unsignedPlanAuthorized === true;
 }

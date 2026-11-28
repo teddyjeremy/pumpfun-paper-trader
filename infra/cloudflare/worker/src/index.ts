@@ -83,7 +83,7 @@ import {
 import { deriveNonSigningVirtualTraderIdentity } from "../../../../src/ingestion/virtual-trader-identity.js";
 import { getFreshExecutableQuoteCostPct } from "../../../../src/ingestion/executable-quote-eligibility.js";
 import { parseReviewedVolumeThresholds } from "../../../../src/strategy/reviewed-volume-thresholds.js";
-import { evaluateTradingReadiness } from "../../../../src/paper/trading-readiness.js";
+import { evaluateTradingReadiness, isPaperWorkerPaused } from "../../../../src/paper/trading-readiness.js";
 import {
   executePaperExit
 } from "../../../../src/paper/exit-lifecycle.js";
@@ -253,7 +253,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
   }
 
   private get storagePaused(): boolean {
-    return this.env.PAPER_WORKER_PAUSED === "true";
+    return isPaperWorkerPaused(this.env.PAPER_WORKER_PAUSED);
   }
 
   private get historicalBackfillEnabled(): boolean {
