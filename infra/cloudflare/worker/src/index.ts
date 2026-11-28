@@ -3,7 +3,8 @@ import { createBankrollState, markPaperEquity, replenishPaperBankroll, type Bank
 import { updateCandidatePriceTracker, type CandidatePriceTracker } from "../../../../src/paper/candidate-price-ledger.js";
 import { evaluateStrictStrategyAudit, calculateReclaimConfirmation, canRequestExecutableQuote } from "../../../../src/paper/strategy-audit.js";
 import {
-  closePaperPosition, createPaperPortfolio, markPaperPosition, openPaperPosition,
+  calculatePaperPortfolioEquity, closePaperPosition, createPaperPortfolio,
+  markPaperPosition, openPaperPosition,
   type ExecutablePaperQuote, type PaperPortfolioState
 } from "../../../../src/paper/portfolio.js";
 import {
@@ -1519,13 +1520,13 @@ export class PumpFunCoordinator extends DurableObject<Env> {
         const marked = markPaperPosition(portfolio, {
           sellQuotes: input.sellQuotes, markedAt, nowMs: Date.parse(markedAt)
         });
-        const openPositions = marked.positions.filter(position => position.status !== "CLOSED");
-        const liquidationValueUsd = openPositions.reduce((sum, position) =>
-          sum + position.latestLiquidationValueUsd, 0);
+        const equity = calculatePaperPortfolioEquity(marked);
+        if (Math.abs(equity.equityUsd - marked.bankroll.currentEquityUsd) > 1e-8) {
+          throw new Error("Paper mark equity does not reconcile with the persisted bankroll.");
+        }
         const events: PaperTransitionEvent[] = [{
           kind: "POSITION_MARK",
-          data: { markedAt, quoteIds, liquidationValueUsd,
-            equityUsd: marked.availableCashUsd + liquidationValueUsd,
+          data: { markedAt, quoteIds, ...equity,
             positions: marked.positions.filter(position => position.status !== "CLOSED"),
             sellQuotes: input.sellQuotes }
         }];
@@ -1536,7 +1537,7 @@ export class PumpFunCoordinator extends DurableObject<Env> {
               totalTopUpsUsd: marked.bankroll.totalTopUpsUsd }
           });
         }
-        return { state: marked, result: { liquidationValueUsd, equityUsd: marked.bankroll.currentEquityUsd }, events };
+        return { state: marked, result: { liquidationValueUsd: equity.liquidationValueUsd, equityUsd: equity.equityUsd }, events };
       }
     });
   }
