@@ -138,6 +138,42 @@ function growthEquity(state: PaperPortfolioState): number {
 function currentOpen(state: PaperPortfolioState): PaperPosition[] {
   return state.positions.filter(position => position.status !== "CLOSED");
 }
+
+export interface PaperPortfolioEquityBreakdown {
+  availableCashUsd: number;
+  reservedAccountRentUsd: number;
+  liquidationValueUsd: number;
+  expectedSellCostsUsd: number;
+  equityUsd: number;
+}
+
+/**
+ * Reconcile marked portfolio equity from persisted cash, refundable rent,
+ * net liquidation value and the sell-fee reserve already withheld from cash.
+ * EXIT_BLOCKED positions remain part of equity until they are actually closed.
+ */
+export function calculatePaperPortfolioEquity(state: PaperPortfolioState): PaperPortfolioEquityBreakdown {
+  const openPositions = currentOpen(state);
+  const availableCashUsd = state.availableCashUsd;
+  const reservedAccountRentUsd = state.reservedAccountRentUsd ?? 0;
+  const liquidationValueUsd = openPositions.reduce(
+    (sum, position) => sum + position.latestLiquidationValueUsd, 0
+  );
+  const expectedSellCostsUsd = openPositions.reduce(
+    (sum, position) => sum + (position.expectedSellCostsUsd ?? 0), 0
+  );
+  if (![availableCashUsd, reservedAccountRentUsd, liquidationValueUsd, expectedSellCostsUsd]
+      .every(value => Number.isFinite(value) && value >= 0)) {
+    throw new Error("Paper portfolio equity contains invalid cash, rent, liquidation or sell-cost values.");
+  }
+  return {
+    availableCashUsd,
+    reservedAccountRentUsd,
+    liquidationValueUsd: round(liquidationValueUsd),
+    expectedSellCostsUsd: round(expectedSellCostsUsd),
+    equityUsd: round(availableCashUsd + reservedAccountRentUsd + liquidationValueUsd + expectedSellCostsUsd)
+  };
+}
 function applyEquityAndTopUp(state: PaperPortfolioState, equity: number, occurredAt: string) {
   const bankroll = markPaperEquity(state.bankroll, equity);
   const topped = replenishPaperBankroll(bankroll, occurredAt,
@@ -321,8 +357,7 @@ export function markPaperPosition(state: PaperPortfolioState, input: {
   if (quotesByMint.size !== openByMint.size || [...quotesByMint.keys()].some(mint => !openByMint.has(mint))) {
     throw new Error("Sell quotes include a mint that is not an open position.");
   }
-  const equity = round(state.availableCashUsd + (state.reservedAccountRentUsd ?? 0) + positions.reduce((sum, position) =>
-    sum + (position.status === "CLOSED" ? 0 : position.latestLiquidationValueUsd + (position.expectedSellCostsUsd ?? 0)), 0));
+  const equity = calculatePaperPortfolioEquity({ ...state, positions }).equityUsd;
   const adjusted = applyEquityAndTopUp({ ...state, positions }, equity, input.markedAt);
   return { ...state, ...adjusted, positions, lastMarkedAt: input.markedAt };
 }
