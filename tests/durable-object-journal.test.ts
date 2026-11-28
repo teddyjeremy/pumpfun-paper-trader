@@ -53,7 +53,10 @@ function harness(storage = new MemoryDurableStorage(), env: Record<string, strin
     waitUntil: (_promise: Promise<unknown>) => undefined,
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback()
   };
-  const coordinator = new PumpFunCoordinator(ctx as never, env as never);
+  const coordinator = new PumpFunCoordinator(ctx as never, {
+    PAPER_WORKER_PAUSED: "false",
+    ...env
+  } as never);
   return { coordinator, storage };
 }
 function seedSession(storage: MemoryDurableStorage, enabled = false): void {
